@@ -1,0 +1,72 @@
+{
+  "version": "5",
+  "dialect": "mysql",
+  "id": "00827dbc-14aa-4760-9192-4b39a95b8859",
+  "prevId": "00000000-0000-0000-0000-000000000000",
+  "tables": {
+    "_platform_migration_verification": {
+      "name": "_platform_migration_verification",
+      "columns": {
+        "probe_id": {
+          "name": "probe_id",
+          "type": "bigint unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "idempotency_key": {
+          "name": "idempotency_key",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "decimal_round_trip_value": {
+          "name": "decimal_round_trip_value",
+          "type": "decimal(19,4)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "observed_at_utc": {
+          "name": "observed_at_utc",
+          "type": "timestamp(6)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP(6)"
+        }
+      },
+      "indexes": {
+        "uq_platform_migration_verification_idempotency": {
+          "name": "uq_platform_migration_verification_idempotency",
+          "columns": [
+            "idempotency_key"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "_platform_migration_verification_probe_id": {
+          "name": "_platform_migration_verification_probe_id",
+          "columns": [
+            "probe_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    }
+  },
+  "views": {},
+  "_meta": {
+    "schemas": {},
+    "tables": {},
+    "columns": {}
+  },
+  "internal": {
+    "tables": {},
+    "indexes": {}
+  }
+}

@@ -1,0 +1,25 @@
+services:
+  mariadb-test:
+    image: mariadb:11.4.8@sha256:bc474f00629f0123c10f9e1bca193a45d18af15a274cf0656acda64f1086c3b6
+    restart: "no"
+    environment:
+      # These credentials are fixed, disposable test fixtures. They are never
+      # used by the application or read from a developer/live environment.
+      MARIADB_ROOT_PASSWORD: portal-pusula-local-root-only
+      MARIADB_DATABASE: portal_pusula_migration_test
+      MARIADB_USER: portal_pusula_test
+      MARIADB_PASSWORD: portal-pusula-local-test-only
+    ports:
+      - "127.0.0.1::3306"
+    volumes:
+      - mariadb-test-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 1s
+      timeout: 3s
+      retries: 60
+      start_period: 5s
+
+volumes:
+  mariadb-test-data:
+    driver: local

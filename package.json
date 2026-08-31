@@ -1,0 +1,61 @@
+{
+  "name": "portal-pusula",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "npm@12.0.2",
+  "engines": {
+    "node": ">=24 <25",
+    "npm": ">=12 <13"
+  },
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build --webpack",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "node scripts/migrate.mjs",
+    "icons:generate": "node scripts/generate-pwa-icons.mjs",
+    "scan:secrets": "node scripts/scan-secrets.mjs",
+    "checkpoint:source": "node scripts/package-source-checkpoint.mjs",
+    "package:hostinger": "node scripts/package-hostinger.mjs",
+    "package:verify": "node scripts/verify-hostinger-package.mjs",
+    "start": "next start",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --config vitest.config.mts",
+    "test:mariadb": "node scripts/test-mariadb.mjs",
+    "test:watch": "vitest --config vitest.config.mts",
+    "test:integration": "vitest run --config vitest.integration.config.mts",
+    "test:e2e": "npm run build && node scripts/run-e2e.mjs",
+    "test:e2e:run": "node scripts/run-e2e.mjs"
+  },
+  "dependencies": {
+    "decimal.js": "10.6.0",
+    "drizzle-orm": "0.45.2",
+    "mysql2": "3.24.2",
+    "next": "~16.3.3",
+    "pino": "~10.3.1",
+    "react": "~19.2.8",
+    "react-dom": "~19.2.8",
+    "server-only": "0.0.1",
+    "zod": "~4.5.0"
+  },
+  "devDependencies": {
+    "@eslint/compat": "~2.1.0",
+    "@playwright/test": "~1.62.1",
+    "@tailwindcss/postcss": "~4.3.3",
+    "@testing-library/dom": "~10.4.1",
+    "@testing-library/jest-dom": "~7.0.1",
+    "@testing-library/react": "~16.3.2",
+    "@testing-library/user-event": "~14.6.6",
+    "@types/node": "~24.13.3",
+    "@types/react": "~19.2.18",
+    "@types/react-dom": "~19.2.5",
+    "drizzle-kit": "0.31.10",
+    "eslint": "~10.9.1",
+    "eslint-config-next": "~16.3.3",
+    "jsdom": "~30.0.1",
+    "postcss": "~8.5.26",
+    "tailwindcss": "~4.3.3",
+    "typescript": "~6.0.3",
+    "vitest": "~4.1.10"
+  }
+}

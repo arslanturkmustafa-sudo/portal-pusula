@@ -1,0 +1,67 @@
+name: Portal Pusula CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: portal-pusula-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CI: "true"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.x
+          cache: npm
+
+      - name: Scan tracked source for secrets
+        run: node scripts/scan-secrets.mjs
+
+      - name: Pin npm
+        run: npm install --global npm@12.0.2
+
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit and policy tests
+        run: npm test
+
+      - name: Secrets-free integration tests
+        run: npm run test:integration
+
+      - name: Disposable MariaDB tests
+        run: npm run test:mariadb
+
+      - name: Production build
+        run: npm run build
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Desktop and mobile E2E
+        run: npm run test:e2e:run
+
+      - name: Verify deterministic Hostinger package
+        run: npm run package:verify

@@ -1,0 +1,38 @@
+# dependencies
+/node_modules/
+
+# Next.js
+/.next/
+/out/
+/dist/
+/.pnpm-store/
+
+# test output
+/coverage/
+/playwright-report/
+/test-results/
+
+# user-owned planning and generated artifact areas
+/outputs/
+/work/
+
+# local runtime output
+/.logs/
+*.log
+*.tsbuildinfo
+
+# local environment files (the example is intentionally committed)
+.env*
+!.env.example
+
+# operating system and editors
+.DS_Store
+Thumbs.db
+*.swp
+
+# hosting providers
+/.vercel/
+
+# Codex/local orchestration metadata
+/.agents/
+/.codex/

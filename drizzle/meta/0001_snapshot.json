@@ -1,0 +1,637 @@
+{
+  "version": "5",
+  "dialect": "mysql",
+  "id": "a5bb02f0-3ae9-4744-b43b-3ccc469db31a",
+  "prevId": "00827dbc-14aa-4760-9192-4b39a95b8859",
+  "tables": {
+    "audit_event": {
+      "name": "audit_event",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "char(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "actor_type": {
+          "name": "actor_type",
+          "type": "varchar(16)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "actor_id": {
+          "name": "actor_id",
+          "type": "char(36)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "action": {
+          "name": "action",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "entity_type": {
+          "name": "entity_type",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "entity_id": {
+          "name": "entity_id",
+          "type": "char(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "before_summary": {
+          "name": "before_summary",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "after_summary": {
+          "name": "after_summary",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "correlation_id": {
+          "name": "correlation_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "occurred_at_utc": {
+          "name": "occurred_at_utc",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "idx_audit_event_entity_occurred": {
+          "name": "idx_audit_event_entity_occurred",
+          "columns": [
+            "entity_type",
+            "entity_id",
+            "occurred_at_utc"
+          ],
+          "isUnique": false
+        },
+        "idx_audit_event_correlation_occurred": {
+          "name": "idx_audit_event_correlation_occurred",
+          "columns": [
+            "correlation_id",
+            "occurred_at_utc"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "audit_event_id": {
+          "name": "audit_event_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "job_run": {
+      "name": "job_run",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "char(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "job_id": {
+          "name": "job_id",
+          "type": "char(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "attempt_no": {
+          "name": "attempt_no",
+          "type": "smallint unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "lease_token": {
+          "name": "lease_token",
+          "type": "char(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "lease_owner": {
+          "name": "lease_owner",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "started_at_utc": {
+          "name": "started_at_utc",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "completed_at_utc": {
+          "name": "completed_at_utc",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "outcome": {
+          "name": "outcome",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'running'"
+        },
+        "correlation_id": {
+          "name": "correlation_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "error_code": {
+          "name": "error_code",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "uq_job_run_job_attempt": {
+          "name": "uq_job_run_job_attempt",
+          "columns": [
+            "job_id",
+            "attempt_no"
+          ],
+          "isUnique": true
+        },
+        "idx_job_run_job_started": {
+          "name": "idx_job_run_job_started",
+          "columns": [
+            "job_id",
+            "started_at_utc"
+          ],
+          "isUnique": false
+        },
+        "idx_job_run_correlation_started": {
+          "name": "idx_job_run_correlation_started",
+          "columns": [
+            "correlation_id",
+            "started_at_utc"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "fk_job_run_scheduled_job": {
+          "name": "fk_job_run_scheduled_job",
+          "tableFrom": "job_run",
+          "tableTo": "scheduled_job",
+          "columnsFrom": [
+            "job_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "restrict"
+        }
+      },
+      "compositePrimaryKeys": {
+        "job_run_id": {
+          "name": "job_run_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "outbox_event": {
+      "name": "outbox_event",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "char(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "event_type": {
+          "name": "event_type",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "schema_version": {
+          "name": "schema_version",
+          "type": "int unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "payload": {
+          "name": "payload",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "idempotency_key": {
+          "name": "idempotency_key",
+          "type": "varchar(191)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "available_at_utc": {
+          "name": "available_at_utc",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'pending'"
+        },
+        "attempt_count": {
+          "name": "attempt_count",
+          "type": "smallint unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "max_attempts": {
+          "name": "max_attempts",
+          "type": "smallint unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "lease_owner": {
+          "name": "lease_owner",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "lease_token": {
+          "name": "lease_token",
+          "type": "char(36)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "lease_expires_at_utc": {
+          "name": "lease_expires_at_utc",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "delivered_at_utc": {
+          "name": "delivered_at_utc",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "last_error_code": {
+          "name": "last_error_code",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at_utc": {
+          "name": "created_at_utc",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP(6)"
+        },
+        "updated_at_utc": {
+          "name": "updated_at_utc",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP(6)"
+        }
+      },
+      "indexes": {
+        "uq_outbox_event_idempotency": {
+          "name": "uq_outbox_event_idempotency",
+          "columns": [
+            "idempotency_key"
+          ],
+          "isUnique": true
+        },
+        "uq_outbox_event_lease_token": {
+          "name": "uq_outbox_event_lease_token",
+          "columns": [
+            "lease_token"
+          ],
+          "isUnique": true
+        },
+        "idx_outbox_event_claim_ready": {
+          "name": "idx_outbox_event_claim_ready",
+          "columns": [
+            "status",
+            "available_at_utc",
+            "id"
+          ],
+          "isUnique": false
+        },
+        "idx_outbox_event_claim_expired": {
+          "name": "idx_outbox_event_claim_expired",
+          "columns": [
+            "status",
+            "lease_expires_at_utc",
+            "id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "outbox_event_id": {
+          "name": "outbox_event_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "_platform_migration_verification": {
+      "name": "_platform_migration_verification",
+      "columns": {
+        "probe_id": {
+          "name": "probe_id",
+          "type": "bigint unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "idempotency_key": {
+          "name": "idempotency_key",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "decimal_round_trip_value": {
+          "name": "decimal_round_trip_value",
+          "type": "decimal(19,4)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "observed_at_utc": {
+          "name": "observed_at_utc",
+          "type": "timestamp(6)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP(6)"
+        }
+      },
+      "indexes": {
+        "uq_platform_migration_verification_idempotency": {
+          "name": "uq_platform_migration_verification_idempotency",
+          "columns": [
+            "idempotency_key"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "_platform_migration_verification_probe_id": {
+          "name": "_platform_migration_verification_probe_id",
+          "columns": [
+            "probe_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "scheduled_job": {
+      "name": "scheduled_job",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "char(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "job_type": {
+          "name": "job_type",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "payload_schema_version": {
+          "name": "payload_schema_version",
+          "type": "int unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "payload": {
+          "name": "payload",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "scheduled_at_utc": {
+          "name": "scheduled_at_utc",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "available_at_utc": {
+          "name": "available_at_utc",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'pending'"
+        },
+        "attempt_count": {
+          "name": "attempt_count",
+          "type": "smallint unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "max_attempts": {
+          "name": "max_attempts",
+          "type": "smallint unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "lease_owner": {
+          "name": "lease_owner",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "lease_token": {
+          "name": "lease_token",
+          "type": "char(36)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "lease_expires_at_utc": {
+          "name": "lease_expires_at_utc",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "idempotency_key": {
+          "name": "idempotency_key",
+          "type": "varchar(191)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "last_error_code": {
+          "name": "last_error_code",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at_utc": {
+          "name": "created_at_utc",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP(6)"
+        },
+        "updated_at_utc": {
+          "name": "updated_at_utc",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP(6)"
+        }
+      },
+      "indexes": {
+        "uq_scheduled_job_type_idempotency": {
+          "name": "uq_scheduled_job_type_idempotency",
+          "columns": [
+            "job_type",
+            "idempotency_key"
+          ],
+          "isUnique": true
+        },
+        "uq_scheduled_job_lease_token": {
+          "name": "uq_scheduled_job_lease_token",
+          "columns": [
+            "lease_token"
+          ],
+          "isUnique": true
+        },
+        "idx_scheduled_job_claim_ready": {
+          "name": "idx_scheduled_job_claim_ready",
+          "columns": [
+            "status",
+            "available_at_utc",
+            "id"
+          ],
+          "isUnique": false
+        },
+        "idx_scheduled_job_claim_expired": {
+          "name": "idx_scheduled_job_claim_expired",
+          "columns": [
+            "status",
+            "lease_expires_at_utc",
+            "id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "scheduled_job_id": {
+          "name": "scheduled_job_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    }
+  },
+  "views": {},
+  "_meta": {
+    "schemas": {},
+    "tables": {},
+    "columns": {}
+  },
+  "internal": {
+    "tables": {},
+    "indexes": {}
+  }
+}
