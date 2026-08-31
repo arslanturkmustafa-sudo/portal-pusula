@@ -1,11 +1,15 @@
-# Portal Pusula Yerel Baseline Sürümü
+# Portal Pusula Baseline Sürümü
 
-Bu kayıt, yeni bağlayıcı şartnamedeki **Komut 0 — proje tabanı ve izlenebilirlik** için ilk yerel dilimi tanımlar. Yerel baseline, mevcut platform yatırımını kayıpsız korur; private remote, branch protection ve uzaktaki yeşil CI ayrıca tamamlanmadan Komut 0 bütünüyle kapanmış sayılmaz.
+Bu kayıt, yeni bağlayıcı şartnamedeki **Komut 0 — proje tabanı ve izlenebilirlik** için kaynak baseline'ını tanımlar. Yerel baseline public GitHub deposuna gönderilmiş; uzak CI ve korumalı `main` akışıyla birlikte doğrulanmıştır.
 
 ## Baseline kimliği
 
 - Dal: `main`
 - Açıklamalı etiket: `baseline-platform-v0.1`
+- Baseline commit: `aea2ec0690b96fe579549e6d718c0dafb98a76ad`
+- Açıklamalı tag nesnesi: `89441c9e622ae999cfcf8161738be83168023ae4`
+- Remote: `https://github.com/arslanturkmustafa-sudo/portal-pusula.git`
+- Görünürlük: public; secret/env/backup/çıktı sınıfları Git kapsamı dışındadır
 - Kimlik biçimi: commit ve tag nesne kimlikleri `outputs/portal-pusula-baseline-v0.1-evidence.txt` dosyasına yerel olarak yazılır.
 - Hostinger artefaktı: `dist/portal-pusula-hostinger.zip`
 - Dosya sayısı: `80`
@@ -49,11 +53,16 @@ Bu dosyalar silinmez veya taşınmaz; Git kapsamı dışında yerel olarak korun
 - Masaüstü/mobil E2E: 12/12 PASS
 - Hostinger paketi iki ardışık üretimde aynı SHA-256: PASS
 
-## Kalan Komut 0 kapıları
+## Uzak kabul kanıtı — 31 Ağustos 2026
 
-1. Ürün sahibine ait private Git remote oluşturmak ve baseline'ı push etmek.
-2. `main` için branch protection, zorunlu PR/CI ve force-push engelini açmak.
-3. Uzak CI çalışmasını yeşil kanıtlamak.
-4. Aynı release kimliğiyle staging deploy, güncel yedi tabloluk şema/journal restore, güvenli rollback ve cron davranışını tamamlamak.
+- Baseline `main` ve `baseline-platform-v0.1` etiketi `origin` deposuna gönderildi: PASS
+- GitHub Actions `quality` çalışması: [run 33419687742](https://github.com/arslanturkmustafa-sudo/portal-pusula/actions/runs/33419687742), 2 dakika 2 saniye, PASS
+- Aktif `protect-main` ruleset: varsayılan dal hedefi, bypass yok, PR zorunlu ve onay sayısı `0`
+- Zorunlu `quality` kontrolü ve hedef dalın güncel olması: etkin
+- Konuşma çözümü, doğrusal geçmiş, yalnız squash birleştirme, silme ve force-push engeli: etkin
 
-Bu dört kapı tamamlanmadan gerçek müşteri/finans verisi veya kullanıcı auth geliştirmesi production'a açılmaz.
+## Kalan Komut 0 kapısı
+
+1. Aynı release kimliğiyle staging deploy, güncel yedi tabloluk şema/journal restore, güvenli rollback ve cron davranışını tamamlamak.
+
+Bu kapı tamamlanmadan gerçek müşteri/finans verisi veya kullanıcı auth geliştirmesi production'a açılmaz.
