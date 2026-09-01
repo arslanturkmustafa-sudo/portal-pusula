@@ -12,6 +12,7 @@
     "build": "next build --webpack",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "node scripts/migrate.mjs",
+    "db:bundle:phpmyadmin": "node scripts/build-phpmyadmin-migration-bundle.mjs",
     "icons:generate": "node scripts/generate-pwa-icons.mjs",
     "scan:secrets": "node scripts/scan-secrets.mjs",
     "checkpoint:source": "node scripts/package-source-checkpoint.mjs",

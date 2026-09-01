@@ -33,6 +33,8 @@ npm run package:hostinger
 
 Son komut `dist/portal-pusula-hostinger.zip` üretir. ZIP standardı Zip32/STORE, UTF-8 yollar, sabit tarih, sıralı girişler ve CRC32 kullanır; aynı kaynak iki çalıştırmada aynı SHA-256 değerini verir.
 
+Uygulama ZIP'i DB şeması uygulamaz. npm/SSH erişimi olmayan, yeni ve tamamen boş disposable staging DB'si için hedefe bağlı SQL artefaktı gerekiyorsa [phpMyAdmin clean-only migration runbook'u](./phpmyadmin-clean-migration.md) izlenir; bu artefakt Hostinger ZIP'inin içine eklenmez.
+
 Arşiv kökünde doğrudan `package.json`, `package-lock.json`, `.nvmrc`, `next.config.mjs`, `next-env.d.ts`, `tsconfig.json` ve `postcss.config.mjs` bulunur. `drizzle/` içindeki immutable `0000`/`0001` ile ileri yönlü `0002`/`0003`, `public/`, production için gereken migration scriptleri ve testleri çıkarılmış `src/` sabit allowlist ile dahil edilir. `src/**/*.test.ts(x)`, `tests/`, disposable DB/E2E/paketleme scriptleri, herhangi bir alt dizindeki `.env*`, özel anahtar/credential dosyaları, `.next/`, `node_modules/`, `dist/`, `outputs/`, `work/`, log/coverage/Playwright/test çıktıları ve Git verisi hariçtir. Nested yasak yol bulunduğunda paket içerik üretmeden fail-closed olur. Production ZIP migration dosyalarını taşısa da bu yalnız dağıtılabilir artefakt içeriğidir; canlı migration veya deploy kanıtı değildir.
 
 ## Hostinger yükleme akışı — bu turda uygulanmadı
