@@ -1,4 +1,5 @@
 import { cleanup, render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { HomeScreen } from "@/components/home/home-screen";
@@ -46,5 +47,22 @@ describe("HomeScreen", () => {
     expect(screen.getByText("Müşteri kayıtları yükleniyor…")).toBeInTheDocument();
     expect(screen.queryByText("Atlas Makina")).not.toBeInTheDocument();
     expect(screen.getByText("Henüz müşteri kaydı yok. İlk müşteriyi ekleyerek başlayın.")).toBeInTheDocument();
+  });
+
+  it("opens date-based contract and monthly visit planning from a customer row", async () => {
+    const user = userEvent.setup();
+    render(<HomeScreen />);
+
+    await user.click(screen.getByRole("button", { name: /Atlas Makina/ }));
+
+    expect(
+      screen.getByRole("region", { name: "Atlas Makina" }),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("Başlangıç")).toHaveValue("2026-09-01");
+    expect(screen.getByLabelText("Bitiş")).toHaveValue("2027-08-31");
+    expect(screen.getByText("₺60.000,00")).toBeInTheDocument();
+    expect(screen.queryByLabelText(/haftalık gün/iu)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/ziyaret adedi/iu)).not.toBeInTheDocument();
+    expect(screen.getByText("Önce sözleşmeyi kaydedin.")).toBeInTheDocument();
   });
 });
