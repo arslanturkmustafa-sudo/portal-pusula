@@ -1,21 +1,33 @@
 import { expect, test } from "@playwright/test";
 
+import { signIn } from "./auth";
+
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-test("renders the accessible local operations desk", async ({ page }) => {
-  const response = await page.goto("/");
+test("protects and renders the accessible customer workbench", async ({ page }) => {
+  await page.goto("/");
+  await expect(page).toHaveURL(/\/giris$/u);
+  await expect(
+    page.getByRole("heading", { level: 1, name: "Çalışma alanına giriş" }),
+  ).toBeVisible();
+
+  await signIn(page);
+  const response = await page.reload();
 
   await expect(
-    page.getByRole("heading", { level: 1, name: "Günlük operasyon" }),
+    page.getByRole("heading", { level: 1, name: "Müşteriler" }),
   ).toBeVisible();
   await expect(
     page.getByRole("navigation", { name: "Ana navigasyon" }),
   ).toBeVisible();
-  await expect(page.getByText("Yerel tasarım önizlemesi")).toBeVisible();
-  for (const name of ["Projeler", "Görevler", "Takvim", "Finans"]) {
-    await expect(page.getByRole("region", { name })).toBeVisible();
-  }
+  await expect(
+    page.getByRole("region", { name: "Müşteri kayıtları" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("complementary", { name: "Bugünün planı" }),
+  ).toBeVisible();
+  await expect(page.getByText("Atlas Makina")).toHaveCount(0);
 
   const skipLink = page.getByRole("link", { name: "Ana içeriğe geç" });
   await page.keyboard.press("Tab");
@@ -32,7 +44,7 @@ test("renders the accessible local operations desk", async ({ page }) => {
 });
 
 test("has no page-level horizontal overflow", async ({ page }, testInfo) => {
-  await page.goto("/");
+  await signIn(page);
 
   const widths = await page.evaluate(() => ({
     body: document.body.scrollWidth,
@@ -68,6 +80,10 @@ test("public liveness is minimal and protected readiness fails closed", async ({
   expect(readiness.status()).toBe(404);
   expect(await readiness.json()).toEqual({ status: "not_found" });
   expect(readiness.headers()["cache-control"]).toContain("no-store");
+
+  const customers = await request.get("/api/customers");
+  expect(customers.status()).toBe(401);
+  expect(await customers.json()).toEqual({ status: "unauthorized" });
 });
 
 test("keeps the internal cron candidate disabled by default", async ({

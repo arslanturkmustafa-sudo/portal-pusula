@@ -23,6 +23,11 @@ const cronDispatchGateMigrationPath = resolve(
   "drizzle",
   "0003_platform_cron_dispatch_gate.sql",
 );
+const customerMigrationPath = resolve(
+  process.cwd(),
+  "drizzle",
+  "0004_customer.sql",
+);
 const verificationMigrationSql = readFileSync(
   verificationMigrationPath,
   "utf8",
@@ -36,6 +41,7 @@ const cronDispatchGateMigrationSql = readFileSync(
   cronDispatchGateMigrationPath,
   "utf8",
 );
+const customerMigrationSql = readFileSync(customerMigrationPath, "utf8");
 
 function createdTables(sql: string): string[] {
   return Array.from(
@@ -281,5 +287,25 @@ describe("platform migration SQL policy", () => {
     expect(cronDispatchGateMigrationSql).toMatch(
       /chk_cron_dispatch_gate_timeline[\s\S]*?`created_at_utc`\s*<=\s*`cron_dispatch_gate`\.`last_permitted_at_utc`[\s\S]*?`last_permitted_at_utc`\s*=\s*`cron_dispatch_gate`\.`updated_at_utc`/iu,
     );
+  });
+
+  it("adds the first customer domain table with Unicode and canonical identity contracts", () => {
+    expect(createdTables(customerMigrationSql)).toEqual(["customer"]);
+    expect(customerMigrationSql).not.toMatch(/\bIF\s+NOT\s+EXISTS\b/iu);
+    expect(customerMigrationSql).not.toMatch(
+      /(?:^|;)\s*(?:DROP|TRUNCATE|ALTER|RENAME|DELETE|UPDATE|INSERT|REPLACE)\b/imu,
+    );
+    expect(customerMigrationSql).toMatch(/\bENGINE\s*=\s*InnoDB\b/iu);
+    expect(customerMigrationSql).toMatch(
+      /\bDEFAULT\s+CHARACTER\s+SET\s*=\s*utf8mb4\s+COLLATE\s*=\s*utf8mb4_unicode_ci\b/iu,
+    );
+    expect(customerMigrationSql).toMatch(
+      /`id`\s+char\(36\)\s+CHARACTER SET ascii COLLATE ascii_bin/iu,
+    );
+    expect(customerMigrationSql).toMatch(
+      /`short_code`\s+varchar\(32\)\s+CHARACTER SET ascii COLLATE ascii_bin/iu,
+    );
+    expect(customerMigrationSql).toContain("chk_customer_short_code");
+    expect(customerMigrationSql).toContain("uq_customer_short_code");
   });
 });

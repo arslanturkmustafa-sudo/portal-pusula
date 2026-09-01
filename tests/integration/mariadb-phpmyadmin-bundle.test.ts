@@ -21,6 +21,7 @@ const disposableMariaDbEnabled =
 const repositoryRoot = process.cwd();
 const journalTable = "__drizzle_migrations";
 const knownTablesInDropOrder = [
+  "customer",
   "cron_dispatch_gate",
   "job_run",
   "scheduled_job",
@@ -454,8 +455,8 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
           },
           sessionRestored: true,
         });
-        expect(await tableNames(pool)).toHaveLength(7);
-        expect(await journalRows(pool)).toHaveLength(4);
+        expect(await tableNames(pool)).toHaveLength(8);
+        expect(await journalRows(pool)).toHaveLength(5);
       } catch (error) {
         reusable = false;
         throw error;
@@ -621,11 +622,11 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
         tablesAfter,
       }).toEqual({
         diagnostics: {
-          application_columns: 61,
-          checks: 19,
+          application_columns: 70,
+          checks: 25,
           foreign_keys: 1,
-          indexes: 21,
-          matching_application_tables: 6,
+          indexes: 24,
+          matching_application_tables: 7,
           matching_journal_tables: 1,
           sql_mode: expect.any(String),
         },
@@ -639,11 +640,12 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
           "_platform_migration_verification",
           "audit_event",
           "cron_dispatch_gate",
+          "customer",
           "job_run",
           "outbox_event",
           "scheduled_job",
         ],
-        journalCount: 4,
+        journalCount: 5,
       });
 
       await expect(
@@ -657,7 +659,7 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
 
       const bundleSchema = await schemaDefinitionSnapshot(pool);
       await expect(runMigration()).resolves.toBeUndefined();
-      expect(await journalRows(pool)).toHaveLength(4);
+      expect(await journalRows(pool)).toHaveLength(5);
       expect(await schemaDefinitionSnapshot(pool)).toEqual(bundleSchema);
 
       await resetKnownTables(pool);

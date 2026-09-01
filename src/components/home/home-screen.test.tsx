@@ -1,50 +1,50 @@
-import { render, screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { cleanup, render, screen, within } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { HomeScreen } from "@/components/home/home-screen";
 
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
+
 describe("HomeScreen", () => {
-  it("renders the accessible local operations desk without marketing UI", () => {
+  it("renders the customer workbench without a marketing hero", () => {
     render(<HomeScreen />);
 
-    const levelOneHeadings = screen.getAllByRole("heading", { level: 1 });
-    expect(levelOneHeadings).toHaveLength(1);
-    expect(levelOneHeadings[0]).toHaveAccessibleName("Günlük operasyon");
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+    expect(screen.getByRole("heading", { level: 1 })).toHaveAccessibleName("Müşteriler");
+    expect(screen.getByRole("button", { name: "Müşteri ekle" })).toBeInTheDocument();
+    expect(screen.getByRole("searchbox", { name: "Müşteri ara" })).toBeInTheDocument();
 
-    const skipLink = screen.getByRole("link", { name: "Ana içeriğe geç" });
-    const main = screen.getByRole("main");
-    expect(skipLink).toHaveAttribute("href", "#ana-icerik");
-    expect(main).toHaveAttribute("id", "ana-icerik");
-    expect(main).toHaveAttribute("tabindex", "-1");
-
-    const navigation = screen.getByRole("navigation", {
-      name: "Ana navigasyon",
-    });
-    for (const name of ["Projeler", "Görevler", "Takvim", "Finans"]) {
+    const navigation = screen.getByRole("navigation", { name: "Ana navigasyon" });
+    for (const name of ["Müşteriler", "Günlük plan", "Görevler", "Finans", "Projeler"]) {
       expect(within(navigation).getByRole("link", { name })).toBeInTheDocument();
-      expect(screen.getByRole("region", { name })).toBeInTheDocument();
     }
-    for (const link of within(navigation).getAllByRole("link")) {
-      expect(link).not.toHaveAttribute("aria-current");
-    }
+    expect(within(navigation).getByRole("link", { name: "Müşteriler" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
 
-    const previewBoundary = screen.getByRole("note");
-    expect(
-      within(previewBoundary).getByText("Yerel tasarım önizlemesi"),
-    ).toBeInTheDocument();
-    expect(
-      within(previewBoundary).getByText("Örnek içerik · gerçek iş verisi değil"),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Müşteri kayıtları" })).toBeInTheDocument();
+    expect(screen.getByRole("complementary", { name: "Bugünün planı" })).toBeInTheDocument();
 
-    expect(
-      screen.queryByRole("heading", { name: /İşlerinizi tek bir yerde/i }),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("link", { name: "Temeli incele" }),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByText("Genişlemeden önce doğrulanan dört temel"),
-    ).not.toBeInTheDocument();
-    expect(document.body.textContent).not.toMatch(/₺|tahsilat toplamı|müşteri sayısı/i);
+    const table = screen.getByRole("table", { name: "Müşteri kayıtları" });
+    expect(within(table).getAllByRole("row")).toHaveLength(6);
+    expect(within(table).getByText("Atlas Makina")).toBeInTheDocument();
+    expect(within(table).getAllByText("Gecikti")).toHaveLength(2);
+
+    expect(screen.queryByText("Yerel tasarım önizlemesi")).not.toBeInTheDocument();
+    expect(screen.queryByText(/İşlerinizi tek bir yerde/i)).not.toBeInTheDocument();
+  });
+
+  it("never presents sample customers as live records while data is loading", () => {
+    vi.stubGlobal("fetch", vi.fn(() => new Promise(() => undefined)));
+
+    render(<HomeScreen live />);
+
+    expect(screen.getByText("Müşteri kayıtları yükleniyor…")).toBeInTheDocument();
+    expect(screen.queryByText("Atlas Makina")).not.toBeInTheDocument();
+    expect(screen.getByText("Henüz müşteri kaydı yok. İlk müşteriyi ekleyerek başlayın.")).toBeInTheDocument();
   });
 });

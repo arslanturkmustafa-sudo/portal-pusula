@@ -1,4 +1,9 @@
 export {
+  customer,
+  type CustomerRecord,
+  type NewCustomerRecord,
+} from "./customer";
+export {
   auditEvent,
   type AuditEventRecord,
   type NewAuditEventRecord,

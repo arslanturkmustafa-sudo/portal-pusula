@@ -117,8 +117,8 @@ describe.sequential("clean-only phpMyAdmin migration bundle policy", () => {
     expect(second.summary).toEqual(first.summary);
     expect(second.sql).toBe(first.sql);
     expect(second.manifestText).toBe(first.manifestText);
-    expect(first.summary.migrationCount).toBe(4);
-    expect(first.summary.statementCount).toBe(27);
+    expect(first.summary.migrationCount).toBe(5);
+    expect(first.summary.statementCount).toBe(29);
     expect(first.summary.sqlBytes).toBe(Buffer.byteLength(first.sql));
     expect(first.summary.sqlSha256).toBe(
       createHash("sha256").update(first.sql).digest("hex"),
@@ -169,6 +169,7 @@ describe.sequential("clean-only phpMyAdmin migration bundle policy", () => {
       "_platform_migration_verification",
       "audit_event",
       "cron_dispatch_gate",
+      "customer",
       "job_run",
       "outbox_event",
       "scheduled_job",
@@ -226,10 +227,16 @@ describe.sequential("clean-only phpMyAdmin migration bundle policy", () => {
         sqlFileName: "0003_platform_cron_dispatch_gate.sql",
         statementCount: 1,
       },
+      {
+        createdAt: 1788262397356,
+        hash: "8027aef0d0c48a6c29d806a45c7e074a50ea7cf890dc1a40786c0f3b63bf0dc5",
+        sqlFileName: "0004_customer.sql",
+        statementCount: 2,
+      },
     ]);
     expect(
       manifest.migrations.flatMap((migration) => migration.statementHashes),
-    ).toHaveLength(27);
+    ).toHaveLength(29);
     expect(
       manifest.migrations
         .flatMap((migration) => migration.statementHashes)

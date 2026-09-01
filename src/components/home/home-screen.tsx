@@ -1,332 +1,510 @@
+"use client";
+
+import { useEffect, useMemo, useState, type FormEvent } from "react";
+
 const navigationItems = [
-  { code: "01", href: "#genel-bakis", label: "Genel bakış", meta: "Bugün" },
-  { code: "02", href: "#projeler", label: "Projeler", meta: "03" },
-  { code: "03", href: "#gorevler", label: "Görevler", meta: "08" },
-  { code: "04", href: "#takvim", label: "Takvim", meta: "02" },
-  { code: "05", href: "#finans", label: "Finans", meta: "—" },
+  { href: "#musteriler", label: "Müşteriler", shortLabel: "Müşteri", active: true },
+  { href: "#gunluk-plan", label: "Günlük plan", shortLabel: "Plan", active: false },
+  { href: "#gorevler", label: "Görevler", shortLabel: "Görev", active: false },
+  { href: "#finans", label: "Finans", shortLabel: "Finans", active: false },
+  { href: "#projeler", label: "Projeler", shortLabel: "Proje", active: false },
 ] as const;
 
-const summaryItems = [
-  { label: "Bugünün ritmi", value: "04", note: "zamanlanmış adım" },
-  { label: "Açık iş", value: "08", note: "öncelik sırasına alınmış" },
-  { label: "Karar bekleyen", value: "03", note: "netleştirme kuyruğunda" },
-  { label: "Blokaj", value: "01", note: "bugün ele alınacak" },
-] as const;
+type CustomerView = Readonly<{
+  code: string;
+  contact: string;
+  fee: string;
+  id: string;
+  name: string;
+  payment: string;
+  status: string;
+  tone: "active" | "inactive" | "late" | "paid" | "waiting";
+  visit: string;
+}>;
 
-const agendaItems = [
+type StoredCustomer = Readonly<{
+  contactNote: string | null;
+  displayName: string;
+  email: string | null;
+  id: string;
+  phone: string | null;
+  shortCode: string;
+  status: "active" | "inactive";
+}>;
+
+const sampleCustomers: readonly CustomerView[] = [
   {
-    time: "09:30",
-    title: "Haftalık planı kilitle",
-    context: "İç operasyon · Bugün",
+    code: "MK-001",
+    contact: "İletişim kaydı bekliyor",
+    name: "Atlas Makina",
+    id: "sample-1",
+    visit: "Pazartesi",
+    fee: "120.000 ₺",
+    payment: "Ayın 5'i",
+    status: "Tahsil edildi",
+    tone: "paid",
+  },
+  {
+    code: "MK-002",
+    contact: "İletişim kaydı bekliyor",
+    name: "Vega Endüstri",
+    id: "sample-2",
+    visit: "Salı",
+    fee: "50.000 ₺ + KDV",
+    payment: "Ayın 10'u",
+    status: "Gecikti",
+    tone: "late",
+  },
+  {
+    code: "MK-003",
+    contact: "İletişim kaydı bekliyor",
+    name: "Kuzey Lojistik",
+    id: "sample-3",
+    visit: "Çarşamba",
+    fee: "75.000 ₺",
+    payment: "Ayın 15'i",
     status: "Bekliyor",
-    tone: "signal",
+    tone: "waiting",
   },
   {
-    time: "11:00",
-    title: "Arayüz dilimini gözden geçir",
-    context: "Portal Pusula · Tasarım",
-    status: "İncele",
-    tone: "attention",
+    code: "MK-004",
+    contact: "İletişim kaydı bekliyor",
+    name: "Delta Üretim",
+    id: "sample-4",
+    visit: "Perşembe",
+    fee: "50.000 ₺ + KDV",
+    payment: "Ayın 20'si",
+    status: "Bekliyor",
+    tone: "waiting",
   },
   {
-    time: "14:30",
-    title: "Finans kayıt akışını tanımla",
-    context: "Operasyon · Veri sınırı",
-    status: "Planlı",
-    tone: "quiet",
+    code: "MK-005",
+    contact: "İletişim kaydı bekliyor",
+    name: "Rota Teknoloji",
+    id: "sample-5",
+    visit: "Cuma",
+    fee: "50.000 ₺",
+    payment: "Ayın 25'i",
+    status: "Gecikti",
+    tone: "late",
   },
 ] as const;
 
-const projects = [
-  {
-    code: "P-014",
-    name: "Portal Pusula",
-    focus: "Dilim 0 · Arayüz kabuğu",
-    status: "Devam ediyor",
-    progress: 72,
-  },
-  {
-    code: "P-009",
-    name: "Mühendis Kafası",
-    focus: "İçerik ve yayın düzeni",
-    status: "Sırada",
-    progress: 46,
-  },
-  {
-    code: "P-004",
-    name: "Operasyon sistemi",
-    focus: "Süreç standardı",
-    status: "İzlemede",
-    progress: 28,
-  },
+const todayItems = [
+  { time: "09:00", title: "Saha ziyareti", context: "Atlas Makina" },
+  { time: "13:30", title: "Yönetim toplantısı", context: "Vega Endüstri" },
+  { time: "16:00", title: "Tahsilat kontrolü", context: "İç operasyon" },
 ] as const;
 
-const weekDays = [
-  { day: "Pzt", date: "Bugün", current: true },
-  { day: "Sal", date: "01", current: false },
-  { day: "Çar", date: "02", current: false },
-  { day: "Per", date: "03", current: false },
-  { day: "Cum", date: "04", current: false },
-] as const;
+function istanbulTodayLabel(): string {
+  return new Intl.DateTimeFormat("tr-TR", {
+    day: "numeric",
+    month: "long",
+    timeZone: "Europe/Istanbul",
+    weekday: "long",
+  }).format(new Date());
+}
 
-const financeRows = [
-  { label: "Nakit akışı", value: "Veri bağlantısı bekliyor" },
-  { label: "Yaklaşan yükümlülükler", value: "Takvimlenmedi" },
-  { label: "Mutabakat", value: "Kaynak tanımlanmadı" },
-] as const;
+function generatedCustomerCode(displayName: FormDataEntryValue | null): string {
+  const rawName = typeof displayName === "string" ? displayName : "";
+  const base = rawName
+    .replace(/[ıİ]/gu, "I")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/gu, "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/gu, "_")
+    .replace(/^_+|_+$/gu, "")
+    .slice(0, 24) || "MUSTERI";
+  const suffix = crypto.randomUUID().replaceAll("-", "").slice(0, 4).toUpperCase();
+  return `${base}_${suffix}`;
+}
 
-export function HomeScreen() {
+function storedCustomerView(customer: StoredCustomer): CustomerView {
+  return {
+    code: customer.shortCode,
+    contact: customer.email ?? customer.phone ?? "İletişim bilgisi yok",
+    fee: "—",
+    id: customer.id,
+    name: customer.displayName,
+    payment: "—",
+    status: customer.status === "active" ? "Aktif" : "Pasif",
+    tone: customer.status,
+    visit: "Sözleşme bekliyor",
+  };
+}
+
+type HomeScreenProps = Readonly<{
+  live?: boolean;
+}>;
+
+export function HomeScreen({ live = false }: HomeScreenProps) {
+  const [customerRows, setCustomerRows] =
+    useState<readonly CustomerView[]>(() => (live ? [] : sampleCustomers));
+  const [dataState, setDataState] = useState<
+    "error" | "live" | "loading" | "sample"
+  >(live ? "loading" : "sample");
+  const [filter, setFilter] = useState<"all" | "late">("all");
+  const [query, setQuery] = useState("");
+  const [formOpen, setFormOpen] = useState(false);
+  const [saveState, setSaveState] = useState<"error" | "idle" | "saving">("idle");
+  const todayLabel = istanbulTodayLabel();
+
+  useEffect(() => {
+    if (!live) return;
+    const controller = new AbortController();
+
+    void fetch("/api/customers", {
+      cache: "no-store",
+      credentials: "same-origin",
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Customer list is unavailable.");
+        return (await response.json()) as { customers?: StoredCustomer[] };
+      })
+      .then((payload) => {
+        setCustomerRows((payload.customers ?? []).map(storedCustomerView));
+        setDataState("live");
+      })
+      .catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        setDataState("error");
+      });
+
+    return () => controller.abort();
+  }, [live]);
+
+  const visibleCustomers = useMemo(() => {
+    const canonicalQuery = query.trim().toLocaleLowerCase("tr-TR");
+    return customerRows.filter((customer) => {
+      const queryMatches =
+        canonicalQuery.length === 0 ||
+        customer.name.toLocaleLowerCase("tr-TR").includes(canonicalQuery) ||
+        customer.code.toLocaleLowerCase("tr-TR").includes(canonicalQuery);
+      const filterMatches = filter === "all" || customer.tone === "late";
+      return queryMatches && filterMatches;
+    });
+  }, [customerRows, filter, query]);
+
+  async function submitCustomer(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const fields = new FormData(form);
+    setSaveState("saving");
+
+    try {
+      const response = await fetch("/api/customers", {
+        body: JSON.stringify({
+          contactNote: fields.get("contactNote"),
+          displayName: fields.get("displayName"),
+          email: fields.get("email"),
+          phone: fields.get("phone"),
+          shortCode: generatedCustomerCode(fields.get("displayName")),
+          status: "active",
+        }),
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      });
+      if (!response.ok) throw new Error("Customer could not be saved.");
+      const payload = (await response.json()) as { customer: StoredCustomer };
+      setCustomerRows((current) => [
+        ...current,
+        storedCustomerView(payload.customer),
+      ]);
+      setDataState("live");
+      setSaveState("idle");
+      setFormOpen(false);
+      form.reset();
+    } catch {
+      setSaveState("error");
+    }
+  }
+
+  const dataMessage =
+    dataState === "live"
+      ? "Kayıtlar veritabanından okunuyor; sözleşme alanları bir sonraki dilimde açılacak."
+      : dataState === "loading"
+        ? "Müşteri kayıtları yükleniyor…"
+        : dataState === "error"
+          ? "Müşteri kayıtlarına ulaşılamadı. Bağlantıyı kontrol edip sayfayı yenileyin."
+          : "Aşağıdaki kayıtlar arayüzü değerlendirmek için hazırlanmış örnek verilerdir.";
+
   return (
     <>
       <a className="skip-link" href="#ana-icerik">
         Ana içeriğe geç
       </a>
 
-      <div className="ops-shell">
-        <aside className="ops-rail">
-          <div className="ops-brand" aria-label="Portal Pusula">
-            <span className="ops-brand-mark" aria-hidden="true">
-              <span>PP</span>
-            </span>
-            <span className="ops-brand-copy">
+      <div className="workbench-shell">
+        <aside className="ledger-rail">
+          <a className="ledger-brand" href="#musteriler" aria-label="Portal Pusula ana sayfa">
+            <span className="ledger-brand-mark" aria-hidden="true">PP</span>
+            <span>
               <strong>Portal Pusula</strong>
-              <small>Operasyon masası</small>
+              <small>İş kayıt defteri</small>
             </span>
-          </div>
+          </a>
 
-          <div className="workspace-label" aria-label="Aktif çalışma alanı">
+          <div className="ledger-workspace">
             <span>Çalışma alanı</span>
             <strong>Mühendis Kafası</strong>
           </div>
 
-          <nav className="ops-nav" aria-label="Ana navigasyon">
-            {navigationItems.map((item) => (
+          <nav className="ledger-nav" aria-label="Ana navigasyon">
+            {navigationItems.map((item, index) => (
               <a
-                className="ops-nav-link"
+                className={item.active ? "is-active" : undefined}
                 href={item.href}
-                key={item.code}
+                key={item.href}
+                aria-current={item.active ? "page" : undefined}
               >
-                <span className="ops-nav-code" aria-hidden="true">
-                  {item.code}
+                <span className="ledger-nav-index" aria-hidden="true">
+                  {String(index + 1).padStart(2, "0")}
                 </span>
-                <span className="ops-nav-label">{item.label}</span>
-                <span className="ops-nav-meta" aria-hidden="true">
-                  {item.meta}
-                </span>
+                <span className="ledger-nav-label">{item.label}</span>
+                <span className="ledger-nav-short" aria-hidden="true">{item.shortLabel}</span>
               </a>
             ))}
           </nav>
 
-          <div className="rail-status">
-            <span className="status-light" aria-hidden="true" />
+          <div className="ledger-rail-footer">
+            <span className="connection-dot" aria-hidden="true" />
             <span>
-              <strong>Yerel çalışma</strong>
-              <small>Canlı veri bağlı değil</small>
+              <strong>İç kullanım</strong>
+              <small>Yetkili erişim</small>
             </span>
           </div>
         </aside>
 
-        <main className="ops-main" id="ana-icerik" tabIndex={-1}>
-          <header className="ops-header" id="genel-bakis">
+        <main className="workbench-main" id="ana-icerik" tabIndex={-1}>
+          <header className="workbench-header">
             <div>
-              <p className="ops-breadcrumb">Operasyon / Genel bakış</p>
-              <h1>Günlük operasyon</h1>
-              <p className="ops-intro">
-                Bugünün işleri, yaklaşan temaslar ve karar bekleyen konular tek
-                çalışma yüzeyinde.
+              <p className="eyebrow" suppressHydrationWarning>
+                {todayLabel} · Müşteri masası
               </p>
+              <h1>Müşteriler</h1>
+              <p className="header-note">Sözleşme, ziyaret ve tahsilat durumuna tek bakış.</p>
             </div>
-            <div className="preview-boundary" role="note">
-              <span>Yerel tasarım önizlemesi</span>
-              <strong>Örnek içerik · gerçek iş verisi değil</strong>
+            <div className="header-actions">
+              <form action="/api/auth/logout" method="post">
+                <button className="text-action" type="submit">Çıkış</button>
+              </form>
+              <button
+                className="primary-action"
+                type="button"
+                aria-label="Müşteri ekle"
+                aria-expanded={formOpen}
+                onClick={() => {
+                  setFormOpen((current) => !current);
+                  setSaveState("idle");
+                }}
+              >
+                + Müşteri ekle
+              </button>
             </div>
           </header>
 
-          <section className="summary-strip" aria-label="Operasyon özeti">
-            {summaryItems.map((item) => (
-              <div className="summary-item" key={item.label}>
-                <span>{item.label}</span>
-                <strong>{item.value}</strong>
-                <small>{item.note}</small>
+          {formOpen ? (
+            <section className="customer-entry" aria-labelledby="customer-entry-title">
+              <div>
+                <p className="section-kicker">Yeni kayıt</p>
+                <h2 id="customer-entry-title">Müşteri ekle</h2>
+                <p>Sözleşme ve ziyaret planı, müşteri kaydedildikten sonra eklenecek.</p>
               </div>
-            ))}
+              <form onSubmit={submitCustomer}>
+                <label>
+                  <span>Müşteri / şirket adı</span>
+                  <input maxLength={191} name="displayName" required />
+                </label>
+                <label>
+                  <span>E-posta</span>
+                  <input autoComplete="email" maxLength={254} name="email" type="email" />
+                </label>
+                <label>
+                  <span>Telefon</span>
+                  <input autoComplete="tel" maxLength={32} name="phone" type="tel" />
+                </label>
+                <label className="entry-note">
+                  <span>İletişim notu</span>
+                  <textarea maxLength={2000} name="contactNote" rows={2} />
+                </label>
+                <div className="entry-actions">
+                  <button
+                    className="text-action"
+                    type="button"
+                    onClick={() => setFormOpen(false)}
+                  >
+                    Vazgeç
+                  </button>
+                  <button className="primary-action" disabled={saveState === "saving"} type="submit">
+                    {saveState === "saving" ? "Kaydediliyor…" : "Müşteriyi kaydet"}
+                  </button>
+                </div>
+                {saveState === "error" ? (
+                  <p className="entry-error" role="alert">
+                    Kayıt tamamlanamadı. Bağlantıyı ve alanları kontrol edip yeniden deneyin.
+                  </p>
+                ) : null}
+              </form>
+            </section>
+          ) : null}
+
+          <p className="sample-note" role="note">
+            {dataMessage}
+          </p>
+
+          <section className="ledger-summary" aria-label="Müşteri özeti">
+            <div>
+              <span>Aktif müşteri</span>
+              <strong>{String(customerRows.filter((item) => item.tone !== "inactive").length).padStart(2, "0")}</strong>
+            </div>
+            <div>
+              <span>Bugünkü ziyaret</span>
+              <strong>{live ? "—" : "02"}</strong>
+            </div>
+            <div>
+              <span>Geciken ödeme</span>
+              <strong className="attention-ink">
+                {live
+                  ? "—"
+                  : String(customerRows.filter((item) => item.tone === "late").length).padStart(2, "0")}
+              </strong>
+            </div>
+            <div>
+              <span>Açık hakediş</span>
+              <strong>{live ? "—" : "225.000 ₺"}</strong>
+            </div>
           </section>
 
-          <div className="desk-grid">
+          <div className="workbench-grid">
             <section
-              className="desk-section desk-section-agenda"
-              id="gorevler"
-              aria-labelledby="gorevler-title"
+              className="customer-ledger"
+              id="musteriler"
+              aria-labelledby="customer-ledger-title"
             >
-              <div className="desk-section-heading">
+              <div className="section-heading">
                 <div>
-                  <span className="section-index">01 / Akış</span>
-                  <h2 id="gorevler-title">Görevler</h2>
+                  <p className="section-kicker">Kayıt / {String(customerRows.length).padStart(2, "0")}</p>
+                  <h2 id="customer-ledger-title">Müşteri kayıtları</h2>
                 </div>
-                <span className="section-aside">Öncelik sırası</span>
-              </div>
-
-              <ol className="agenda-list">
-                {agendaItems.map((item) => (
-                  <li className="agenda-row" key={`${item.time}-${item.title}`}>
-                    <time>{item.time}</time>
-                    <span className="agenda-copy">
-                      <strong>{item.title}</strong>
-                      <small>{item.context}</small>
-                    </span>
-                    <span className={`row-state row-state-${item.tone}`}>
-                      {item.status}
-                    </span>
-                  </li>
-                ))}
-              </ol>
-
-              <div className="queue-note">
-                <span>Sonraki sıra</span>
-                <strong>2 iş yarına taşınmaya aday</strong>
-              </div>
-            </section>
-
-            <section
-              className="desk-section desk-section-calendar"
-              id="takvim"
-              aria-labelledby="takvim-title"
-            >
-              <div className="desk-section-heading">
-                <div>
-                  <span className="section-index">02 / Zaman</span>
-                  <h2 id="takvim-title">Takvim</h2>
-                </div>
-                <span className="section-aside">Bu hafta</span>
-              </div>
-
-              <div className="week-strip" aria-label="Beş günlük görünüm">
-                {weekDays.map((item) => (
-                  <div className={item.current ? "is-current" : undefined} key={item.day}>
-                    <span>{item.day}</span>
-                    <strong>{item.date}</strong>
+                <div className="ledger-tools" aria-label="Müşteri araçları">
+                  <label className="search-field">
+                    <span className="sr-only">Müşteri ara</span>
+                    <input
+                      type="search"
+                      placeholder="Müşteri ara"
+                      value={query}
+                      onChange={(event) => setQuery(event.target.value)}
+                    />
+                  </label>
+                  <div className="filter-set" aria-label="Kayıt filtresi">
+                    <button
+                      className={filter === "all" ? "is-selected" : undefined}
+                      type="button"
+                      onClick={() => setFilter("all")}
+                    >
+                      Tümü
+                    </button>
+                    <button
+                      className={filter === "late" ? "is-selected" : undefined}
+                      type="button"
+                      onClick={() => setFilter("late")}
+                    >
+                      Geciken
+                    </button>
                   </div>
-                ))}
-              </div>
-
-              <div className="calendar-events">
-                <p>
-                  <time>09:30</time>
-                  <span>Planlama oturumu</span>
-                </p>
-                <p>
-                  <time>11:00</time>
-                  <span>Tasarım inceleme</span>
-                </p>
-                <p>
-                  <time>14:30</time>
-                  <span>Finans kontrol penceresi</span>
-                </p>
-              </div>
-            </section>
-
-            <section
-              className="desk-section desk-section-projects"
-              id="projeler"
-              aria-labelledby="projeler-title"
-            >
-              <div className="desk-section-heading">
-                <div>
-                  <span className="section-index">03 / Portföy</span>
-                  <h2 id="projeler-title">Projeler</h2>
                 </div>
-                <span className="section-aside">3 aktif kayıt</span>
               </div>
 
-              <div className="project-table-wrap">
-                <table className="project-table">
+              <div className="customer-table-wrap">
+                <table className="customer-table" aria-label="Müşteri kayıtları">
                   <thead>
                     <tr>
-                      <th scope="col">Kod</th>
-                      <th scope="col">Proje / odak</th>
+                      <th scope="col">Müşteri</th>
+                      <th scope="col">Hizmet günü</th>
+                      <th scope="col">Aylık ücret</th>
+                      <th scope="col">Ödeme</th>
                       <th scope="col">Durum</th>
-                      <th scope="col">İlerleme</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {projects.map((project) => (
-                      <tr key={project.code}>
-                        <td data-label="Kod">
-                          <span className="project-code">{project.code}</span>
+                    {visibleCustomers.map((customer) => (
+                      <tr key={customer.id}>
+                        <td data-label="Müşteri">
+                          <span className="customer-link">
+                            <strong>{customer.name}</strong>
+                            <small>{customer.code}</small>
+                          </span>
                         </td>
-                        <td data-label="Proje / odak">
-                          <strong>{project.name}</strong>
-                          <small>{project.focus}</small>
-                        </td>
-                        <td data-label="Durum">{project.status}</td>
-                        <td data-label="İlerleme">
-                          <span className="progress-value">{project.progress}%</span>
-                          <span className="progress-track" aria-hidden="true">
-                            <span style={{ width: `${project.progress}%` }} />
+                        <td data-label="Hizmet günü">{customer.visit}</td>
+                        <td data-label="Aylık ücret">{customer.fee}</td>
+                        <td data-label="Ödeme">{customer.payment}</td>
+                        <td data-label="Durum">
+                          <span className={`record-status record-status-${customer.tone}`}>
+                            {customer.status}
                           </span>
                         </td>
                       </tr>
                     ))}
+                    {visibleCustomers.length === 0 ? (
+                      <tr>
+                        <td className="empty-row" colSpan={5}>
+                          {customerRows.length === 0
+                            ? "Henüz müşteri kaydı yok. İlk müşteriyi ekleyerek başlayın."
+                            : "Arama veya filtreyle eşleşen kayıt bulunamadı."}
+                        </td>
+                      </tr>
+                    ) : null}
                   </tbody>
                 </table>
               </div>
             </section>
 
-            <section
-              className="desk-section desk-section-finance"
-              id="finans"
-              aria-labelledby="finans-title"
-            >
-              <div className="desk-section-heading">
+            <aside className="day-sheet" id="gunluk-plan" aria-labelledby="day-sheet-title">
+              <div className="section-heading section-heading-compact">
                 <div>
-                  <span className="section-index">04 / Kontrol</span>
-                  <h2 id="finans-title">Finans</h2>
+                  <p className="section-kicker">Bugün / {live ? "—" : "03"}</p>
+                  <h2 id="day-sheet-title">Bugünün planı</h2>
                 </div>
-                <span className="section-aside">Bağlantısız</span>
               </div>
 
-              <dl className="finance-list">
-                {financeRows.map((row) => (
-                  <div key={row.label}>
-                    <dt>{row.label}</dt>
-                    <dd>{row.value}</dd>
-                  </div>
+              <ol className="day-list">
+                {(live ? [] : todayItems).map((item) => (
+                  <li key={`${item.time}-${item.title}`}>
+                    <label>
+                      <input type="checkbox" />
+                      <span className="day-time">{item.time}</span>
+                      <span className="day-copy">
+                        <strong>{item.title}</strong>
+                        <small>{item.context}</small>
+                      </span>
+                    </label>
+                  </li>
                 ))}
-              </dl>
-              <p className="data-boundary-note">
-                Finans modülü açılana kadar tutar veya müşteri verisi gösterilmez.
-              </p>
-            </section>
+              </ol>
 
-            <section className="desk-section desk-section-decisions" aria-labelledby="kararlar-title">
-              <div className="desk-section-heading">
-                <div>
-                  <span className="section-index">05 / Karar</span>
-                  <h2 id="kararlar-title">Karar kuyruğu</h2>
+              {live ? (
+                <div className="next-action">
+                  <span>Planlama alanı</span>
+                  <strong>Takvim ve tahsilat adımı henüz açılmadı.</strong>
+                  <small>Müşteri sözleşmeleri tamamlandığında bu alan otomatik dolacak.</small>
                 </div>
-                <span className="section-aside">3 başlık</span>
-              </div>
-              <ul className="decision-list">
-                <li>
-                  <span>Ana navigasyon isimleri</span>
-                  <strong>Karar bekliyor</strong>
-                </li>
-                <li>
-                  <span>Takvim varsayılan görünümü</span>
-                  <strong>Taslak</strong>
-                </li>
-                <li>
-                  <span>Finans veri kaynağı</span>
-                  <strong>Bağlantı yok</strong>
-                </li>
-              </ul>
-            </section>
+              ) : (
+                <div className="next-action">
+                  <span>Örnek sıradaki işlem</span>
+                  <strong>Geciken 2 ödeme için müşterileri ara</strong>
+                  <small>Tahsilat ekranı bir sonraki iş adımında açılacak.</small>
+                </div>
+              )}
+            </aside>
           </div>
 
-          <footer className="ops-footer">
-            <span>Portal Pusula · Operasyon masası</span>
-            <span>Yerel arayüz dilimi / canlı sistem değişmedi</span>
-          </footer>
+          <section className="future-sections" aria-label="Yakında açılacak çalışma alanları">
+            <span id="gorevler">Görevler</span>
+            <span id="finans">Finans</span>
+            <span id="projeler">Projeler</span>
+          </section>
         </main>
       </div>
     </>
