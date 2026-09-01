@@ -1,12 +1,19 @@
 import type { Pool, PoolConnection } from "mysql2/promise";
 import { describe, expect, it, vi } from "vitest";
 
+vi.mock("server-only", () => ({}));
+
 import {
   CRON_ADVISORY_LOCK_TIMEOUT_MS,
   CronAdvisoryLockError,
   cronAdvisoryLockName,
   withCronAdvisoryLock,
 } from "@/platform/cron/cron-advisory-lock";
+import {
+  MYSQL_CANONICAL_SQL_MODE,
+  MYSQL_SESSION_SETUP_SQL,
+  MYSQL_SESSION_VERIFY_SQL,
+} from "@/platform/database/mysql-session-contract";
 
 type FakeConnection = {
   destroy: ReturnType<typeof vi.fn>;
@@ -17,16 +24,39 @@ type FakeConnection = {
 function createHarness(queryResults: unknown[]) {
   const connection: FakeConnection = {
     destroy: vi.fn(),
-    query: vi.fn(),
+    query: vi.fn(async (statement: string | { sql: string }) => {
+      const sql = typeof statement === "string" ? statement : statement.sql;
+      if (MYSQL_SESSION_SETUP_SQL.some((candidate) => candidate.sql === sql)) {
+        return [[], []];
+      }
+      if (sql === MYSQL_SESSION_VERIFY_SQL) {
+        return [
+          [
+            {
+              autocommit: 1,
+              character_set_client: "utf8mb4",
+              character_set_connection: "utf8mb4",
+              character_set_results: "utf8mb4",
+              check_constraint_checks: 1,
+              collation_connection: "utf8mb4_unicode_ci",
+              current_database: "database",
+              default_storage_engine: "InnoDB",
+              foreign_key_checks: 1,
+              sql_mode: MYSQL_CANONICAL_SQL_MODE,
+              time_zone: "+00:00",
+              unique_checks: 1,
+            },
+          ],
+          [],
+        ];
+      }
+
+      const result = queryResults.shift();
+      if (result instanceof Error) throw result;
+      return [result, []];
+    }),
     release: vi.fn(),
   };
-  for (const result of queryResults) {
-    if (result instanceof Error) {
-      connection.query.mockRejectedValueOnce(result);
-    } else {
-      connection.query.mockResolvedValueOnce([result, []]);
-    }
-  }
 
   const pool = {
     getConnection: vi.fn().mockResolvedValue(connection as unknown as PoolConnection),
@@ -64,18 +94,33 @@ describe("cron advisory lock", () => {
     ).resolves.toBe(true);
 
     expect(operation).toHaveBeenCalledOnce();
-    expect(connection.query).toHaveBeenCalledTimes(2);
-    expect(connection.query.mock.calls[0]?.[0]).toMatchObject({
+    const lockQueries = connection.query.mock.calls.filter(([statement]) =>
+      (statement as { sql?: string }).sql?.includes("LOCK"),
+    );
+    expect(connection.query).toHaveBeenCalledTimes(
+      MYSQL_SESSION_SETUP_SQL.length + 3,
+    );
+    expect(lockQueries[0]?.[0]).toMatchObject({
       sql: "SELECT GET_LOCK(?, 0) AS acquired",
       timeout: CRON_ADVISORY_LOCK_TIMEOUT_MS,
     });
-    expect(connection.query.mock.calls[1]?.[0]).toMatchObject({
+    expect(lockQueries[1]?.[0]).toMatchObject({
       sql: "SELECT RELEASE_LOCK(?) AS released",
       timeout: CRON_ADVISORY_LOCK_TIMEOUT_MS,
     });
-    expect(connection.query.mock.calls[0]?.[0].values).toEqual(
-      connection.query.mock.calls[1]?.[0].values,
+    expect((lockQueries[0]?.[0] as { values: unknown }).values).toEqual(
+      (lockQueries[1]?.[0] as { values: unknown }).values,
     );
+    expect(connection.query.mock.calls.findIndex(([statement]) =>
+      (statement as { sql?: string }).sql === MYSQL_SESSION_VERIFY_SQL,
+    ))
+      .toBeLessThan(
+        connection.query.mock.calls.findIndex(
+          ([statement]) =>
+            (statement as { sql?: string }).sql ===
+            "SELECT GET_LOCK(?, 0) AS acquired",
+        ),
+      );
     expect(connection.release).toHaveBeenCalledOnce();
     expect(connection.destroy).not.toHaveBeenCalled();
   });
@@ -108,7 +153,7 @@ describe("cron advisory lock", () => {
     expect(pool.getConnection).not.toHaveBeenCalled();
   });
 
-  it("releases without acquiring when aborted while waiting for a connection", async () => {
+  it("destroys an unverified checkout when aborted while waiting for a connection", async () => {
     const { connection } = createHarness([]);
     let resolveConnection: ((value: PoolConnection) => void) | undefined;
     const pendingConnection = new Promise<PoolConnection>((resolve) => {
@@ -131,7 +176,8 @@ describe("cron advisory lock", () => {
 
     await expect(result).rejects.toBeInstanceOf(CronAdvisoryLockError);
     expect(connection.query).not.toHaveBeenCalled();
-    expect(connection.release).toHaveBeenCalledOnce();
+    expect(connection.destroy).toHaveBeenCalledOnce();
+    expect(connection.release).not.toHaveBeenCalled();
     expect(operation).not.toHaveBeenCalled();
   });
 

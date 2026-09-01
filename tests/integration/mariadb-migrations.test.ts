@@ -11,8 +11,9 @@ import mysqlPromise, {
   type PoolConnection,
   type RowDataPacket,
 } from "mysql2/promise";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
+import { applyMySqlSessionPolicy } from "../../scripts/mysql-session-policy.mjs";
 import * as schema from "../../src/platform/db/schema";
 
 const disposableMariaDbEnabled =
@@ -69,6 +70,11 @@ interface MigrationRow extends RowDataPacket {
   id: number;
   hash: string;
   created_at: number;
+}
+
+interface SqlModeRow extends RowDataPacket {
+  global_sql_mode: string;
+  session_sql_mode: string;
 }
 
 interface TableCountRow extends RowDataPacket {
@@ -337,6 +343,75 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
     afterAll(async () => {
       await pool?.end();
       await drizzlePool?.promise().end();
+    });
+
+    beforeEach(async () => {
+      const connection = await pool.getConnection();
+      let reusable = false;
+      try {
+        await applyMySqlSessionPolicy(
+          connection,
+          requiredTestEnvironment("DB_NAME"),
+        );
+        reusable = true;
+      } finally {
+        if (reusable) connection.release();
+        else connection.destroy();
+      }
+    });
+
+    it("rejects journal coercion after inheriting a non-strict provider default", async () => {
+      const providerConnection = await mysqlPromise.createConnection({
+        host: requiredTestEnvironment("DB_HOST"),
+        port: Number(requiredTestEnvironment("DB_PORT")),
+        database: requiredTestEnvironment("DB_NAME"),
+        user: requiredTestEnvironment("DB_USER"),
+        password: requiredTestEnvironment("DB_PASSWORD"),
+        charset: "utf8mb4",
+        connectTimeout: 5_000,
+        multipleStatements: false,
+      });
+      try {
+        const [modeRows] = await providerConnection.query<SqlModeRow[]>(
+          `SELECT
+             @@GLOBAL.sql_mode AS global_sql_mode,
+             @@SESSION.sql_mode AS session_sql_mode`,
+        );
+        expect(modeRows[0]?.global_sql_mode).not.toMatch(
+          /STRICT_(?:ALL|TRANS)_TABLES/u,
+        );
+        expect(modeRows[0]?.session_sql_mode).not.toMatch(
+          /STRICT_(?:ALL|TRANS)_TABLES/u,
+        );
+      } finally {
+        await providerConnection.end();
+      }
+
+      await pool.query(
+        `CREATE TABLE \`${migrationTable}\` (
+           id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+           hash VARCHAR(1) NOT NULL,
+           created_at BIGINT
+         ) ENGINE=InnoDB DEFAULT CHARACTER SET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+      );
+
+      try {
+        await expect(runMigration()).rejects.toThrow("Migration runner failed.");
+
+        // The first migration DDL auto-commits before Drizzle records its
+        // journal row. A strict runner reaches that insert and rejects the
+        // 64-character hash instead of silently truncating it to VARCHAR(1).
+        expect(await tableExists(pool, verificationTable)).toBe(true);
+        const [journalRows] = await pool.query<CountRow[]>(
+          `SELECT COUNT(*) AS row_count FROM \`${migrationTable}\``,
+        );
+        expect(Number(journalRows[0]?.row_count)).toBe(0);
+        for (const tableName of allMigratedPlatformTables) {
+          expect(await tableExists(pool, tableName)).toBe(false);
+        }
+      } finally {
+        await resetKnownMigrationArtifacts(pool);
+      }
     });
 
     it("fails closed when an incompatible table pre-exists without a migration journal", async () => {

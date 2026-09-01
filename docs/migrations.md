@@ -13,6 +13,18 @@ Bu adımlar canlı Hostinger veritabanına uygulanmaz. Gerçek veritabanı parol
 
 SSH/npm erişimi olmayan Hostinger hedefindeki yalnız boş ve disposable staging kurulumu için ayrı [phpMyAdmin clean-only migration runbook'u](./phpmyadmin-clean-migration.md) kullanılır. Bu paket mevcut şemayı yükseltmez ve normal runner'ın yerine genel bir migration yöntemi değildir.
 
+## Ortak MariaDB session sözleşmesi
+
+Hostinger'ın paylaşımlı global `sql_mode` değeri uygulamanın kontrolünde değildir. Portal Pusula `SET GLOBAL` çalıştırmaz ve global değerin strict olmasına güvenmez. Normal migration runner ile uygulamanın readiness, transaction ve advisory-lock yolları, havuzdan alınan **her bağlantı checkout'ında** herhangi bir iş sorgusundan önce aynı fail-closed session politikasını kurup geri okuyarak doğrular:
+
+- exact `STRICT_ALL_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION` SQL mode;
+- UTC session timezone;
+- InnoDB varsayılan motoru;
+- etkin `CHECK`, foreign-key ve unique kontrolleri;
+- `utf8mb4` bağlantı karakter seti ve beklenen seçili veritabanı.
+
+Kurulum sorgusu, geri okuma, timeout veya herhangi bir karşılaştırma başarısızsa bağlantı havuza bırakılmaz; imha edilir ve migration/transaction/lock/readiness işi başlamadan genel bir hatayla kapanır. Yalnız process başlangıcında veya yalnız ilk fiziksel bağlantıda kontrol yeterli değildir: Hostinger yeniden bağlantı kurabilir ve havuzdaki session durumu önceki kullanımdan etkilenebilir. Bu nedenle sözleşme her checkout'ta yeniden uygulanır.
+
 ## Yerel disposable MariaDB doğrulaması
 
 Ön koşullar: Node/npm sürümleri proje ile uyumlu olmalı, Docker Engine çalışmalı ve Docker Compose v2 erişilebilir olmalıdır.
@@ -40,6 +52,7 @@ Test hedefleri iki ayrı kanıt sınıfıdır:
 - `0001` tablo, kolon, engine/collation, FK, unique constraint ve index yapısının doğrudan `information_schema` ile doğrulanması;
 - `0002` named `CHECK` constraint'lerinin `information_schema` içinde bulunması ve geçersiz state/kimlik girdilerini gerçek MariaDB'nin reddetmesi.
 - `0003` tablo/kolon/primary key/`CHECK` yapısının doğrudan `information_schema` ile doğrulanması; canonical gate key, yalnız `active` state ve UTC timeline invariant'larının gerçek MariaDB'de zorlanması.
+- global strict mode kapalı disposable MariaDB'de runner'ın kendi session sözleşmesini kurması, iki ayrı fiziksel bağlantı ve yeniden checkout sonrasında strict davranışın korunması;
 
 **Platform job/outbox/audit davranışı**
 
@@ -63,6 +76,8 @@ npm run db:migrate
 ```
 
 Runner aynı veritabanındaki eşzamanlı çalışmaları, DB adını açığa çıkarmayan sabit uzunluklu bir MariaDB advisory lock ile sıraya alır. Lock alınamazsa migration başlamadan genel bir hatayla kapanır; lock ve bağlantı cleanup'ı bitmeden başarı yazmaz.
+
+Runner bağlantıyı aldıktan sonra advisory lock, journal okuması veya Drizzle DDL'inden önce ortak session sözleşmesini kurup doğrular. Sağlayıcının global `sql_mode` değeri bu sırada okunabilir fakat değiştirilmez ve güvenlik garantisi olarak kullanılmaz. Session kurulumu ya da doğrulaması başarısızsa bağlantı imha edilir; aynı bağlantıyla lock veya migration denenmez.
 
 Her çalıştırmada journal'ın uygulanmış tüm satırları, migration başlamadan önce `drizzle/meta/_journal.json` sırası ve sürümlü SQL dosyalarının SHA-256 özetleriyle karşılaştırılır. Fazla satır, sıra boşluğu, beklenmeyen timestamp veya hash farkı fail-closed sonuç verir. Migration sonrasında journal'ın eksiksiz olduğu yeniden doğrulanır. Uygulanmış bir SQL dosyasının değiştirilmesi normal bir düzeltme yolu değildir; yeni ileri yönlü migration hazırlanmalıdır.
 
@@ -101,8 +116,9 @@ Canlı migration için bu turda yetki yoktur. Ayrı kullanıcı onayı ve deği�
 3. Migration öncesi yedeğin zamanını ve kimliğini kaydet. Yedeğin güncel Komut 3C şemasını içerdiğini doğrula; ayrı bir disposable hedefe restore et ve toplam yedi tablonun (altı teknik tablo + migration journal), dört journal satırının ve kontrollü veri doğruluk sorgularının geçtiğine ilişkin kanıt üret. Boş readiness spike DB'sinin 0 tablo/journal yok restore `PASS` sonucu bu migration kapısını karşılamaz. Yalnız “backup alındı” görüntüsü yeterli değildir.
 4. Uygulama ve DB için bakım/geri dönüş penceresini, sorumluyu ve durdurma koşullarını belirle.
 5. DB değişkenlerini yalnız onaylı secret/env yönetimiyle sürece enjekte et. Parola, token veya connection string'i CLI argümanına, loga, sohbete ya da dosyaya koyma.
-6. Ayrı onaylı canlı çalıştırmada runner'ı tek kez çalıştır; migration journal, süre ve genel sonucu kaydet. Ham DB hatasını veya bağlantı ayrıntısını kanıta kopyalama.
-7. Migration sonrası şema/journal kontrolünü, uygulama liveness/readiness kontrollerini ve ilgili smoke testlerini çalıştır; hata bütçesini gözle.
+6. Çalıştırılacak runner/uygulama artefaktının güncel ortak session initializer ve fail-closed doğrulamayı içerdiğini paket politikasıyla kanıtla. Bu initializer'ı taşımayan eski artefaktı çalıştırma veya geri dönüş adayı olarak kaydetme.
+7. Ayrı onaylı canlı çalıştırmada runner'ı tek kez çalıştır; migration journal, süre ve genel sonucu kaydet. Ham DB hatasını veya bağlantı ayrıntısını kanıta kopyalama.
+8. Migration sonrası şema/journal kontrolünü, uygulama liveness/readiness kontrollerini ve ilgili smoke testlerini çalıştır; hata bütçesini gözle.
 
 Hostinger plan-geneli manuel yedeği ve boş readiness kaynağının ayrı disposable hedef restore'u tamamlanmıştır; production write/restore başlatılmamıştır. Bu dar `PASS`, güncel Komut 3C migration şeması/journal/veri restore kanıtı değildir. Production öncesi [güncel şemayı kapsayan backup + ayrı hedef restore kanıtı](./backup-restore.md) gerekliliği sürer. Bu runbook kapsamında canlı migration, deploy veya environment değişikliği çalıştırılmamıştır.
 
@@ -112,6 +128,7 @@ Hostinger plan-geneli manuel yedeği ve boş readiness kaynağının ayrı dispo
 - MariaDB/MySQL DDL işlemleri implicit commit yapabildiğinden tüm şema değişiminin tek transaction ile geri alınacağı varsayılmaz.
 - Hata veri yazılmadan yakalanırsa, uygulanmış SQL değiştirilmeden yeni bir düzeltme migration'ı hazırlanır ve aynı kapılardan geçirilir.
 - Uygulama rollback'i yalnız önceki uygulama sürümü yeni şemayla uyumluysa güvenlidir; bu uyumluluk önceden test edilmelidir.
+- Ortak MariaDB session initializer ve doğrulamasını taşımayan eski runner veya uygulama artefaktına rollback yasaktır. Şemayla uyumlu görünmesi bu yasağı kaldırmaz; önceki sürüm ancak aynı fail-closed session sözleşmesiyle yeniden üretilip tüm kapılardan geçirilirse aday olabilir.
 - Veri kaybı, uyumsuz şema veya geri döndürülemez DDL durumunda tek güvenilir dönüş, önceden restore edilerek kanıtlanmış yedeğin onaylı bakım penceresinde geri yüklenmesidir. Olası veri kaybı aralığı ayrıca kullanıcıya bildirilir.
 - `DROP`, kolon daraltma/yeniden adlandırma veya veri dönüşümü bu doğrulama diliminin dışında ayrı tasarım, yedek ve restore provası gerektirir.
 

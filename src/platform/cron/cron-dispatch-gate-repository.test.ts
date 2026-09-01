@@ -7,6 +7,11 @@ import {
   acquireCronDispatchPermit,
   CronDispatchGateError,
 } from "./cron-dispatch-gate-repository";
+import {
+  MYSQL_CANONICAL_SQL_MODE,
+  MYSQL_SESSION_VERIFY_SQL,
+  registerMySqlPoolDatabase,
+} from "@/platform/database/mysql-session-contract";
 
 const gateKey = "platform-cron-dispatch-v1";
 const now = new Date("2026-08-30T10:00:00.000Z");
@@ -50,6 +55,27 @@ function fakePool(selectResults: GateFixture[][]): {
   const pendingSelects = [...selectResults];
   const query = vi.fn(async (statement: string | { sql: string }) => {
     const sql = typeof statement === "string" ? statement : statement.sql;
+    if (sql === MYSQL_SESSION_VERIFY_SQL) {
+      return [
+        [
+          {
+            autocommit: 1,
+            character_set_client: "utf8mb4",
+            character_set_connection: "utf8mb4",
+            character_set_results: "utf8mb4",
+            check_constraint_checks: 1,
+            collation_connection: "utf8mb4_unicode_ci",
+            current_database: "unit_test_db",
+            default_storage_engine: "InnoDB",
+            foreign_key_checks: 1,
+            sql_mode: MYSQL_CANONICAL_SQL_MODE,
+            time_zone: "+00:00",
+            unique_checks: 1,
+          },
+        ],
+        [],
+      ];
+    }
     if (sql.includes("FROM cron_dispatch_gate")) {
       return [pendingSelects.shift() ?? [], []];
     }
@@ -71,6 +97,7 @@ function fakePool(selectResults: GateFixture[][]): {
   const pool = {
     getConnection: vi.fn(async () => connection),
   } as unknown as Pool;
+  registerMySqlPoolDatabase(pool, "unit_test_db");
 
   return { connection, pool, query };
 }
@@ -212,6 +239,7 @@ describe("durable cron dispatch gate repository", () => {
         throw new Error("sensitive database detail");
       }),
     } as unknown as Pool;
+    registerMySqlPoolDatabase(pool, "unit_test_db");
 
     await expect(
       acquireCronDispatchPermit(pool, {

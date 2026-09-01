@@ -10,6 +10,7 @@ import {
   acquireCronDispatchPermit,
   CronDispatchGateError,
 } from "../../src/platform/cron/cron-dispatch-gate-repository";
+import { registerMySqlPoolDatabase } from "../../src/platform/database/mysql-session-contract";
 
 const disposableMariaDbEnabled =
   process.env.PORTAL_PUSULA_DISPOSABLE_MARIADB === "1";
@@ -90,7 +91,7 @@ function runMigration(): Promise<void> {
 }
 
 function createPool(): Pool {
-  return mysql.createPool({
+  const pool = mysql.createPool({
     host: requiredTestEnvironment("DB_HOST"),
     port: Number(requiredTestEnvironment("DB_PORT")),
     database: requiredTestEnvironment("DB_NAME"),
@@ -105,6 +106,8 @@ function createPool(): Pool {
     connectTimeout: 5_000,
     multipleStatements: false,
   });
+  registerMySqlPoolDatabase(pool, requiredTestEnvironment("DB_NAME"));
+  return pool;
 }
 
 async function expectDatabaseWriteRejected(

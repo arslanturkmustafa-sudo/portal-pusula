@@ -30,10 +30,12 @@ const includedDirectories = ["drizzle", "public", "scripts", "src"];
 const allowedProductionScripts = new Set([
   "scripts/migrate.mjs",
   "scripts/migration-integrity.mjs",
+  "scripts/mysql-session-policy.mjs",
 ]);
 const excludedLocalScripts = new Set([
   "scripts/build-phpmyadmin-migration-bundle.mjs",
   "scripts/generate-pwa-icons.mjs",
+  "scripts/mysql-session-policy.d.mts",
   "scripts/package-hostinger.mjs",
   "scripts/package-source-checkpoint.mjs",
   "scripts/probe-readiness-secure.ps1",

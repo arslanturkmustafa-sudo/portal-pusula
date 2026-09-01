@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 
 import type { Pool, PoolConnection, RowDataPacket } from "mysql2/promise";
 
+import { configureAndVerifyMySqlSession } from "@/platform/database/mysql-session-contract";
+
 export const CRON_ADVISORY_LOCK_TIMEOUT_MS = 1_000;
 
 const CRON_ADVISORY_LOCK_PREFIX = "pp:cron:";
@@ -61,7 +63,11 @@ export async function withCronAdvisoryLock(
   }
 
   if (signal.aborted) {
-    connection.release();
+    try {
+      connection.destroy();
+    } catch {
+      // An unverified checkout is never returned to the pool.
+    }
     throw new CronAdvisoryLockError();
   }
 
@@ -71,6 +77,8 @@ export async function withCronAdvisoryLock(
   let operationFailed = false;
 
   try {
+    await configureAndVerifyMySqlSession(connection, databaseName);
+
     const [rows] = await connection.query<LockRow[]>({
       sql: GET_LOCK_SQL,
       timeout: CRON_ADVISORY_LOCK_TIMEOUT_MS,

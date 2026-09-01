@@ -17,8 +17,15 @@ import {
   MIGRATION_LOCK_TIMEOUT_SECONDS,
   readExpectedMigrations,
 } from "./migration-integrity.mjs";
+import {
+  MYSQL_SESSION_CHARACTER_SET,
+  MYSQL_SESSION_COLLATION,
+  MYSQL_SESSION_SQL_MODE,
+  MYSQL_SESSION_STORAGE_ENGINE,
+  MYSQL_SESSION_TIME_ZONE,
+} from "./mysql-session-policy.mjs";
 
-const FORMAT_VERSION = 1;
+const FORMAT_VERSION = 2;
 const MINIMUM_MARIADB_MAJOR = 10;
 const MINIMUM_MARIADB_MINOR = 6;
 const JOURNAL_TABLE = DRIZZLE_MIGRATIONS_TABLE;
@@ -60,6 +67,22 @@ function quotedIdentifier(identifier) {
 
 function sqlStringList(values) {
   return values.map(sqlString).join(", ");
+}
+
+function mysqlSessionPolicyPredicate() {
+  return [
+    `@@SESSION.character_set_client = ${sqlString(MYSQL_SESSION_CHARACTER_SET)}`,
+    `@@SESSION.character_set_connection = ${sqlString(MYSQL_SESSION_CHARACTER_SET)}`,
+    `@@SESSION.character_set_results = ${sqlString(MYSQL_SESSION_CHARACTER_SET)}`,
+    `@@SESSION.collation_connection = ${sqlString(MYSQL_SESSION_COLLATION)}`,
+    `@@SESSION.time_zone = ${sqlString(MYSQL_SESSION_TIME_ZONE)}`,
+    "@@SESSION.autocommit = 1",
+    "@@SESSION.check_constraint_checks = 1",
+    "@@SESSION.foreign_key_checks = 1",
+    "@@SESSION.unique_checks = 1",
+    `@@SESSION.default_storage_engine = ${sqlString(MYSQL_SESSION_STORAGE_ENGINE)}`,
+    `BINARY @@SESSION.sql_mode = BINARY ${sqlString(MYSQL_SESSION_SQL_MODE)}`,
+  ].join(" AND ");
 }
 
 function validateTargetDatabaseSha256(targetDatabaseSha256) {
@@ -401,15 +424,16 @@ function statementVerificationPredicate(analysis) {
 
 function guardedStatementLines({ statement, expectedStep, predicate }) {
   const candidateHash = sha256(statement);
+  const sessionPolicyGuard = `@pp_session_policy_applied = 1 AND (${mysqlSessionPolicyPredicate()})`;
   return [
     `SET @pp_candidate_sql = ${sqlHex(statement)};`,
-    `SET @pp_step = IF(@pp_step = ${expectedStep} AND IS_USED_LOCK(@pp_lock_name) = CONNECTION_ID() AND SHA2(@pp_candidate_sql, 256) = ${sqlString(candidateHash)}, ${expectedStep}, -1);`,
+    `SET @pp_step = IF(@pp_step = ${expectedStep} AND IS_USED_LOCK(@pp_lock_name) = CONNECTION_ID() AND (${sessionPolicyGuard}) AND SHA2(@pp_candidate_sql, 256) = ${sqlString(candidateHash)}, ${expectedStep}, -1);`,
     "SET @pp_sql = NULL;",
-    `SET @pp_sql = IF(@pp_step = ${expectedStep} AND IS_USED_LOCK(@pp_lock_name) = CONNECTION_ID() AND SHA2(@pp_candidate_sql, 256) = ${sqlString(candidateHash)}, @pp_candidate_sql, ${sqlHex(SAFE_NOOP_QUERY)});`,
+    `SET @pp_sql = IF(@pp_step = ${expectedStep} AND IS_USED_LOCK(@pp_lock_name) = CONNECTION_ID() AND (${sessionPolicyGuard}) AND SHA2(@pp_candidate_sql, 256) = ${sqlString(candidateHash)}, @pp_candidate_sql, ${sqlHex(SAFE_NOOP_QUERY)});`,
     "PREPARE pp_bundle_statement FROM @pp_sql;",
     "EXECUTE pp_bundle_statement;",
     "DEALLOCATE PREPARE pp_bundle_statement;",
-    `SET @pp_step = IF(@pp_step = ${expectedStep} AND IS_USED_LOCK(@pp_lock_name) = CONNECTION_ID() AND (${predicate}), ${expectedStep + 1}, -1);`,
+    `SET @pp_step = IF(@pp_step = ${expectedStep} AND IS_USED_LOCK(@pp_lock_name) = CONNECTION_ID() AND (${sessionPolicyGuard}) AND (${predicate}), ${expectedStep + 1}, -1);`,
   ];
 }
 
@@ -560,16 +584,10 @@ function postflightPredicate(
   const predicates = [
     `SHA2(DATABASE(), 256) = ${sqlString(targetDatabaseSha256)}`,
     `SHA2(VERSION(), 256) = ${sqlString(serverVersionSha256)}`,
-    "@@SESSION.autocommit = 1",
-    "@@SESSION.check_constraint_checks = 1",
-    "@@SESSION.foreign_key_checks = 1",
-    "@@SESSION.unique_checks = 1",
-    "(FIND_IN_SET('STRICT_TRANS_TABLES', @@SESSION.sql_mode) > 0 OR FIND_IN_SET('STRICT_ALL_TABLES', @@SESSION.sql_mode) > 0)",
+    `(${mysqlSessionPolicyPredicate()})`,
     "@@GLOBAL.check_constraint_checks = 1",
     "@@GLOBAL.foreign_key_checks = 1",
     "@@GLOBAL.unique_checks = 1",
-    "(FIND_IN_SET('STRICT_TRANS_TABLES', @@GLOBAL.sql_mode) > 0 OR FIND_IN_SET('STRICT_ALL_TABLES', @@GLOBAL.sql_mode) > 0)",
-    "@@SESSION.default_storage_engine = 'InnoDB'",
     "@@GLOBAL.default_storage_engine = 'InnoDB'",
     `(SELECT COUNT(*) FROM information_schema.TABLES
         WHERE TABLE_SCHEMA = DATABASE()) = ${allTableNames.length}`,
@@ -677,22 +695,34 @@ function buildSql({
     "SET @pp_lock_was_already_owned = NULL;",
     "SET @pp_lock_acquired = NULL;",
     "SET @pp_release_result = NULL;",
+    "SET @pp_original_sql_mode = NULL;",
+    "SET @pp_session_policy_applied = 0;",
+    "SET @pp_session_restore_applied = 0;",
+    "SET @pp_session_mode_restored = NULL;",
     "SET @pp_candidate_sql = NULL;",
     "SET @pp_sql = NULL;",
     "SET @pp_step = NULL;",
-    "SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci;",
-    "SET SESSION time_zone = '+00:00';",
-    "SET SESSION autocommit = 1;",
-    "SET SESSION check_constraint_checks = 1;",
-    "SET SESSION foreign_key_checks = 1;",
-    "SET SESSION unique_checks = 1;",
+    "SET @pp_original_sql_mode = @@SESSION.sql_mode;",
+    `SET @@SESSION.sql_mode = ${sqlString(MYSQL_SESSION_SQL_MODE)},
+      @@SESSION.character_set_client = ${sqlString(MYSQL_SESSION_CHARACTER_SET)},
+      @@SESSION.character_set_connection = ${sqlString(MYSQL_SESSION_CHARACTER_SET)},
+      @@SESSION.character_set_results = ${sqlString(MYSQL_SESSION_CHARACTER_SET)},
+      @@SESSION.collation_connection = ${sqlString(MYSQL_SESSION_COLLATION)},
+      @@SESSION.time_zone = ${sqlString(MYSQL_SESSION_TIME_ZONE)},
+      @@SESSION.autocommit = 1,
+      @@SESSION.check_constraint_checks = 1,
+      @@SESSION.foreign_key_checks = 1,
+      @@SESSION.unique_checks = 1,
+      @@SESSION.default_storage_engine = ${sqlString(MYSQL_SESSION_STORAGE_ENGINE)},
+      @pp_session_policy_applied = 1;`,
     `SET @pp_bundle_id = ${sqlString(bundleId)};`,
     `SET @pp_target_database_sha256 = ${sqlString(targetDatabaseSha256)};`,
     `SET @pp_server_version_sha256 = ${sqlString(serverVersionSha256)};`,
     `SET @pp_lock_name = CONCAT(${sqlString(MIGRATION_LOCK_PREFIX)}, LEFT(SHA2(DATABASE(), 256), ${MIGRATION_LOCK_DIGEST_HEX_LENGTH}));`,
     "SET @pp_lock_was_already_owned = COALESCE(IS_USED_LOCK(@pp_lock_name) = CONNECTION_ID(), 0);",
-    `SET @pp_lock_acquired = IF(@pp_lock_was_already_owned, 0, GET_LOCK(@pp_lock_name, ${MIGRATION_LOCK_TIMEOUT_SECONDS}));`,
-    "SET @pp_step = IF(@pp_lock_acquired = 1 AND NOT @pp_lock_was_already_owned, 0, -1);",
+    `SET @pp_step = IF(@pp_original_sql_mode IS NOT NULL AND @pp_session_policy_applied = 1 AND (${mysqlSessionPolicyPredicate()}), 0, -1);`,
+    `SET @pp_lock_acquired = IF(@pp_step = 0 AND NOT @pp_lock_was_already_owned, GET_LOCK(@pp_lock_name, ${MIGRATION_LOCK_TIMEOUT_SECONDS}), 0);`,
+    "SET @pp_step = IF(@pp_step = 0 AND @pp_lock_acquired = 1 AND NOT @pp_lock_was_already_owned, 0, -1);",
     `SET @pp_step = IF(
       @pp_step = 0
       AND DATABASE() IS NOT NULL
@@ -706,20 +736,10 @@ function buildSql({
           AND CAST(SUBSTRING_INDEX(SUBSTRING_INDEX(VERSION(), '.', 2), '.', -1) AS UNSIGNED) >= ${MINIMUM_MARIADB_MINOR}
         )
       )
-      AND @@SESSION.character_set_connection = 'utf8mb4'
-      AND @@SESSION.collation_connection = 'utf8mb4_unicode_ci'
-      AND @@SESSION.autocommit = 1
-      AND @@SESSION.check_constraint_checks = 1
-      AND @@SESSION.foreign_key_checks = 1
-      AND @@SESSION.unique_checks = 1
-      AND (FIND_IN_SET('STRICT_TRANS_TABLES', @@SESSION.sql_mode) > 0
-        OR FIND_IN_SET('STRICT_ALL_TABLES', @@SESSION.sql_mode) > 0)
+      AND (${mysqlSessionPolicyPredicate()})
       AND @@GLOBAL.check_constraint_checks = 1
       AND @@GLOBAL.foreign_key_checks = 1
       AND @@GLOBAL.unique_checks = 1
-      AND (FIND_IN_SET('STRICT_TRANS_TABLES', @@GLOBAL.sql_mode) > 0
-        OR FIND_IN_SET('STRICT_ALL_TABLES', @@GLOBAL.sql_mode) > 0)
-      AND @@SESSION.default_storage_engine = 'InnoDB'
       AND @@GLOBAL.default_storage_engine = 'InnoDB'
       AND (SELECT COUNT(*) FROM information_schema.ENGINES
              WHERE ENGINE = 'InnoDB' AND SUPPORT IN ('YES', 'DEFAULT')) = 1
@@ -784,10 +804,14 @@ function buildSql({
       targetDatabaseSha256,
       serverVersionSha256,
     )}), ${step + 1}, -1);`,
+    "SET @pp_session_restore_applied = 0;",
+    "SET @@SESSION.sql_mode = COALESCE(@pp_original_sql_mode, @@SESSION.sql_mode), @pp_session_restore_applied = 1;",
+    "SET @pp_session_mode_restored = COALESCE(@pp_session_restore_applied = 1 AND BINARY @@SESSION.sql_mode = BINARY @pp_original_sql_mode, 0);",
+    `SET @pp_step = IF(@pp_step = ${step + 1} AND @pp_session_mode_restored = 1 AND IS_USED_LOCK(@pp_lock_name) = CONNECTION_ID(), ${step + 2}, -1);`,
     `SET @pp_release_result = IF(@pp_lock_acquired = 1 AND NOT @pp_lock_was_already_owned, RELEASE_LOCK(@pp_lock_name), 0);`,
-    `SET @pp_step = IF(@pp_step = ${step + 1} AND @pp_release_result = 1 AND COALESCE(IS_USED_LOCK(@pp_lock_name) <> CONNECTION_ID(), 1), ${step + 2}, -1);`,
+    `SET @pp_step = IF(@pp_step = ${step + 2} AND @pp_release_result = 1 AND COALESCE(IS_USED_LOCK(@pp_lock_name) <> CONNECTION_ID(), 1), ${step + 3}, -1);`,
     "SET @pp_sql = NULL;",
-    `SET @pp_sql = IF(@pp_step = ${step + 2} AND @pp_release_result = 1 AND COALESCE(IS_USED_LOCK(@pp_lock_name) <> CONNECTION_ID(), 1), ${sqlHex("SELECT 'PORTAL_PUSULA_MIGRATION_BUNDLE_OK' AS portal_pusula_migration_bundle_result")}, ${sqlHex(GUARD_FAILURE_QUERY)});`,
+    `SET @pp_sql = IF(@pp_step = ${step + 3} AND @pp_session_mode_restored = 1 AND @pp_release_result = 1 AND COALESCE(IS_USED_LOCK(@pp_lock_name) <> CONNECTION_ID(), 1), ${sqlHex("SELECT 'PORTAL_PUSULA_MIGRATION_BUNDLE_OK' AS portal_pusula_migration_bundle_result")}, ${sqlHex(GUARD_FAILURE_QUERY)});`,
     "PREPARE pp_bundle_statement FROM @pp_sql;",
     "EXECUTE pp_bundle_statement;",
     "DEALLOCATE PREPARE pp_bundle_statement;",
@@ -800,6 +824,10 @@ function buildSql({
     "SET @pp_bundle_id = NULL;",
     "SET @pp_lock_acquired = NULL;",
     "SET @pp_release_result = NULL;",
+    "SET @pp_original_sql_mode = NULL;",
+    "SET @pp_session_policy_applied = NULL;",
+    "SET @pp_session_restore_applied = NULL;",
+    "SET @pp_session_mode_restored = NULL;",
     "SET @pp_step = NULL;",
     "",
   );
@@ -864,6 +892,15 @@ export async function buildPhpMyAdminMigrationBundle({
   const bundleIdentity = {
     formatVersion: FORMAT_VERSION,
     minimumMariaDb: `${MINIMUM_MARIADB_MAJOR}.${MINIMUM_MARIADB_MINOR}`,
+    sessionPolicy: {
+      characterSet: MYSQL_SESSION_CHARACTER_SET,
+      collation: MYSQL_SESSION_COLLATION,
+      modifiesGlobalSqlMode: false,
+      restoresOriginalSqlMode: true,
+      sqlMode: MYSQL_SESSION_SQL_MODE,
+      storageEngine: MYSQL_SESSION_STORAGE_ENGINE,
+      timeZone: MYSQL_SESSION_TIME_ZONE,
+    },
     migrations: migrations.map((migration) => ({
       createdAt: migration.createdAt,
       hash: migration.hash,

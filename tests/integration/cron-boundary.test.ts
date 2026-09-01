@@ -1,6 +1,8 @@
 import type { Pool } from "mysql2/promise";
 import { describe, expect, it, vi } from "vitest";
 
+vi.mock("server-only", () => ({}));
+
 import { parseCronEnvironment } from "@/platform/config/cron-env.schema";
 import type { DatabaseProbeEnvironment } from "@/platform/config/readiness-env.schema";
 import type { CronAdvisoryLockRunner } from "@/platform/cron/cron-advisory-lock";

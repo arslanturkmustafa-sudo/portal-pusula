@@ -63,6 +63,8 @@ Hostinger environment alanında gereken adlar:
 
 Gerçek değerleri Codex okumaz, yazmaz veya sohbet/belgeye istemez. `DB_NAME`, `DB_USER`, `DB_PASSWORD` ve tam 16 karakterlik, yalnız ASCII `A-Z`/`a-z`/`0-9` içeren rastgele readiness token eksik veya biçim dışıysa sınır fail-closed çalışır. 15/17 karakter, boşluk, Türkçe/özel karakter ve semboller kabul edilmez.
 
+Hostinger'ın global `sql_mode` değeri paylaşımlı sağlayıcı ayarıdır. Portal Pusula bu değeri değiştirmez, `SET GLOBAL` yetkisi istemez ve global strict moda güvenmez. Uygulama havuzdan aldığı her bağlantıda, DB işi başlamadan önce exact canonical strict session modunu, UTC/InnoDB/integrity-check/`utf8mb4` sözleşmesini kurup geri okuyarak doğrular. Kurulum veya doğrulama başarısızsa bağlantı havuza dönmez; imha edilir ve ilgili endpoint genel fail-closed yanıt verir.
+
 Komut 3C kaynaklarında ayrıca `CRON_ENDPOINT_ENABLED` ve `CRON_BEARER_TOKEN` adları tanımlıdır; bunlar yalnız yerel, varsayılan kapalı aday içindir. Bu turda hPanel'e eklenmez. Aday ancak `CRON_ENDPOINT_ENABLED` exact `true`, cron token exact 43 base64url karakter ve readiness token'dan farklı olduğunda açılabilir. Exact secret doğrulaması, DB advisory lock, batch 10 ve 4 saniye deadline korunur. Hostinger cron'un exact `POST`, custom Authorization header ve güvenli secret saklama yeteneği; güvenli çağrı sıklığı; token rotasyon/iptal prosedürü canlı olarak kanıtlanmadan bu route etkinleştirilmez.
 
 Komut 3C ile yalnız etkin adayda `CRON_MIN_INTERVAL_SECONDS` da zorunludur; leading zero/işaret/ondalık/exponent/whitespace/Unicode kabul etmeyen canonical `60..86400` saniye aralığı dışı fail-closed'dur. DB'deki `cron_dispatch_gate` process/restart'lar arasında son permit zamanını korur. Minimum aralık içinde kalan yetkili çağrı dispatch ve advisory lock çalıştırmadan, izin verilen çağrıyla aynı generic 202 yanıtını alır. Bu yerel sözleşme Hostinger cron yöntem/header/timezone/retry/overlap davranışını kanıtlamaz; üç cron değişkeni hPanel'e bu turda eklenmez.
@@ -73,8 +75,8 @@ Komut 3C ile yalnız etkin adayda `CRON_MIN_INTERVAL_SECONDS` da zorunludur; lea
 - Auth: exact `Authorization: Bearer <token>`; SHA-256 digest + `timingSafeEqual`.
 - Token biçimi: tam 16 ASCII alfanümerik karakter; rastgele üretilmiş olmalıdır.
 - Yetkisiz veya token yapılandırılmamış: generic 404, DB çağrısı yok.
-- Yetkili fakat DB yapılandırması eksik/DB ulaşılamaz/timeout: generic 503.
-- Yetkili ve sabit `SELECT 1 AS readiness_ok` başarılı: generic 200.
+- Yetkili fakat DB yapılandırması eksik, session sözleşmesi kurulamaz/doğrulanamaz, DB ulaşılamaz veya timeout oluşur: generic 503.
+- Yetkili ve aynı bağlantıda canonical session doğrulamasından sonra sabit `SELECT 1 AS readiness_ok` başarılı: generic 200.
 - Yanıtlar: `private, no-store`, JSON ve correlation ID.
 - Havuz: `connectionLimit: 2`, `maxIdle: 2`, `waitForConnections: false`, 2 saniye connect/query ve 2,5 saniye toplam deadline.
 - `multipleStatements` kapalıdır; SQL sabittir ve kullanıcı girdisi almaz.
@@ -94,6 +96,7 @@ Canlı v3'te hCDN, public `/sw.js` dosyasına Next `Cache-Control` ve `Service-W
 
 - Üç ZIP dağıtımından test dosyaları çıkarılmış v3 canlıda sağlam `Akım` sürümdür.
 - Güncel yerel paket artık `0001` platform tablolarını, bunlara forward-only CHECK constraint'leri ekleyen `0002` audit fix'ini, teknik `0003` cron gate tablosunu ve varsayılan kapalı cron route'unu taşır; bu nedenle önceki spike'ın basit redeploy'u olarak değerlendirilmez. Ayrı backup/restore kanıtı, migration onayı ve canlı değişiklik penceresi olmadan yüklenmez.
+- Ortak MariaDB session initializer ve fail-closed doğrulamasını içermeyen v3 ya da başka bir eski ZIP, güncel DB kullanan ortama rollback adayı değildir. Önceki kod ancak yeni şemayla uyumluluğu kanıtlanıp aynı session sözleşmesiyle yeniden paketlenerek tüm kalite ve canlı kabul kapılarından geçerse aday olabilir.
 - ZIP redeploy kanıtlandı, fakat secret-safe gerçek rollback/önceki sürüme dönüş yöntemi bulunmadığı için durum `BLOCKED`dır ve bu alt adımda PASS sayılmaz.
 - `/api/internal/cron/dispatch` kaynakta vardır fakat varsayılan kapalıdır; production job ve outbox registry'leri boştur. hPanel cron kaydı, cron secret'ı, gerçek handler veya dış adapter bu alt adımda yoktur.
 
@@ -116,17 +119,19 @@ Komut 3C kodlama turunda canlı Hostinger DB/migration, ZIP deploy, environment,
 - [ ] Ana sayfa 200; public liveness minimal 200.
 - [ ] Readiness header olmadan ve yanlış header ile generic 404.
 - [ ] Doğru header + eksik/yanlış DB ayarında generic 503.
-- [ ] Doğru header + Hostinger MySQL ile `SELECT 1` sonucu generic 200.
+- [ ] Doğru header + Hostinger MySQL ile canonical session doğrulaması ve aynı bağlantıda `SELECT 1` sonucu generic 200.
 - [ ] Yanıt/log/client bundle içinde parola, token veya bağlantı ayrıntısı yok.
 - [ ] `/sw.js` Node yanıtında no-store, JS MIME ve `Service-Worker-Allowed: /` var.
 - [ ] PWA Cache Storage yalnız güvenli sürümlü allowlist'i içeriyor.
 - [ ] Güncel ZIP Node 24.x/npm 12 engines sözleşmesiyle build/start oluyor.
+- [ ] Güncel ZIP ortak MariaDB session initializer'ı içeriyor; global `sql_mode` değiştirilmeden her checkout'ta strict/UTC/InnoDB/integrity-check/`utf8mb4` doğrulanıyor.
 - [x] Backup boş Portal Pusula readiness DB'sini kapsıyor ve ayrı disposable hedefte 0 tablo/journal yok sonucu doğrulandı.
 - [ ] Backup güncel Komut 3C şemasını kapsıyor; toplam yedi tablo (altı teknik + journal), dört journal satırı ve kontrollü veri ayrı hedefte doğrulandı.
 - [ ] `0001`/`0002`/`0003` migration journal/hash/şema kontrolleri onaylı pencerede geçiyor.
 - [ ] Hostinger cron exact `POST` ve custom Authorization header'ı secret sızdırmadan destekliyor; timezone/retry/overlap ölçüldü.
 - [ ] Yetkili permit ile dayanıklı suppression aynı generic 202'yi veriyor; gerçek gate/DB arızası generic 503 kalıyor.
 - [ ] Secret-safe önceki uygulama sürümüne dönüş yolu tatbik edildi.
+- [ ] Rollback adayı initializer içermeyen eski artefakt değil; aynı session sözleşmesiyle yeniden üretilmiş ve şema uyumluluğu kanıtlanmış sürüm.
 
 Bu kontrol listesi güncel Komut 3C paketiyle canlı kanıtlanmadan maddeler Komut 3C PASS'i yapılamaz. Önceki spike'ın MySQL/hCDN PASS sonuçları tarihsel kanıt olarak korunur fakat güncel migration/ZIP/cron'a aktarılmaz. **DİLİM 0 GO: VERİLMEDİ.**
 
