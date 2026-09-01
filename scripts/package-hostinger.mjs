@@ -33,6 +33,7 @@ const allowedProductionScripts = new Set([
   "scripts/mysql-session-policy.mjs",
 ]);
 const excludedLocalScripts = new Set([
+  "scripts/build-phpmyadmin-incremental-migration.mjs",
   "scripts/build-phpmyadmin-migration-bundle.mjs",
   "scripts/generate-admin-auth.mjs",
   "scripts/generate-pwa-icons.mjs",

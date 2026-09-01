@@ -33,7 +33,7 @@ npm run package:hostinger
 
 Son komut `dist/portal-pusula-hostinger.zip` üretir. ZIP standardı Zip32/STORE, UTF-8 yollar, sabit tarih, sıralı girişler ve CRC32 kullanır; aynı kaynak iki çalıştırmada aynı SHA-256 değerini verir.
 
-Uygulama ZIP'i DB şeması uygulamaz. npm/SSH erişimi olmayan, yeni ve tamamen boş disposable staging DB'si için hedefe bağlı SQL artefaktı gerekiyorsa [phpMyAdmin clean-only migration runbook'u](./phpmyadmin-clean-migration.md) izlenir; bu artefakt Hostinger ZIP'inin içine eklenmez.
+Uygulama ZIP'i DB şeması uygulamaz. npm/SSH erişimi olmayan, yeni ve tamamen boş disposable staging DB'si için [phpMyAdmin clean-only migration runbook'u](./phpmyadmin-clean-migration.md); journal'ı bulunan mevcut DB'de yalnız sıradaki migration için [phpMyAdmin incremental migration runbook'u](./phpmyadmin-incremental-migration.md) izlenir. SQL artefaktları Hostinger ZIP'inin içine eklenmez.
 
 Arşiv kökünde doğrudan `package.json`, `package-lock.json`, `.nvmrc`, `next.config.mjs`, `next-env.d.ts`, `tsconfig.json` ve `postcss.config.mjs` bulunur. `drizzle/` içindeki immutable `0000`/`0001` ile ileri yönlü `0002`/`0003`, `public/`, production için gereken migration scriptleri ve testleri çıkarılmış `src/` sabit allowlist ile dahil edilir. `src/**/*.test.ts(x)`, `tests/`, disposable DB/E2E/paketleme scriptleri, herhangi bir alt dizindeki `.env*`, özel anahtar/credential dosyaları, `.next/`, `node_modules/`, `dist/`, `outputs/`, `work/`, log/coverage/Playwright/test çıktıları ve Git verisi hariçtir. Nested yasak yol bulunduğunda paket içerik üretmeden fail-closed olur. Production ZIP migration dosyalarını taşısa da bu yalnız dağıtılabilir artefakt içeriğidir; canlı migration veya deploy kanıtı değildir.
 
@@ -114,7 +114,7 @@ Komut 3C kodlama turunda canlı Hostinger DB/migration, ZIP deploy, environment,
 - Job/outbox claim, lease/fencing, retry/dead-letter, bounded catch-up, audit append ve transactional outbox davranışları yerel gerçek DB testlerinden geçmiştir. Bu, Hostinger DB migration PASS'i değildir.
 - Cron adayı yalnız exact `POST` + exact Bearer kabul eder; kapalı/yetkisiz durumda generic 404, DB/gate/dispatch hatasında generic 503, permit veya dayanıklı suppression durumunda aynı generic 202 verir. Batch 10, deadline 4 saniye, DB frekans kapısı ve DB adını açığa çıkarmayan nonblocking advisory lock kullanır. Yanıt semantiği [ADR-0002](./adr/0002-internal-endpoint-response-policy.md) ile bağlıdır.
 - Production registry ve adapter listeleri bilinçli olarak boştur; canlı iş veya dış etki yoktur.
-- [Ayrı hedefte readiness restore'u](./backup-restore.md) ve yerel şifreli recovery kopyası dar kapsamda `PASS`tir. Komut 3C'nin toplam yedi tablolu (altı teknik + journal), dört journal satırlı güncel şema/veri restore'u; Hostinger migration; cron yöntem/header/secret ve gerçek scheduler davranışı; güvenli çağrı sıklığı; token rotasyonu; gerçek rollback ve manuel dead-letter/requeue prosedürü açık blocker olarak kalır. Plan-geneli manuel backup kapsamı `PANEL PASS`tir.
+- [Ayrı hedefte readiness restore'u](./backup-restore.md) ve yerel şifreli recovery kopyası dar kapsamda `PASS`tir. Güncel toplam on iki tablolu (on bir uygulama + journal), yedi journal satırlı şema/veri restore'u; Hostinger migration; cron yöntem/header/secret ve gerçek scheduler davranışı; güvenli çağrı sıklığı; token rotasyonu; gerçek rollback ve manuel dead-letter/requeue prosedürü açık blocker olarak kalır. Plan-geneli manuel backup kapsamı `PANEL PASS`tir.
 
 ## Canlı kabul kontrolü
 
@@ -129,7 +129,7 @@ Komut 3C kodlama turunda canlı Hostinger DB/migration, ZIP deploy, environment,
 - [ ] Güncel ZIP Node 24.x/npm 12 engines sözleşmesiyle build/start oluyor.
 - [ ] Güncel ZIP ortak MariaDB session initializer'ı içeriyor; global `sql_mode` değiştirilmeden her checkout'ta strict/UTC/InnoDB/integrity-check/`utf8mb4` doğrulanıyor.
 - [x] Backup boş Portal Pusula readiness DB'sini kapsıyor ve ayrı disposable hedefte 0 tablo/journal yok sonucu doğrulandı.
-- [ ] Backup güncel Komut 3C şemasını kapsıyor; toplam yedi tablo (altı teknik + journal), dört journal satırı ve kontrollü veri ayrı hedefte doğrulandı.
+- [ ] Backup güncel şemayı kapsıyor; toplam on iki tablo (on bir uygulama + journal), yedi journal satırı ve kontrollü veri ayrı hedefte doğrulandı.
 - [ ] `0001`/`0002`/`0003` migration journal/hash/şema kontrolleri onaylı pencerede geçiyor.
 - [ ] Hostinger cron exact `POST` ve custom Authorization header'ı secret sızdırmadan destekliyor; timezone/retry/overlap ölçüldü.
 - [ ] Yetkili permit ile dayanıklı suppression aynı generic 202'yi veriyor; gerçek gate/DB arızası generic 503 kalıyor.

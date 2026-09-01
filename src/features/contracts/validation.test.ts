@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   createContractInputSchema,
   monthlyVisitPlanInputSchema,
+  updateContractInputSchema,
   updateVisitResolutionInputSchema,
 } from "@/features/contracts/validation";
 
@@ -46,6 +47,35 @@ describe("contract validation", () => {
     expect(
       createContractInputSchema.safeParse({ ...base, startsOn: "2026-02-30" })
         .success,
+    ).toBe(false);
+  });
+
+  it("rejects an edited contract whose end precedes its start", () => {
+    expect(
+      updateContractInputSchema.safeParse({
+        endsOn: "2026-01-31",
+        internalNote: null,
+        monthlyFeeAmount: "60000",
+        paymentDay: 15,
+        startsOn: "2026-02-01",
+        status: "active",
+        vatMode: "exempt",
+        vatRate: "0",
+      }).success,
+    ).toBe(false);
+  });
+
+  it("requires the complete current terms document for an edit", () => {
+    expect(
+      updateContractInputSchema.safeParse({
+        endsOn: "2026-12-31",
+        monthlyFeeAmount: "60000",
+        paymentDay: 15,
+        startsOn: "2026-02-01",
+        status: "active",
+        vatMode: "exempt",
+        vatRate: "0",
+      }).success,
     ).toBe(false);
   });
 });

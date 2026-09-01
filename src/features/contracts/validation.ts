@@ -52,13 +52,46 @@ const rateSchema = z
   .refine((value) => new Decimal(value).lessThanOrEqualTo(100))
   .transform((value) => new Decimal(value).toFixed(2));
 
-const optionalNoteSchema = z.preprocess(
+const nullableNoteSchema = z.preprocess(
   emptyToNull,
-  z.union([z.string().min(1).max(2000), z.null()]).default(null),
+  z.union([z.string().min(1).max(2000), z.null()]),
 );
+const optionalNoteSchema = nullableNoteSchema.default(null);
 
 export const contractStatusSchema = z.enum(["draft", "active", "closed"]);
 export const vatModeSchema = z.enum(["exempt", "exclusive", "inclusive"]);
+
+type ContractTerms = Readonly<{
+  endsOn: string;
+  startsOn: string;
+  vatMode: z.infer<typeof vatModeSchema>;
+  vatRate: string;
+}>;
+
+function validateContractTerms(
+  value: ContractTerms,
+  context: z.RefinementCtx,
+): void {
+  if (value.endsOn < value.startsOn) {
+    context.addIssue({
+      code: "custom",
+      message: "Bitiş tarihi başlangıç tarihinden önce olamaz.",
+      path: ["endsOn"],
+    });
+  }
+
+  const rate = new Decimal(value.vatRate);
+  const validVat =
+    (value.vatMode === "exempt" && rate.isZero()) ||
+    (value.vatMode !== "exempt" && rate.greaterThan(0));
+  if (!validVat) {
+    context.addIssue({
+      code: "custom",
+      message: "KDV biçimi ile oranı uyumlu değil.",
+      path: ["vatRate"],
+    });
+  }
+}
 
 export const createContractInputSchema = z
   .object({
@@ -72,27 +105,24 @@ export const createContractInputSchema = z
     vatRate: rateSchema,
   })
   .strict()
-  .superRefine((value, context) => {
-    if (value.endsOn < value.startsOn) {
-      context.addIssue({
-        code: "custom",
-        message: "Bitiş tarihi başlangıç tarihinden önce olamaz.",
-        path: ["endsOn"],
-      });
-    }
+  .superRefine(validateContractTerms);
 
-    const rate = new Decimal(value.vatRate);
-    const validVat =
-      (value.vatMode === "exempt" && rate.isZero()) ||
-      (value.vatMode !== "exempt" && rate.greaterThan(0));
-    if (!validVat) {
-      context.addIssue({
-        code: "custom",
-        message: "KDV biçimi ile oranı uyumlu değil.",
-        path: ["vatRate"],
-      });
-    }
-  });
+// Contract edits deliberately use the same complete terms document as creates.
+// Requiring every field keeps PATCH requests deterministic and prevents an
+// omitted field from being mistaken for an instruction to clear it.
+export const updateContractInputSchema = z
+  .object({
+    endsOn: isoDateSchema,
+    internalNote: nullableNoteSchema,
+    monthlyFeeAmount: moneySchema,
+    paymentDay: z.number().int().min(1).max(31),
+    startsOn: isoDateSchema,
+    status: contractStatusSchema,
+    vatMode: vatModeSchema,
+    vatRate: rateSchema,
+  })
+  .strict()
+  .superRefine(validateContractTerms);
 
 const nullableClockSchema = z.preprocess(
   emptyToNull,
@@ -184,6 +214,7 @@ export const updateVisitResolutionInputSchema = z
   });
 
 export type CreateContractInput = z.infer<typeof createContractInputSchema>;
+export type UpdateContractInput = z.infer<typeof updateContractInputSchema>;
 export type MonthlyVisitPlanInput = z.infer<
   typeof monthlyVisitPlanInputSchema
 >;

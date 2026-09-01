@@ -190,20 +190,44 @@ export async function findOverlappingContract(
   customerId: string,
   startsOn: string,
   endsOn: string,
+  excludedContractId?: string,
 ): Promise<ConsultingContract | null> {
+  const exclusion = excludedContractId === undefined ? "" : "\n        AND id <> ?";
+  const parameters =
+    excludedContractId === undefined
+      ? [customerId, endsOn, startsOn]
+      : [customerId, endsOn, startsOn, excludedContractId];
   const [rows] = await connection.execute<ContractRow[]>(
     `SELECT ${CONTRACT_COLUMNS}
        FROM consulting_contract
       WHERE customer_id = ?
         AND status IN ('draft', 'active')
         AND starts_on <= ?
-        AND ends_on >= ?
+        AND ends_on >= ?${exclusion}
       ORDER BY starts_on ASC, id ASC
       LIMIT 1
       FOR UPDATE`,
-    [customerId, endsOn, startsOn],
+    parameters,
   );
   return rows[0] ? mapContract(rows[0]) : null;
+}
+
+export async function contractHasVisitOutsideRange(
+  connection: PoolConnection,
+  contractId: string,
+  startsOn: string,
+  endsOn: string,
+): Promise<boolean> {
+  const [rows] = await connection.execute<RowDataPacket[]>(
+    `SELECT id
+       FROM monthly_visit_commitment
+      WHERE contract_id = ?
+        AND (committed_on < ? OR committed_on > ?)
+      LIMIT 1
+      FOR UPDATE`,
+    [contractId, startsOn, endsOn],
+  );
+  return rows.length > 0;
 }
 
 export async function insertContractRecord(
@@ -233,6 +257,33 @@ export async function insertContractRecord(
     ],
   );
   if (result.affectedRows !== 1) throw new Error("Contract insert failed.");
+}
+
+export async function updateContractRecord(
+  connection: PoolConnection,
+  contract: ConsultingContract,
+): Promise<void> {
+  const [result] = await connection.execute<ResultSetHeader>(
+    `UPDATE consulting_contract
+        SET status = ?, starts_on = ?, ends_on = ?, monthly_fee_amount = ?,
+            vat_mode = ?, vat_rate = ?, payment_day = ?, internal_note = ?,
+            updated_at_utc = ?
+      WHERE id = ? AND customer_id = ?`,
+    [
+      contract.status,
+      contract.startsOn,
+      contract.endsOn,
+      contract.monthlyFeeAmount,
+      contract.vatMode,
+      contract.vatRate,
+      contract.paymentDay,
+      contract.internalNote,
+      contract.updatedAtUtc,
+      contract.id,
+      contract.customerId,
+    ],
+  );
+  if (result.affectedRows !== 1) throw new Error("Contract update failed.");
 }
 
 export async function listMonthVisitRecords(

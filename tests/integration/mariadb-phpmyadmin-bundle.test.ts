@@ -21,6 +21,8 @@ const disposableMariaDbEnabled =
 const repositoryRoot = process.cwd();
 const journalTable = "__drizzle_migrations";
 const knownTablesInDropOrder = [
+  "receivable_collection",
+  "receivable",
   "monthly_visit_commitment",
   "consulting_contract",
   "customer",
@@ -457,8 +459,8 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
           },
           sessionRestored: true,
         });
-        expect(await tableNames(pool)).toHaveLength(10);
-        expect(await journalRows(pool)).toHaveLength(6);
+        expect(await tableNames(pool)).toHaveLength(12);
+        expect(await journalRows(pool)).toHaveLength(7);
       } catch (error) {
         reusable = false;
         throw error;
@@ -624,11 +626,11 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
         tablesAfter,
       }).toEqual({
         diagnostics: {
-          application_columns: 93,
-          checks: 37,
-          foreign_keys: 3,
-          indexes: 30,
-          matching_application_tables: 9,
+          application_columns: 114,
+          checks: 45,
+          foreign_keys: 6,
+          indexes: 38,
+          matching_application_tables: 11,
           matching_journal_tables: 1,
           sql_mode: expect.any(String),
         },
@@ -647,9 +649,11 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
           "job_run",
           "monthly_visit_commitment",
           "outbox_event",
+          "receivable",
+          "receivable_collection",
           "scheduled_job",
         ],
-        journalCount: 6,
+        journalCount: 7,
       });
 
       await expect(
@@ -663,7 +667,7 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
 
       const bundleSchema = await schemaDefinitionSnapshot(pool);
       await expect(runMigration()).resolves.toBeUndefined();
-      expect(await journalRows(pool)).toHaveLength(6);
+      expect(await journalRows(pool)).toHaveLength(7);
       expect(await schemaDefinitionSnapshot(pool)).toEqual(bundleSchema);
 
       await resetKnownTables(pool);
