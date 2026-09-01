@@ -37,9 +37,27 @@ interface BundleSummary {
   sqlPath: string;
 }
 
+interface BundleManifest {
+  formatVersion: number;
+  sessionPolicy: {
+    characterSet: string;
+    collation: string;
+    modifiesGlobalSqlMode: boolean;
+    restoresOriginalSqlMode: boolean;
+    sqlMode: string;
+    storageEngine: string;
+    timeZone: string;
+  };
+}
+
 interface DatabaseRow extends RowDataPacket {
   database_name: string;
   server_version: string;
+}
+
+interface SqlModeRow extends RowDataPacket {
+  global_sql_mode: string;
+  session_sql_mode: string;
 }
 
 interface JournalRow extends RowDataPacket {
@@ -303,6 +321,7 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
     let pool: Pool;
     let outputDirectory = "";
     let databaseName = "";
+    let validManifest: BundleManifest;
     let validSql = "";
 
     beforeAll(async () => {
@@ -342,6 +361,12 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
         path.resolve(repositoryRoot, summary.sqlPath),
         "utf8",
       );
+      validManifest = JSON.parse(
+        await readFile(
+          path.resolve(repositoryRoot, summary.manifestPath),
+          "utf8",
+        ),
+      ) as BundleManifest;
     });
 
     afterAll(async () => {
@@ -357,6 +382,215 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
         }
       }
     });
+
+    it("publishes an exact format-2 session policy without changing global SQL mode", () => {
+      expect(validManifest).toMatchObject({
+        formatVersion: 2,
+        sessionPolicy: {
+          characterSet: "utf8mb4",
+          collation: "utf8mb4_unicode_ci",
+          modifiesGlobalSqlMode: false,
+          restoresOriginalSqlMode: true,
+          sqlMode:
+            "STRICT_ALL_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION",
+          storageEngine: "InnoDB",
+          timeZone: "+00:00",
+        },
+      });
+      expect(validSql).toContain("-- Format 2;");
+      expect(validSql).toContain("SET @pp_original_sql_mode = @@SESSION.sql_mode;");
+      expect(validSql).toContain(
+        "SET @@SESSION.sql_mode = COALESCE(@pp_original_sql_mode, @@SESSION.sql_mode), @pp_session_restore_applied = 1;",
+      );
+      expect(validSql).not.toContain("SET GLOBAL");
+      expect(validSql).not.toContain("@@GLOBAL.sql_mode");
+    });
+
+    it("temporarily enforces strict mode on a non-strict provider session and restores it", async () => {
+      await resetKnownTables(pool);
+      const connection = await pool.getConnection();
+      let reusable = true;
+      try {
+        await connection.query(
+          "SET SESSION sql_mode = 'NO_ENGINE_SUBSTITUTION'",
+        );
+        const [beforeRows] = await connection.query<SqlModeRow[]>(
+          `SELECT
+             @@GLOBAL.sql_mode AS global_sql_mode,
+             @@SESSION.sql_mode AS session_sql_mode`,
+        );
+        const before = beforeRows[0];
+        expect(before).toBeDefined();
+        expect(before?.global_sql_mode).not.toMatch(/STRICT_(?:ALL|TRANS)_TABLES/u);
+        expect(before?.session_sql_mode).not.toMatch(/STRICT_(?:ALL|TRANS)_TABLES/u);
+
+        const outcome = await executeBundleOnConnection(
+          connection,
+          validSql,
+          "continue-on-error",
+          { destroyOnAbort: false },
+        );
+        reusable = !outcome.destroyed;
+
+        const [afterRows] = await connection.query<SqlModeRow[]>(
+          `SELECT
+             @@GLOBAL.sql_mode AS global_sql_mode,
+             @@SESSION.sql_mode AS session_sql_mode`,
+        );
+        expect({
+          globalUnchanged:
+            afterRows[0]?.global_sql_mode === before?.global_sql_mode,
+          outcome: {
+            errors: outcome.errors,
+            results: outcome.results,
+          },
+          sessionRestored:
+            afterRows[0]?.session_sql_mode === before?.session_sql_mode,
+        }).toEqual({
+          globalUnchanged: true,
+          outcome: {
+            errors: 0,
+            results: ["PORTAL_PUSULA_MIGRATION_BUNDLE_OK"],
+          },
+          sessionRestored: true,
+        });
+        expect(await tableNames(pool)).toHaveLength(7);
+        expect(await journalRows(pool)).toHaveLength(4);
+      } catch (error) {
+        reusable = false;
+        throw error;
+      } finally {
+        if (reusable) connection.release();
+        else connection.destroy();
+      }
+    }, 45_000);
+
+    it.each(["abort-on-first-error", "continue-on-error"] as const)(
+      "fails closed before DDL when the strict-mode SET is rejected in %s mode",
+      async (mode) => {
+        await resetKnownTables(pool);
+        const invalidPolicySql = validSql.replace(
+          /^SET @@SESSION\.sql_mode = .*@pp_session_policy_applied = 1;$/mu,
+          "SET @@SESSION.sql_mode = 'PORTAL_PUSULA_INVALID_SQL_MODE', @pp_session_policy_applied = 1;",
+        );
+        expect(invalidPolicySql).not.toBe(validSql);
+
+        const outcome = await executeBundle(pool, invalidPolicySql, mode);
+
+        expect(outcome.errors).toBeGreaterThanOrEqual(1);
+        expect(outcome.results).toEqual([]);
+        expect(await tableNames(pool)).toEqual([]);
+        await assertRunnerLockAvailable(pool, databaseName);
+      },
+      20_000,
+    );
+
+    it.each(["abort-on-first-error", "continue-on-error"] as const)(
+      "fails closed before DDL when strict session readback drifts in %s mode",
+      async (mode) => {
+        await resetKnownTables(pool);
+        const connection = await pool.getConnection();
+        let driftInjected = false;
+        try {
+          await connection.query(
+            "SET SESSION sql_mode = 'NO_ENGINE_SUBSTITUTION'",
+          );
+          const outcome = await executeBundleOnConnection(
+            connection,
+            validSql,
+            mode,
+            {
+              beforeStatement: async (statement) => {
+                if (
+                  !driftInjected &&
+                  statement.startsWith(
+                    "SET @pp_step = IF(@pp_original_sql_mode IS NOT NULL",
+                  )
+                ) {
+                  await connection.query(
+                    "SET SESSION sql_mode = 'NO_ENGINE_SUBSTITUTION'",
+                  );
+                  driftInjected = true;
+                }
+              },
+              destroyOnAbort: false,
+            },
+          );
+          const [modeRows] = await connection.query<SqlModeRow[]>(
+            `SELECT
+               @@GLOBAL.sql_mode AS global_sql_mode,
+               @@SESSION.sql_mode AS session_sql_mode`,
+          );
+
+          expect(driftInjected).toBe(true);
+          expect(outcome.errors).toBeGreaterThanOrEqual(1);
+          expect(outcome.results).toEqual([]);
+          expect(await tableNames(pool)).toEqual([]);
+          expect(modeRows[0]?.global_sql_mode).not.toMatch(
+            /STRICT_(?:ALL|TRANS)_TABLES/u,
+          );
+          expect(modeRows[0]?.session_sql_mode).toBe(
+            "NO_ENGINE_SUBSTITUTION",
+          );
+          await assertRunnerLockAvailable(pool, databaseName);
+        } finally {
+          connection.destroy();
+        }
+      },
+      30_000,
+    );
+
+    it("stops all later DDL and journal writes after mid-import session drift", async () => {
+      await resetKnownTables(pool);
+      const connection = await pool.getConnection();
+      const executeIndex = jobRunCandidateExecuteIndex(validSql);
+      let driftInjected = false;
+      try {
+        await connection.query(
+          "SET SESSION sql_mode = 'NO_ENGINE_SUBSTITUTION'",
+        );
+        const outcome = await executeBundleOnConnection(
+          connection,
+          validSql,
+          "continue-on-error",
+          {
+            beforeStatement: async (_statement, statementIndex) => {
+              if (!driftInjected && statementIndex === executeIndex - 4) {
+                await connection.query(
+                  "SET SESSION sql_mode = 'NO_ENGINE_SUBSTITUTION'",
+                );
+                driftInjected = true;
+              }
+            },
+            destroyOnAbort: false,
+          },
+        );
+        const [modeRows] = await connection.query<SqlModeRow[]>(
+          `SELECT
+             @@GLOBAL.sql_mode AS global_sql_mode,
+             @@SESSION.sql_mode AS session_sql_mode`,
+        );
+
+        expect(driftInjected).toBe(true);
+        expect(outcome.errors).toBeGreaterThanOrEqual(1);
+        expect(outcome.results).toEqual([]);
+        expect(await tableNames(pool)).toEqual([
+          "__drizzle_migrations",
+          "_platform_migration_verification",
+          "audit_event",
+        ]);
+        expect(await journalRows(pool)).toHaveLength(1);
+        expect(modeRows[0]?.global_sql_mode).not.toMatch(
+          /STRICT_(?:ALL|TRANS)_TABLES/u,
+        );
+        expect(modeRows[0]?.session_sql_mode).toBe(
+          "NO_ENGINE_SUBSTITUTION",
+        );
+        await assertRunnerLockAvailable(pool, databaseName);
+      } finally {
+        connection.destroy();
+      }
+    }, 30_000);
 
     it("applies a clean bundle, writes an exact journal, and remains runner-compatible", async () => {
       await resetKnownTables(pool);

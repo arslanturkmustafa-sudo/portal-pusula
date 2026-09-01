@@ -27,6 +27,7 @@ import {
 } from "../../src/platform/outbox";
 import { appendAuditEvent } from "../../src/platform/audit";
 import { PlatformInputError } from "../../src/platform/validation/canonical-identifiers";
+import { registerMySqlPoolDatabase } from "../../src/platform/database/mysql-session-contract";
 import {
   createVerificationJobHandler,
   VERIFICATION_EVENT_TYPE,
@@ -192,6 +193,7 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
         connectTimeout: 5_000,
         multipleStatements: false,
       });
+      registerMySqlPoolDatabase(pool, requiredTestEnvironment("DB_NAME"));
     });
 
     beforeEach(async () => {

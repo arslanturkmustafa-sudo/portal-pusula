@@ -11,6 +11,7 @@ Bu akış uygulamayı dağıtmaz, kullanıcı oluşturmaz, environment değişke
 - SQL ve manifest dosyaları elle düzenlenmez. Hedef veya sunucu değiştiğinde paket yeni digest'lerle yeniden üretilir.
 - Gerçek DB adı, kullanıcı adı, parola, connection string veya ham `VERSION()` çıktısı komuta, dosyaya, sohbete, issue'ya, commit'e ya da ekran görüntüsüne yazılmaz.
 - Üretilen hedefe bağlı dosyalar `dist/` altında yerel deployment artefaktıdır; Git'e eklenmez ve herkese açık depoda yayımlanmaz.
+- Paket `SET GLOBAL` çalıştırmaz ve sağlayıcının global `sql_mode` değerini değiştirmeye çalışmaz. Hostinger'ın paylaşımlı global varsayımları yalnız salt okunur bağlam bilgisidir; migration güvenliği paketin kendi bağlantısında kurduğu ve doğruladığı session sözleşmesinden gelir.
 - Başarısız import geri alınabilir kabul edilmez. MariaDB DDL implicit commit yapabildiği için aynı DB üzerinde temizleme veya yeniden deneme yapılmaz; disposable hedef silinip yeniden oluşturulur.
 - Canlı migration ancak ayrıca açık kullanıcı onayı, kanıtlanmış backup/restore ve değişiklik penceresiyle ele alınır. Bu runbook canlı import yetkisi vermez.
 
@@ -19,15 +20,19 @@ Bu akış uygulamayı dağıtmaz, kullanıcı oluşturmaz, environment değişke
 Üretici yalnız sürümlü `drizzle/` journal'ında bulunan ve dar allowlist'ten geçen `CREATE TABLE`, `CREATE INDEX` ve güvenli `ALTER TABLE ... ADD CONSTRAINT` ifadelerini kabul eder. Paket:
 
 - hedef DB adının ve tam MariaDB `VERSION()` değerinin SHA-256 digest'lerine bağlanır;
-- MariaDB 10.6 veya üstünü, varsayılan InnoDB motorunu, `utf8mb4`, global/session strict SQL mode ve etkin global/session `CHECK`/foreign-key/unique kontrollerini doğrular;
+- MariaDB 10.6 veya üstünü, varsayılan InnoDB motorunu, `utf8mb4` ve etkin global/session `CHECK`/foreign-key/unique kontrollerini doğrular;
+- import bağlantısındaki önceki exact `@@SESSION.sql_mode` değerini saklar; kendi session'ında exact `STRICT_ALL_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION` politikasını kurup geri okuyarak doğrular;
 - uygulama migration runner'ıyla aynı, DB adını göstermeyen advisory lock'u en çok 10 saniye bekler;
 - yalnız tamamen boş şemada başlar;
+- her guarded DDL ve journal adımının hemen öncesinde ve doğrulama sonrasında canonical session sözleşmesini yeniden kontrol eder; ortadaki bir session sapmasında sonraki mutasyonları güvenli no-op'a çevirir;
 - her DDL adımından sonra beklenen tablo, kolon, constraint veya index'i `information_schema` üzerinden doğrular;
 - migration tamamlanınca dört exact journal kaydını ve toplam yedi teknik tabloyu doğrular;
 - phpMyAdmin çoklu sorgu hatasından sonra devam edecek biçimde ayarlanmış olsa bile guard başarısızlığından sonra yeni DDL veya journal adımı çalıştırmaz;
 - yalnız tüm kontroller ve lock bırakma işlemi geçtiğinde `PORTAL_PUSULA_MIGRATION_BUNDLE_OK` sonucunu üretir.
 
 Bu korumalar yedek veya rollback yerine geçmez. Bir DDL adımında hata oluşursa önceki DDL'lerin transaction ile geri alınacağı varsayılmaz.
+
+Canonical strict mod yalnız bundle'ın kendi phpMyAdmin bağlantısına uygulanır. Global değer değişmez. Paket hem normal başarı yolunda hem de phpMyAdmin'in hata sonrasında kalan ifadeleri çalıştırdığı continue-on-error yolunda, başlangıçta sakladığı önceki session `sql_mode` değerini exact olarak geri yükler ve geri yüklemeyi doğrular. Geri yükleme kanıtlanamazsa başarı imzası üretmez. Bağlantı/import tamamen kesilirse session sağlayıcı tarafından kapatılmalı; hedef yine `UNKNOWN/başarısız` kabul edilir ve tekrar kullanılmaz.
 
 Disposable otomatik kabul ortamı pinned MariaDB 11.4.8 üzerinde çalışır. Farklı Hostinger sürümü yalnız minimum sürüm kontrolüyle “kanıtlanmış” sayılmaz; aşağıdaki exact sürüm digest'i ve capability probe'u geçmeli, clean staging importu da o sunucudaki gerçek kabul kanıtını üretmelidir.
 
@@ -79,7 +84,7 @@ Kabul koşulları:
 - dört nesne sayacı da `0` olmalı;
 - üç session ve üç global kontrol değeri de `1` olmalı;
 - iki varsayılan depolama motoru da exact `InnoDB` olmalı;
-- hem session hem global SQL mode içinde `STRICT_TRANS_TABLES` veya `STRICT_ALL_TABLES` bulunmalı.
+- global veya ilk session `sql_mode` değerinde strict mod bulunması ön koşul değildir. Bu iki değer yalnız bağlam için okunur; bundle kendi session'ında canonical strict modu kurup geri okumadan hiçbir DDL çalıştırmaz.
 
 Digest'ler dışında probe çıktısı kopyalanmaz veya proje dosyalarına kaydedilmez. `DATABASE()` seçili değilse digest `NULL` olur; bu durumda import yapılmaz. Sunucu yükseltmesi veya yeniden yönlendirme tam `VERSION()` değerini değiştirebileceği için digest'ler importtan hemen önce yeniden alınır.
 
@@ -100,17 +105,30 @@ Komut digest eksikse veya biçimi yanlışsa dosya üretmeden hata verir. Başar
 - `dist/portal-pusula-phpmyadmin-migration.sql`
 - `dist/portal-pusula-phpmyadmin-migration.manifest.json`
 
-Manifest; format sürümü, minimum MariaDB sürümü, migration timestamp/hash'leri, her SQL adımının hash'i, beklenen teknik şema, bundle ID ve SQL dosyasının byte sayısı/SHA-256 değerini içerir. Gerçek DB adı, ham sunucu sürümü veya credential içermez.
+Manifest; `formatVersion: 2`, minimum MariaDB sürümü, migration timestamp/hash'leri, her SQL adımının hash'i, beklenen teknik şema, bundle ID ve SQL dosyasının byte sayısı/SHA-256 değerini içerir. `sessionPolicy` alanı canonical SQL mode, charset, collation, timezone ve storage engine değerleriyle birlikte `modifiesGlobalSqlMode: false` ve `restoresOriginalSqlMode: true` sınırını taşır. Gerçek DB adı, ham sunucu sürümü veya credential içermez.
 
 SQL bütünlüğü importtan önce PowerShell ile doğrulanır:
 
 ```powershell
 $manifest = Get-Content .\dist\portal-pusula-phpmyadmin-migration.manifest.json | ConvertFrom-Json
+$manifestPolicyOk = (
+  $manifest.formatVersion -eq 2 -and
+  $manifest.sessionPolicy.sqlMode -ceq "STRICT_ALL_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION" -and
+  $manifest.sessionPolicy.characterSet -ceq "utf8mb4" -and
+  $manifest.sessionPolicy.collation -ceq "utf8mb4_unicode_ci" -and
+  $manifest.sessionPolicy.timeZone -ceq "+00:00" -and
+  $manifest.sessionPolicy.storageEngine -ceq "InnoDB" -and
+  $manifest.sessionPolicy.modifiesGlobalSqlMode -eq $false -and
+  $manifest.sessionPolicy.restoresOriginalSqlMode -eq $true
+)
 $actualSqlHash = (Get-FileHash .\dist\portal-pusula-phpmyadmin-migration.sql -Algorithm SHA256).Hash.ToLowerInvariant()
+$manifestPolicyOk
 $actualSqlHash -eq $manifest.sqlSha256
 ```
 
-Sonuç exact `True` değilse import yapılmaz; iki artefakt silinip kalite kapıları ve üretim adımı baştan çalıştırılır. Dosya adları değiştirilmez, SQL ZIP'e alınmaz ve metin olarak phpMyAdmin SQL sekmesine yapıştırılmaz.
+İki sonuç da exact `True` değilse import yapılmaz; iki artefakt silinip kalite kapıları ve üretim adımı baştan çalıştırılır. Dosya adları değiştirilmez, SQL ZIP'e alınmaz ve metin olarak phpMyAdmin SQL sekmesine yapıştırılmaz.
+
+Yalnız güncel üreticinin session initializer, doğrulama ve exact restore adımlarını taşıyan artefaktı kullanılabilir. Bu politika eklenmeden önce üretilmiş bir SQL/manifest çifti hash'i sağlam görünse bile import, yeniden deneme veya rollback adayı değildir; silinir ve güncel kaynakla yeniden üretilir.
 
 ## 4. phpMyAdmin ile dosya importu
 

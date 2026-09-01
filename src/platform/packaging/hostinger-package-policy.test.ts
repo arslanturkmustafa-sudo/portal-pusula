@@ -193,6 +193,7 @@ describe.sequential("Hostinger package sensitive-file policy", () => {
     expect(entries).toContain("package.json");
     expect(entries).toContain("scripts/migrate.mjs");
     expect(entries).toContain("scripts/migration-integrity.mjs");
+    expect(entries).toContain("scripts/mysql-session-policy.mjs");
     expect(entries).toContain(
       "drizzle/0000_platform_migration_verification.sql",
     );
@@ -242,6 +243,7 @@ describe.sequential("Hostinger package sensitive-file policy", () => {
     const allowedProductionScripts = new Set([
       "scripts/migrate.mjs",
       "scripts/migration-integrity.mjs",
+      "scripts/mysql-session-policy.mjs",
     ]);
 
     for (const entry of entries) {

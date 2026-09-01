@@ -1,6 +1,11 @@
 services:
   mariadb-test:
     image: mariadb:11.4.8@sha256:bc474f00629f0123c10f9e1bca193a45d18af15a274cf0656acda64f1086c3b6
+    # Mirror Hostinger's observed baseline: new sessions are intentionally
+    # non-strict, so every Portal Pusula entrypoint must establish and verify
+    # its own strict session contract before it can read or write application
+    # state.
+    command: ["--sql-mode=NO_ENGINE_SUBSTITUTION"]
     restart: "no"
     environment:
       # These credentials are fixed, disposable test fixtures. They are never

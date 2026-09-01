@@ -12,6 +12,7 @@ import {
   migrationLockName,
   readExpectedMigrations,
 } from "./migration-integrity.mjs";
+import { applyMySqlSessionPolicy } from "./mysql-session-policy.mjs";
 
 const MIGRATION_CONNECTION_LIMIT = 1;
 const MIGRATION_CONNECT_TIMEOUT_MS = 5_000;
@@ -110,13 +111,16 @@ async function run() {
 
   let connection;
   let lockAcquired = false;
+  let sessionPolicyEstablished = false;
   let operationError;
   let cleanupFailed = false;
+  let destroyConnection = false;
   const lockName = migrationLockName(environment.database);
 
   try {
     connection = await pool.getConnection();
-    await connection.query("SET time_zone = '+00:00'");
+    await applyMySqlSessionPolicy(connection, environment.database);
+    sessionPolicyEstablished = true;
 
     const [lockRows] = await connection.query(
       "SELECT GET_LOCK(?, ?) AS acquired",
@@ -146,6 +150,7 @@ async function run() {
     });
   } catch (error) {
     operationError = error;
+    destroyConnection = true;
   } finally {
     if (connection && lockAcquired) {
       try {
@@ -153,15 +158,23 @@ async function run() {
           "SELECT RELEASE_LOCK(?) AS released",
           [lockName],
         );
-        cleanupFailed = Number(releaseRows[0]?.released) !== 1;
+        if (Number(releaseRows[0]?.released) !== 1) {
+          cleanupFailed = true;
+          destroyConnection = true;
+        }
       } catch {
         cleanupFailed = true;
+        destroyConnection = true;
       }
     }
 
     if (connection) {
       try {
-        connection.release();
+        if (!sessionPolicyEstablished || destroyConnection) {
+          connection.destroy();
+        } else {
+          connection.release();
+        }
       } catch {
         cleanupFailed = true;
       }
