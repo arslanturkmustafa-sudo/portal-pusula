@@ -5,13 +5,23 @@ import {
   sessionCookieName,
   sessionCookieOptions,
 } from "@/platform/auth/session";
-import { verifyAdminCredentials } from "@/platform/auth/password";
+import {
+  PasswordVerificationRuntimeError,
+  verifyAdminCredentials,
+} from "@/platform/auth/password";
 import { getAuthEnvironment } from "@/platform/config/auth-env";
+import { correlationIdFromHeaders } from "@/platform/http/correlation-id";
+import { requestLogger } from "@/platform/logging/logger";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 const MAX_FORM_BYTES = 4_096;
+
+type LoginDiagnosticCategory =
+  | "auth_env_invalid"
+  | "auth_scrypt_runtime_error"
+  | "credentials_rejected";
 
 function sameOriginRedirect(location: string): NextResponse {
   return new NextResponse(null, {
@@ -20,9 +30,22 @@ function sameOriginRedirect(location: string): NextResponse {
   });
 }
 
-function failedLogin(): NextResponse {
+function failedLogin(
+  request: NextRequest,
+  category: LoginDiagnosticCategory,
+): NextResponse {
+  requestLogger(correlationIdFromHeaders(request.headers)).warn(
+    {
+      category,
+      event: "auth.login.failed",
+    },
+    `Administrator login failed: ${category}`,
+  );
   const response = sameOriginRedirect("/giris?hata=1");
-  response.headers.set("Cache-Control", "private, no-store, max-age=0, must-revalidate");
+  response.headers.set(
+    "Cache-Control",
+    "private, no-store, max-age=0, must-revalidate",
+  );
   return response;
 }
 
@@ -33,7 +56,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     declaredLength < 0 ||
     declaredLength > MAX_FORM_BYTES
   ) {
-    return failedLogin();
+    return failedLogin(request, "credentials_rejected");
   }
 
   try {
@@ -47,12 +70,28 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       password.length < 1 ||
       password.length > 256
     ) {
-      return failedLogin();
+      return failedLogin(request, "credentials_rejected");
     }
 
-    const environment = getAuthEnvironment();
-    const valid = await verifyAdminCredentials(email, password, environment);
-    if (!valid) return failedLogin();
+    let environment;
+    try {
+      environment = getAuthEnvironment();
+    } catch {
+      return failedLogin(request, "auth_env_invalid");
+    }
+
+    let valid: boolean;
+    try {
+      valid = await verifyAdminCredentials(email, password, environment);
+    } catch (error) {
+      return failedLogin(
+        request,
+        error instanceof PasswordVerificationRuntimeError
+          ? "auth_scrypt_runtime_error"
+          : "credentials_rejected",
+      );
+    }
+    if (!valid) return failedLogin(request, "credentials_rejected");
 
     const production = process.env.NODE_ENV === "production";
     const response = sameOriginRedirect("/");
@@ -67,6 +106,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     );
     return response;
   } catch {
-    return failedLogin();
+    return failedLogin(request, "credentials_rejected");
   }
 }

@@ -29,7 +29,7 @@ const e2ePasswordHash = [
   "1",
   e2eSalt.toString("base64url"),
   e2eKey.toString("base64url"),
-].join("$");
+].join(":");
 
 function sanitizedEnvironment(additions = {}) {
   const environment = {};

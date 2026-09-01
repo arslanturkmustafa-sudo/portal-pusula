@@ -60,7 +60,7 @@ Hostinger environment alanında gereken adlar:
 - `DB_PASSWORD`
 - `READINESS_BEARER_TOKEN`
 - `ADMIN_EMAIL`
-- `ADMIN_PASSWORD_HASH`
+- `ADMIN_PASSWORD_HASH` — yeni değerlerde `auth:generate` çıktısındaki `$` içermeyen `scrypt:32768:8:1:<salt>:<key>` biçimi kullanılır; alana yalnız değer yazılır
 - `SESSION_SECRET`
 - `LOG_LEVEL` — isteğe bağlı, boşsa `info`
 

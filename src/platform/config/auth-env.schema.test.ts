@@ -5,23 +5,28 @@ import {
   parseAuthEnvironment,
 } from "@/platform/config/auth-env.schema";
 
-const validHash =
+const currentHash =
+  "scrypt:32768:8:1:AAAAAAAAAAAAAAAAAAAAAA:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+const legacyHash =
   "scrypt$32768$8$1$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
 describe("auth environment", () => {
-  it("normalizes the administrator email and accepts a 16 character session key", () => {
-    expect(
-      parseAuthEnvironment({
-        ADMIN_EMAIL: "  YONETICI@Example.com ",
-        ADMIN_PASSWORD_HASH: validHash,
+  it.each([currentHash, legacyHash])(
+    "normalizes the administrator email and accepts a supported password hash",
+    (passwordHash) => {
+      expect(
+        parseAuthEnvironment({
+          ADMIN_EMAIL: "  YONETICI@Example.com ",
+          ADMIN_PASSWORD_HASH: passwordHash,
+          SESSION_SECRET: "AbcdEFgh12345678",
+        }),
+      ).toEqual({
+        ADMIN_EMAIL: "yonetici@example.com",
+        ADMIN_PASSWORD_HASH: passwordHash,
         SESSION_SECRET: "AbcdEFgh12345678",
-      }),
-    ).toEqual({
-      ADMIN_EMAIL: "yonetici@example.com",
-      ADMIN_PASSWORD_HASH: validHash,
-      SESSION_SECRET: "AbcdEFgh12345678",
-    });
-  });
+      });
+    },
+  );
 
   it("fails closed for malformed authentication values", () => {
     expect(() =>
