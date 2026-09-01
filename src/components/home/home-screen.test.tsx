@@ -19,7 +19,14 @@ describe("HomeScreen", () => {
     expect(screen.getByRole("searchbox", { name: "Müşteri ara" })).toBeInTheDocument();
 
     const navigation = screen.getByRole("navigation", { name: "Ana navigasyon" });
-    for (const name of ["Müşteriler", "Günlük plan", "Görevler", "Finans", "Projeler"]) {
+    for (const name of [
+      "Müşteriler",
+      "Günlük plan",
+      "Görevler",
+      "Finans",
+      "Projeler",
+      "Hesabım",
+    ]) {
       expect(within(navigation).getByRole("link", { name })).toBeInTheDocument();
     }
     expect(within(navigation).getByRole("link", { name: "Müşteriler" })).toHaveAttribute(
@@ -37,6 +44,7 @@ describe("HomeScreen", () => {
 
     expect(screen.queryByText("Yerel tasarım önizlemesi")).not.toBeInTheDocument();
     expect(screen.queryByText(/İşlerinizi tek bir yerde/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Hesabım" })).toBeInTheDocument();
   });
 
   it("never presents sample customers as live records while data is loading", () => {

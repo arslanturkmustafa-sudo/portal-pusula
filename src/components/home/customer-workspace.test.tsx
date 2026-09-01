@@ -13,6 +13,22 @@ import { CustomerWorkspace } from "@/components/home/customer-workspace";
 const customerId = "10000000-0000-4000-8000-000000000001";
 const otherCustomerId = "10000000-0000-4000-8000-000000000002";
 const contractId = "20000000-0000-4000-8000-000000000001";
+const customer = {
+  contactNote: "Satın alma ekibiyle görüşülüyor.",
+  displayName: "Zevahir Home",
+  email: "bilgi@zevahir.example",
+  id: customerId,
+  name: "Zevahir Home",
+  phone: "+90 555 000 00 00",
+};
+const otherCustomer = {
+  contactNote: null,
+  displayName: "Kardeşler Grup",
+  email: null,
+  id: otherCustomerId,
+  name: "Kardeşler Grup",
+  phone: null,
+};
 const contract = {
   currency: "TRY" as const,
   customerId,
@@ -25,6 +41,15 @@ const contract = {
   status: "active" as const,
   vatMode: "exempt" as const,
   vatRate: "0.00",
+};
+const nextContractId = "20000000-0000-4000-8000-000000000002";
+const nextContract = {
+  ...contract,
+  endsOn: "2027-12-31",
+  id: nextContractId,
+  monthlyFeeAmount: "70000.0000",
+  paymentDay: 20,
+  startsOn: "2027-01-01",
 };
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -47,7 +72,7 @@ function renderWorkspace(fetchMock: ReturnType<typeof vi.fn>) {
   vi.stubGlobal("fetch", fetchMock);
   render(
     <CustomerWorkspace
-      customer={{ id: customerId, name: "Zevahir Home" }}
+      customer={customer}
       live
       onContractSaved={vi.fn()}
       onVisitsSaved={vi.fn()}
@@ -61,6 +86,156 @@ afterEach(() => {
 });
 
 describe("CustomerWorkspace reliable date writes", () => {
+  it("updates only changed customer fields and reports the saved customer", async () => {
+    const requests: unknown[] = [];
+    const onCustomerSaved = vi.fn();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (method === "GET" && url.endsWith("/contracts")) {
+        return jsonResponse({ contracts: [contract] });
+      }
+      if (method === "GET" && url.includes("/month-plans/")) {
+        return jsonResponse({ monthPlan: { visits: [] } });
+      }
+      if (method === "PATCH" && url === `/api/customers/${customerId}`) {
+        const body = JSON.parse(String(init?.body));
+        requests.push(body);
+        return jsonResponse({
+          customer: { ...customer, ...body, name: undefined },
+        });
+      }
+      throw new Error(`Unexpected request: ${method} ${url}`);
+    });
+    const user = userEvent.setup();
+    vi.stubGlobal("fetch", fetchMock);
+    render(
+      <CustomerWorkspace
+        customer={customer}
+        live
+        onContractSaved={vi.fn()}
+        onCustomerSaved={onCustomerSaved}
+        onVisitsSaved={vi.fn()}
+      />,
+    );
+
+    await user.click(
+      await screen.findByRole("button", { name: "Müşteri bilgilerini düzenle" }),
+    );
+    const nameInput = screen.getByLabelText("Müşteri / şirket adı");
+    await user.clear(nameInput);
+    await user.type(nameInput, "Zevahir Home Mobilya");
+    await user.click(
+      screen.getByRole("button", { name: "Müşteri bilgilerini kaydet" }),
+    );
+
+    await waitFor(() => expect(requests).toEqual([
+      { displayName: "Zevahir Home Mobilya" },
+    ]));
+    expect(onCustomerSaved).toHaveBeenCalledWith(
+      expect.objectContaining({ displayName: "Zevahir Home Mobilya" }),
+    );
+    expect(
+      await screen.findByRole("heading", { name: "Zevahir Home Mobilya" }),
+    ).toBeInTheDocument();
+  });
+
+  it("switches annual periods and creates the following period with POST", async () => {
+    const monthPlanUrls: string[] = [];
+    const postRequests: Array<{ body: Record<string, unknown>; url: string }> = [];
+    const createdContractId = "20000000-0000-4000-8000-000000000003";
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (method === "GET" && url.endsWith("/contracts")) {
+        return jsonResponse({ contracts: [nextContract, contract] });
+      }
+      if (method === "GET" && url.includes("/month-plans/")) {
+        monthPlanUrls.push(url);
+        return jsonResponse({ monthPlan: { visits: [] } });
+      }
+      if (method === "POST" && url.endsWith("/contracts")) {
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        postRequests.push({ body, url });
+        return jsonResponse({
+          contract: {
+            ...body,
+            currency: "TRY",
+            customerId,
+            id: createdContractId,
+          },
+        }, 201);
+      }
+      throw new Error(`Unexpected request: ${method} ${url}`);
+    });
+    const user = userEvent.setup();
+    renderWorkspace(fetchMock);
+
+    await user.click(
+      await screen.findByRole("button", { name: /2027-01-01.*70\.000 ₺/u }),
+    );
+    await waitFor(() =>
+      expect(monthPlanUrls).toContain(
+        `/api/customers/${customerId}/contracts/${nextContractId}/month-plans/2027-01`,
+      ),
+    );
+    expect(screen.getByLabelText("Aylık ücret")).toHaveValue("70000");
+
+    await user.click(screen.getByRole("button", { name: "+ Yeni dönem ekle" }));
+    expect(screen.getByLabelText("Başlangıç")).toHaveValue("2028-01-01");
+    expect(screen.getByLabelText("Bitiş")).toHaveValue("2028-12-31");
+    await user.click(screen.getByRole("button", { name: "Yeni dönemi kaydet" }));
+
+    await waitFor(() => expect(postRequests).toHaveLength(1));
+    expect(postRequests[0]).toMatchObject({
+      body: expect.objectContaining({
+        endsOn: "2028-12-31",
+        monthlyFeeAmount: "70000",
+        startsOn: "2028-01-01",
+      }),
+      url: `/api/customers/${customerId}/contracts`,
+    });
+    expect(
+      await screen.findByRole("button", { name: /2028-01-01.*70\.000 ₺/u }),
+    ).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("shows the backend overlap explanation for a conflicting new period", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (method === "GET" && url.endsWith("/contracts")) {
+        return jsonResponse({ contracts: [contract] });
+      }
+      if (method === "GET" && url.includes("/month-plans/")) {
+        return jsonResponse({ monthPlan: { visits: [] } });
+      }
+      if (method === "POST" && url.endsWith("/contracts")) {
+        return jsonResponse({ status: "contract_period_conflict" }, 409);
+      }
+      throw new Error(`Unexpected request: ${method} ${url}`);
+    });
+    const user = userEvent.setup();
+    renderWorkspace(fetchMock);
+
+    await user.click(
+      await screen.findByRole("button", { name: "+ Yeni dönem ekle" }),
+    );
+    fireEvent.input(screen.getByLabelText("Başlangıç"), {
+      target: { value: "2026-10-01" },
+    });
+    fireEvent.input(screen.getByLabelText("Bitiş"), {
+      target: { value: "2026-12-31" },
+    });
+    await user.click(screen.getByRole("button", { name: "Yeni dönemi kaydet" }));
+
+    expect(
+      await screen.findByText(
+        "Bu tarih aralığı müşterinin başka bir sözleşmesiyle çakışıyor.",
+      ),
+    ).toBeInTheDocument();
+  });
+
   it("starts with a clean contract and plan session when the customer changes", async () => {
     const firstVisit = {
       committedOn: "2026-09-02",
@@ -90,7 +265,7 @@ describe("CustomerWorkspace reliable date writes", () => {
     vi.stubGlobal("fetch", fetchMock);
     const { rerender } = render(
       <CustomerWorkspace
-        customer={{ id: customerId, name: "Zevahir Home" }}
+        customer={customer}
         live
         onContractSaved={onContractSaved}
         onVisitsSaved={onVisitsSaved}
@@ -114,7 +289,7 @@ describe("CustomerWorkspace reliable date writes", () => {
 
     rerender(
       <CustomerWorkspace
-        customer={{ id: otherCustomerId, name: "Kardeşler Grup" }}
+        customer={otherCustomer}
         live
         onContractSaved={onContractSaved}
         onVisitsSaved={onVisitsSaved}

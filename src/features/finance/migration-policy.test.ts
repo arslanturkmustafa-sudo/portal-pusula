@@ -39,7 +39,9 @@ describe("receivables migration policy", () => {
     const journal = JSON.parse(
       readFileSync(resolve(root, "drizzle/meta/_journal.json"), "utf8"),
     ) as { entries: Array<{ idx: number; tag: string }> };
-    expect(journal.entries.at(-1)).toMatchObject({
+    expect(
+      journal.entries.find((entry) => entry.tag === "0006_receivables"),
+    ).toMatchObject({
       idx: 6,
       tag: "0006_receivables",
     });

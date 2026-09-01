@@ -1,15 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { authenticateAccountLogin } from "@/features/account";
 import {
-  createSessionToken,
+  createAccountSessionToken,
   sessionCookieName,
   sessionCookieOptions,
 } from "@/platform/auth/session";
 import {
   PasswordVerificationRuntimeError,
-  verifyAdminCredentials,
 } from "@/platform/auth/password";
 import { getAuthEnvironment } from "@/platform/config/auth-env";
+import { getDatabaseProbeEnvironment } from "@/platform/config/readiness-env";
+import { getPlatformDatabasePool } from "@/platform/database/mysql-platform";
 import { correlationIdFromHeaders } from "@/platform/http/correlation-id";
 import { requestLogger } from "@/platform/logging/logger";
 
@@ -19,6 +21,7 @@ export const runtime = "nodejs";
 const MAX_FORM_BYTES = 4_096;
 
 type LoginDiagnosticCategory =
+  | "auth_database_unavailable"
   | "auth_env_invalid"
   | "auth_scrypt_runtime_error"
   | "credentials_rejected";
@@ -80,24 +83,34 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       return failedLogin(request, "auth_env_invalid");
     }
 
-    let valid: boolean;
+    let account;
     try {
-      valid = await verifyAdminCredentials(email, password, environment);
+      account = await authenticateAccountLogin(
+        getPlatformDatabasePool(getDatabaseProbeEnvironment()),
+        email,
+        password,
+        environment,
+        { correlationId: correlationIdFromHeaders(request.headers) },
+      );
     } catch (error) {
       return failedLogin(
         request,
         error instanceof PasswordVerificationRuntimeError
           ? "auth_scrypt_runtime_error"
-          : "credentials_rejected",
+          : "auth_database_unavailable",
       );
     }
-    if (!valid) return failedLogin(request, "credentials_rejected");
+    if (!account) return failedLogin(request, "credentials_rejected");
 
     const production = process.env.NODE_ENV === "production";
     const response = sameOriginRedirect("/");
     response.cookies.set({
       name: sessionCookieName(production),
-      value: createSessionToken(environment.SESSION_SECRET),
+      value: createAccountSessionToken(
+        environment.SESSION_SECRET,
+        account.id,
+        account.credentialVersion,
+      ),
       ...sessionCookieOptions(production),
     });
     response.headers.set(

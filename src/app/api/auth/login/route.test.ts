@@ -4,25 +4,26 @@ import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  authenticateAccountLogin: vi.fn(),
   getAuthEnvironment: vi.fn(),
+  getDatabaseProbeEnvironment: vi.fn(),
+  getPlatformDatabasePool: vi.fn(),
   requestLogger: vi.fn(),
-  verifyAdminCredentials: vi.fn(),
   warn: vi.fn(),
 }));
 
-vi.mock("@/platform/auth/password", async (importOriginal) => {
-  const original =
-    await importOriginal<typeof import("@/platform/auth/password")>();
-  return {
-    ...original,
-    verifyAdminCredentials: mocks.verifyAdminCredentials,
-  };
-});
-
+vi.mock("@/features/account", () => ({
+  authenticateAccountLogin: mocks.authenticateAccountLogin,
+}));
 vi.mock("@/platform/config/auth-env", () => ({
   getAuthEnvironment: mocks.getAuthEnvironment,
 }));
-
+vi.mock("@/platform/config/readiness-env", () => ({
+  getDatabaseProbeEnvironment: mocks.getDatabaseProbeEnvironment,
+}));
+vi.mock("@/platform/database/mysql-platform", () => ({
+  getPlatformDatabasePool: mocks.getPlatformDatabasePool,
+}));
 vi.mock("@/platform/logging/logger", () => ({
   requestLogger: mocks.requestLogger,
 }));
@@ -44,15 +45,14 @@ function loginRequest(): NextRequest {
       email: "yonetici@example.com",
       password: "password-input-sentinel",
     }),
-    headers: {
-      "x-correlation-id": correlationId,
-    },
+    headers: { "x-correlation-id": correlationId },
     method: "POST",
   });
 }
 
 async function expectFailedLogin(
   category:
+    | "auth_database_unavailable"
     | "auth_env_invalid"
     | "auth_scrypt_runtime_error"
     | "credentials_rejected",
@@ -64,10 +64,7 @@ async function expectFailedLogin(
   expect(response.headers.get("set-cookie")).toBeNull();
   expect(mocks.requestLogger).toHaveBeenCalledWith(correlationId);
   expect(mocks.warn).toHaveBeenCalledWith(
-    {
-      category,
-      event: "auth.login.failed",
-    },
+    { category, event: "auth.login.failed" },
     `Administrator login failed: ${category}`,
   );
   expect(JSON.stringify(mocks.warn.mock.calls)).not.toContain(
@@ -78,7 +75,10 @@ async function expectFailedLogin(
 describe("administrator login diagnostics", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.authenticateAccountLogin.mockResolvedValue(null);
     mocks.getAuthEnvironment.mockReturnValue(environment);
+    mocks.getDatabaseProbeEnvironment.mockReturnValue({});
+    mocks.getPlatformDatabasePool.mockReturnValue({});
     mocks.requestLogger.mockReturnValue({ warn: mocks.warn });
   });
 
@@ -86,7 +86,6 @@ describe("administrator login diagnostics", () => {
     mocks.getAuthEnvironment.mockImplementationOnce(() => {
       throw new Error("environment-value-sentinel");
     });
-
     await expectFailedLogin("auth_env_invalid");
     expect(JSON.stringify(mocks.warn.mock.calls)).not.toContain(
       "environment-value-sentinel",
@@ -94,16 +93,23 @@ describe("administrator login diagnostics", () => {
   });
 
   it("distinguishes an scrypt runtime failure from rejected credentials", async () => {
-    mocks.verifyAdminCredentials.mockRejectedValueOnce(
+    mocks.authenticateAccountLogin.mockRejectedValueOnce(
       new PasswordVerificationRuntimeError(),
     );
-
     await expectFailedLogin("auth_scrypt_runtime_error");
   });
 
   it("logs rejected credentials without changing the external redirect", async () => {
-    mocks.verifyAdminCredentials.mockResolvedValueOnce(false);
-
     await expectFailedLogin("credentials_rejected");
+  });
+
+  it("keeps database failures generic externally", async () => {
+    mocks.authenticateAccountLogin.mockRejectedValueOnce(
+      new Error("database-error-sentinel"),
+    );
+    await expectFailedLogin("auth_database_unavailable");
+    expect(JSON.stringify(mocks.warn.mock.calls)).not.toContain(
+      "database-error-sentinel",
+    );
   });
 });

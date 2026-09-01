@@ -2,7 +2,7 @@
 
 ## Amaç ve güven modeli
 
-Bu belge mevcut platform altyapısının tehdit sınırını kaydeder. Portal Pusula artık tek yönetici için environment tabanlı parola doğrulama ve imzalı 8 saatlik oturum uygular. Ana sayfa ile müşteri API'leri hem proxy hem server/API katmanında korunur. Çok kullanıcılı RBAC, organization/workspace izolasyonu ve parola kurtarma henüz yoktur.
+Bu belge mevcut platform altyapısının tehdit sınırını kaydeder. Portal Pusula tek yönetici için DB tabanlı hesap, scrypt parola doğrulama ve imzalı 8 saatlik oturum uygular; ilk hesap mevcut environment kimliğinden tek seferlik güvenli geçişle oluşturulabilir. Parola değişikliği kimlik bilgisi sürümünü artırarak diğer hesap oturumlarını geçersiz kılar. Ana sayfa ile müşteri API'leri hem proxy hem server/API katmanında korunur. Çok kullanıcılı RBAC, organization/workspace izolasyonu ve parola kurtarma henüz yoktur.
 
 Korunan varlıklar server-side environment secret'ları, DB erişimi, migration bütünlüğü, job/outbox/audit kayıtları, iç endpoint'lerin varlık/çalışma ayrıntıları ve gelecekteki iş verisidir. Hostinger paneli, public internet/CDN, Node runtime, MariaDB, cron scheduler ve geliştirici çalışma alanı ayrı güven sınırlarıdır.
 

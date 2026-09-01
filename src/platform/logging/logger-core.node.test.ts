@@ -42,6 +42,9 @@ describe("structured logging", () => {
       },
       DB_PASSWORD: "database-password-sentinel",
       READINESS_BEARER_TOKEN: "readiness-token-sentinel",
+      currentPassword: "current-password-sentinel",
+      newPassword: "new-password-sentinel",
+      confirmation: "confirmation-sentinel",
     });
 
     expect(record.event).toBe("redaction.checked");
@@ -54,6 +57,9 @@ describe("structured logging", () => {
     expect(output).not.toContain("oauth-token-sentinel");
     expect(output).not.toContain("database-password-sentinel");
     expect(output).not.toContain("readiness-token-sentinel");
+    expect(output).not.toContain("current-password-sentinel");
+    expect(output).not.toContain("new-password-sentinel");
+    expect(output).not.toContain("confirmation-sentinel");
   });
 
   it("censors cron bearer tokens and authorization header variants", async () => {

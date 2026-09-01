@@ -33,7 +33,7 @@ export async function PATCH(
   request: NextRequest,
   context: CustomerRouteContext,
 ): Promise<NextResponse> {
-  if (!isAdminAuthenticated(request)) {
+  if (!(await isAdminAuthenticated(request))) {
     return json({ status: "unauthorized" }, 401);
   }
 

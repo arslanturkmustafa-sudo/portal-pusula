@@ -1,5 +1,6 @@
 import {
   createHash,
+  randomBytes,
   scrypt as scryptCallback,
   timingSafeEqual,
 } from "node:crypto";
@@ -96,6 +97,31 @@ export async function verifyPassword(
   try {
     const actualKey = await deriveKey(password, parsed.salt);
     return timingSafeEqual(actualKey, parsed.derivedKey);
+  } catch {
+    throw new PasswordVerificationRuntimeError();
+  }
+}
+
+export async function hashPassword(password: string): Promise<string> {
+  if (
+    typeof password !== "string" ||
+    password.length < 1 ||
+    password.length > 256
+  ) {
+    throw new PasswordVerificationRuntimeError();
+  }
+
+  try {
+    const salt = randomBytes(16);
+    const derivedKey = await deriveKey(password, salt);
+    return [
+      "scrypt",
+      String(SCRYPT_COST),
+      String(SCRYPT_BLOCK_SIZE),
+      String(SCRYPT_PARALLELIZATION),
+      salt.toString("base64url"),
+      derivedKey.toString("base64url"),
+    ].join(":");
   } catch {
     throw new PasswordVerificationRuntimeError();
   }
