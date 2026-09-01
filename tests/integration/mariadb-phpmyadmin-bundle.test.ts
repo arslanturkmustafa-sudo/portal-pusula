@@ -626,10 +626,10 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
         tablesAfter,
       }).toEqual({
         diagnostics: {
-          application_columns: 112,
+          application_columns: 114,
           checks: 45,
           foreign_keys: 6,
-          indexes: 36,
+          indexes: 38,
           matching_application_tables: 11,
           matching_journal_tables: 1,
           sql_mode: expect.any(String),
