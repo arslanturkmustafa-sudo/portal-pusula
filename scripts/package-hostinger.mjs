@@ -32,6 +32,7 @@ const allowedProductionScripts = new Set([
   "scripts/migration-integrity.mjs",
 ]);
 const excludedLocalScripts = new Set([
+  "scripts/build-phpmyadmin-migration-bundle.mjs",
   "scripts/generate-pwa-icons.mjs",
   "scripts/package-hostinger.mjs",
   "scripts/package-source-checkpoint.mjs",

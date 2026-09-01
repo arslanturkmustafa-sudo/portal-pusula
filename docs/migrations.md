@@ -11,6 +11,8 @@ Bu şema müşteri, finans, görev, kullanıcı/auth, workspace/organization vey
 
 Bu adımlar canlı Hostinger veritabanına uygulanmaz. Gerçek veritabanı parolası veya başka bir sır CLI argümanına, komut geçmişine, loga, test çıktısına ya da sürümlü dosyaya yazılmaz.
 
+SSH/npm erişimi olmayan Hostinger hedefindeki yalnız boş ve disposable staging kurulumu için ayrı [phpMyAdmin clean-only migration runbook'u](./phpmyadmin-clean-migration.md) kullanılır. Bu paket mevcut şemayı yükseltmez ve normal runner'ın yerine genel bir migration yöntemi değildir.
+
 ## Yerel disposable MariaDB doğrulaması
 
 Ön koşullar: Node/npm sürümleri proje ile uyumlu olmalı, Docker Engine çalışmalı ve Docker Compose v2 erişilebilir olmalıdır.

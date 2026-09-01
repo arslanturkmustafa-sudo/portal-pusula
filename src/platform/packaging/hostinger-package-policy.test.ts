@@ -214,6 +214,9 @@ describe.sequential("Hostinger package sensitive-file policy", () => {
     expect(entries).toContain("public/icons/portal-pusula-192-v1.png");
 
     expect(entries).not.toContain("scripts/package-source-checkpoint.mjs");
+    expect(entries).not.toContain(
+      "scripts/build-phpmyadmin-migration-bundle.mjs",
+    );
     expect(entries).not.toContain("scripts/probe-readiness-secure.ps1");
     expect(entries).not.toContain("scripts/test-mariadb.mjs");
     expect(entries).not.toContain("scripts/run-e2e.mjs");

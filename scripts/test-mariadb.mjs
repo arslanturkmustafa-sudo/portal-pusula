@@ -177,6 +177,12 @@ try {
 
   console.log("Running migration correctness tests against disposable MariaDB...");
   await runIntegrationFile(
+    "mariadb-phpmyadmin-bundle.test.ts",
+    publishedPort,
+  );
+
+  console.log("Running migration runner correctness tests against disposable MariaDB...");
+  await runIntegrationFile(
     "mariadb-migrations.test.ts",
     publishedPort,
   );

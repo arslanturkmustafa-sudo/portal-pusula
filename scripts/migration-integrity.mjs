@@ -3,6 +3,9 @@ import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 export const DRIZZLE_MIGRATIONS_TABLE = "__drizzle_migrations";
+export const MIGRATION_LOCK_PREFIX = "pp:migrate:";
+export const MIGRATION_LOCK_DIGEST_HEX_LENGTH = 48;
+export const MIGRATION_LOCK_TIMEOUT_SECONDS = 10;
 
 const migrationTagPattern = /^[0-9]{4}_[A-Za-z0-9][A-Za-z0-9_-]*$/u;
 
@@ -19,6 +22,13 @@ function failIntegrity() {
 
 function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
+}
+
+export function migrationLockName(databaseName) {
+  return `${MIGRATION_LOCK_PREFIX}${sha256(databaseName).slice(
+    0,
+    MIGRATION_LOCK_DIGEST_HEX_LENGTH,
+  )}`;
 }
 
 export async function readExpectedMigrations(migrationsFolder) {

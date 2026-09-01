@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -9,12 +8,13 @@ import mysql from "mysql2/promise";
 import {
   assertAppliedMigrationIntegrity,
   assertExpectedMigrationsUnchanged,
+  MIGRATION_LOCK_TIMEOUT_SECONDS,
+  migrationLockName,
   readExpectedMigrations,
 } from "./migration-integrity.mjs";
 
 const MIGRATION_CONNECTION_LIMIT = 1;
 const MIGRATION_CONNECT_TIMEOUT_MS = 5_000;
-const MIGRATION_LOCK_TIMEOUT_SECONDS = 10;
 const migrationsFolder = resolve(
   dirname(fileURLToPath(import.meta.url)),
   "..",
@@ -85,15 +85,6 @@ function migrationEnvironment() {
     user: requiredNonBlankEnvironment("DB_USER", 128),
     password: requiredNonBlankEnvironment("DB_PASSWORD", 1024),
   };
-}
-
-function migrationLockName(databaseName) {
-  const databaseDigest = createHash("sha256")
-    .update(databaseName, "utf8")
-    .digest("hex")
-    .slice(0, 48);
-
-  return `pp:migrate:${databaseDigest}`;
 }
 
 class MigrationRuntimeError extends Error {
