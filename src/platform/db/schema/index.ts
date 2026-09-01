@@ -41,3 +41,11 @@ export {
   type NewScheduledJobRecord,
   type ScheduledJobRecord,
 } from "./scheduled-job";
+export {
+  receivable,
+  receivableCollection,
+  type NewReceivableCollectionRecord,
+  type NewReceivableRecord,
+  type ReceivableCollectionRecord,
+  type ReceivableRecord,
+} from "./receivable";

@@ -16,9 +16,11 @@ Kaynakta çalışan ilk dikey dilim şunları içerir:
 - sabit haftalık gün dayatmayan, her ay tarih seçilen ziyaret planı;
 - ziyaretin iç saat/süre planı ile tamamlandı, telafi bekliyor ve mutabakatla iptal durumları;
 - sözleşme ve ziyaret yazmalarıyla aynı transaction içinde denetim kaydı;
+- sözleşme ayından sınır aylarda gün oranlı ve idempotent alacak üretme, geçmiş alacak açılışı ve kısmi tahsilat;
+- net/KDV/toplam tutar snapshot'ı, kalan bakiye ve vade durumunun finans ekranında hesaplanması;
 - PWA kabuğu, liveness/readiness ve mevcut güvenli platform altyapısı.
 
-Aylık hakediş, geçmiş alacak, tahsilat ve gider/kart modülleri sıradaki iş dilimleridir. Canlı ekranda henüz açılmayan alanlar veri varmış gibi gösterilmez.
+Gider/kart, vergi tahmini ve otomatik aylık üretim sıradaki iş dilimleridir. Canlı ekranda henüz açılmayan alanlar veri varmış gibi gösterilmez.
 
 ## Teknik temel
 
@@ -70,8 +72,9 @@ Cron değişkenleri kaynakta varsayılan kapalı altyapı adayıdır; gerçek i�
 - `0003_platform_cron_dispatch_gate.sql`
 - `0004_customer.sql`
 - `0005_consulting_contract_visits.sql`
+- `0006_receivables.sql`
 
-Uygulanmış migration dosyası değiştirilmez; her düzeltme yeni ileri yönlü migration olur. `0004_customer.sql` müşteri tablosunu, `0005_consulting_contract_visits.sql` sözleşme ve aylık ziyaret tablolarını ekler. Mevcut Hostinger veritabanına clean-only phpMyAdmin paketi tekrar yüklenmez; journal'ı bulunan hedefte normal migration runner yalnız eksik migration'ı uygular.
+Uygulanmış migration dosyası değiştirilmez; her düzeltme yeni ileri yönlü migration olur. `0004_customer.sql` müşteri tablosunu, `0005_consulting_contract_visits.sql` sözleşme ve aylık ziyaret tablolarını, `0006_receivables.sql` alacak ve tahsilat tablolarını ekler. Mevcut Hostinger veritabanına clean-only phpMyAdmin paketi tekrar yüklenmez; journal'ı bulunan ve SSH/npm erişimi olmayan hedefte [seçili incremental phpMyAdmin paketi](docs/phpmyadmin-incremental-migration.md) yalnız sıradaki migration'ı uygular.
 
 ## Yerel geliştirme
 
@@ -101,10 +104,10 @@ npm run package:hostinger
 
 Canlı kabul sırası:
 
-1. Mevcut hedefte normal runner ile yalnız eksik `0004`/`0005` migration'larını uygula.
+1. Mevcut Hostinger hedefinde incremental phpMyAdmin paketiyle yalnız sıradaki migration'ı (`0006`) uygula ve exact başarı satırını doğrula.
 2. `ADMIN_EMAIL`, `ADMIN_PASSWORD_HASH` ve `SESSION_SECRET` değerlerini Hostinger environment alanına ekle.
 3. Güncel ZIP'i dağıt ve build'in `Akım` olmasını bekle.
-4. `/giris`, yetkisiz yönlendirme, yetkili giriş, müşteri, sözleşme ve aylık ziyaret ekleme/yeniden okuma akışını doğrula.
+4. `/giris`, yetkisiz yönlendirme, yetkili giriş, müşteri, sözleşme, aylık ziyaret, alacak ve tahsilat akışını doğrula.
 5. Sorun çıkarsa yalnız ilgili sınırda hedefli test ve log incelemesi yap.
 
 ## Belgeler

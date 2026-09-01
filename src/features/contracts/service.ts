@@ -7,6 +7,7 @@ import type { Pool } from "mysql2/promise";
 import { findCustomerForUpdate } from "@/features/customers/repository";
 import { summarizeVisitMonth } from "@/features/contracts/month-summary";
 import {
+  contractHasVisitOutsideRange,
   deletePlannedMonthVisits,
   findOverlappingContract,
   findOwnedContractForUpdate,
@@ -17,6 +18,7 @@ import {
   listContractRecords,
   listMonthVisitRecords,
   type MonthlyVisit,
+  updateContractRecord,
   updateVisitRecord,
 } from "@/features/contracts/repository";
 import {
@@ -25,6 +27,8 @@ import {
   type MonthlyVisitPlanInput,
   monthParameterSchema,
   monthlyVisitPlanInputSchema,
+  type UpdateContractInput,
+  updateContractInputSchema,
   type UpdateVisitResolutionInput,
   updateVisitResolutionInputSchema,
 } from "@/features/contracts/validation";
@@ -51,6 +55,13 @@ export class ContractPeriodConflictError extends Error {
   constructor() {
     super("The contract period overlaps an existing contract.");
     this.name = "ContractPeriodConflictError";
+  }
+}
+
+export class ContractVisitRangeConflictError extends Error {
+  constructor() {
+    super("The edited contract period excludes an existing visit.");
+    this.name = "ContractVisitRangeConflictError";
   }
 }
 
@@ -93,6 +104,15 @@ export type MonthlyVisitPlan = Readonly<{
   summary: ReturnType<typeof summarizeVisitMonth>;
   visits: readonly MonthlyVisit[];
 }>;
+
+function isDuplicateEntry(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === "ER_DUP_ENTRY"
+  );
+}
 
 function monthBounds(month: string): Readonly<{
   monthStart: string;
@@ -208,51 +228,129 @@ export async function createCustomerContract(
   const input = createContractInputSchema.parse(rawInput);
   const now = toUtcDateTime6(context.now ?? new Date());
 
-  return withUtcTransaction(pool, async (connection) => {
-    const customer = await findCustomerForUpdate(connection, customerId);
-    if (!customer) throw new ContractResourceNotFoundError();
-    if (customer.status !== "active") throw new ContractCustomerInactiveError();
+  try {
+    return await withUtcTransaction(pool, async (connection) => {
+      const customer = await findCustomerForUpdate(connection, customerId);
+      if (!customer) throw new ContractResourceNotFoundError();
+      if (customer.status !== "active") throw new ContractCustomerInactiveError();
 
-    if (
-      input.status !== "closed" &&
-      (await findOverlappingContract(
+      if (
+        input.status !== "closed" &&
+        (await findOverlappingContract(
+          connection,
+          customerId,
+          input.startsOn,
+          input.endsOn,
+        ))
+      ) {
+        throw new ContractPeriodConflictError();
+      }
+
+      const contract: ConsultingContract = {
+        createdAtUtc: now,
+        currency: "TRY",
+        customerId,
+        endsOn: input.endsOn,
+        id: randomUUID(),
+        internalNote: input.internalNote,
+        monthlyFeeAmount: input.monthlyFeeAmount,
+        paymentDay: input.paymentDay,
+        startsOn: input.startsOn,
+        status: input.status,
+        updatedAtUtc: now,
+        vatMode: input.vatMode,
+        vatRate: input.vatRate,
+      };
+
+      await insertContractRecord(connection, contract);
+      await appendAuditEvent(connection, {
+        action: "consulting_contract.created",
+        actorType: "user",
+        afterSummary: contractAuditSummary(contract),
+        correlationId: context.correlationId,
+        entityId: contract.id,
+        entityType: "consulting_contract",
+        occurredAtUtc: now,
+      });
+      return contract;
+    });
+  } catch (error) {
+    if (isDuplicateEntry(error)) throw new ContractPeriodConflictError();
+    throw error;
+  }
+}
+
+export async function updateCustomerContract(
+  pool: Pool,
+  customerId: string,
+  contractId: string,
+  rawInput: UpdateContractInput,
+  context: ContractWriteContext,
+): Promise<ConsultingContract> {
+  assertCanonicalUuid(customerId);
+  assertCanonicalUuid(contractId);
+  const input = updateContractInputSchema.parse(rawInput);
+  const now = toUtcDateTime6(context.now ?? new Date());
+
+  try {
+    return await withUtcTransaction(pool, async (connection) => {
+      // Every contract writer takes the customer lock first. Besides validating
+      // ownership, this serializes overlap checks for the same customer.
+      const customer = await findCustomerForUpdate(connection, customerId);
+      if (!customer) throw new ContractResourceNotFoundError();
+
+      const before = await findOwnedContractForUpdate(
         connection,
         customerId,
-        input.startsOn,
-        input.endsOn,
-      ))
-    ) {
-      throw new ContractPeriodConflictError();
-    }
+        contractId,
+      );
+      if (!before) throw new ContractResourceNotFoundError();
 
-    const contract: ConsultingContract = {
-      createdAtUtc: now,
-      currency: "TRY",
-      customerId,
-      endsOn: input.endsOn,
-      id: randomUUID(),
-      internalNote: input.internalNote,
-      monthlyFeeAmount: input.monthlyFeeAmount,
-      paymentDay: input.paymentDay,
-      startsOn: input.startsOn,
-      status: input.status,
-      updatedAtUtc: now,
-      vatMode: input.vatMode,
-      vatRate: input.vatRate,
-    };
+      if (
+        input.status !== "closed" &&
+        (await findOverlappingContract(
+          connection,
+          customerId,
+          input.startsOn,
+          input.endsOn,
+          contractId,
+        ))
+      ) {
+        throw new ContractPeriodConflictError();
+      }
+      if (
+        await contractHasVisitOutsideRange(
+          connection,
+          contractId,
+          input.startsOn,
+          input.endsOn,
+        )
+      ) {
+        throw new ContractVisitRangeConflictError();
+      }
 
-    await insertContractRecord(connection, contract);
-    await appendAuditEvent(connection, {
-      action: "consulting_contract.created",
-      actorType: "user",
-      afterSummary: contractAuditSummary(contract),
-      correlationId: context.correlationId,
-      entityId: contract.id,
-      entityType: "consulting_contract",
-      occurredAtUtc: now,
+      const after: ConsultingContract = {
+        ...before,
+        ...input,
+        updatedAtUtc: now,
+      };
+      await updateContractRecord(connection, after);
+      await appendAuditEvent(connection, {
+        action: "consulting_contract.updated",
+        actorType: "user",
+        afterSummary: contractAuditSummary(after),
+        beforeSummary: contractAuditSummary(before),
+        correlationId: context.correlationId,
+        entityId: contractId,
+        entityType: "consulting_contract",
+        occurredAtUtc: now,
+      });
+      return after;
     });
-    return contract;
-  });
+  } catch (error) {
+    if (isDuplicateEntry(error)) throw new ContractPeriodConflictError();
+    throw error;
+  }
 }
 
 export async function getMonthlyVisitPlan(

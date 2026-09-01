@@ -68,6 +68,37 @@ type CustomerWorkspaceProps = Readonly<{
 type LoadState = "error" | "loading" | "ready";
 type SaveState = "error" | "idle" | "saving";
 
+function formText(formData: FormData, name: string): string {
+  const value = formData.get(name);
+  return typeof value === "string" ? value : "";
+}
+
+function contractErrorMessage(status: unknown): string {
+  if (status === "contract_period_conflict") {
+    return "Bu tarih aralığı müşterinin başka bir sözleşmesiyle çakışıyor.";
+  }
+  if (status === "contract_visit_range_conflict") {
+    return "Yeni tarih aralığının dışında kalan ziyaretler var. Önce bu ziyaretleri düzenleyin.";
+  }
+  if (status === "validation_error") {
+    return "Bitiş tarihi başlangıçtan önce olamaz; ücret, ödeme günü ve KDV alanlarını da kontrol edin.";
+  }
+  return "Sözleşme kaydedilemedi. Lütfen yeniden deneyin.";
+}
+
+function planErrorMessage(status: unknown): string {
+  if (status === "month_outside_contract") {
+    return "Seçilen ay veya ziyaret günü sözleşme tarihleri dışında.";
+  }
+  if (status === "month_plan_locked") {
+    return "Gerçekleşme kaydı bulunan ay topluca değiştirilemez.";
+  }
+  if (status === "validation_error") {
+    return "Ziyaret günleri tekrarlanamaz; tarih, saat ve süre alanlarını kontrol edin.";
+  }
+  return "Aylık plan kaydedilemedi. Lütfen yeniden deneyin.";
+}
+
 function istanbulToday(): string {
   const parts = new Intl.DateTimeFormat("en-CA", {
     day: "2-digit",
@@ -165,7 +196,11 @@ function visitStatusLabel(status: VisitStatus): string {
   }[status];
 }
 
-export function CustomerWorkspace({
+export function CustomerWorkspace(props: CustomerWorkspaceProps) {
+  return <CustomerWorkspaceSession key={props.customer.id} {...props} />;
+}
+
+function CustomerWorkspaceSession({
   customer,
   live,
   onContractSaved,
@@ -178,10 +213,13 @@ export function CustomerWorkspace({
   const [draft, setDraft] = useState<ContractDraft>(emptyContractDraft);
   const [contractSaveState, setContractSaveState] =
     useState<SaveState>("idle");
+  const [contractError, setContractError] = useState<string | null>(null);
+  const [isEditingContract, setIsEditingContract] = useState(false);
   const [selectedMonth, setSelectedMonth] = useState(currentIstanbulMonth);
   const [visits, setVisits] = useState<VisitDraft[]>([]);
   const [planLoadState, setPlanLoadState] = useState<LoadState>("ready");
   const [planSaveState, setPlanSaveState] = useState<SaveState>("idle");
+  const [planError, setPlanError] = useState<string | null>(null);
   const [visitSaveId, setVisitSaveId] = useState<string | null>(null);
   const [periodTouched, setPeriodTouched] = useState(false);
 
@@ -205,6 +243,8 @@ export function CustomerWorkspace({
           null;
         if (selected) setPlanLoadState("loading");
         setContract(selected);
+        setIsEditingContract(false);
+        setContractError(null);
         if (selected) {
           setDraft(contractDraft(selected));
           onContractSaved(selected);
@@ -241,6 +281,7 @@ export function CustomerWorkspace({
         const loadedVisits = payload.monthPlan?.visits ?? [];
         setVisits(loadedVisits.map(visitDraft));
         onVisitsSaved(loadedVisits);
+        setPlanError(null);
         setPlanLoadState("ready");
       })
       .catch((error: unknown) => {
@@ -274,37 +315,77 @@ export function CustomerWorkspace({
 
   async function saveContract(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!live || contract !== null) return;
+    if (!live || (contract !== null && !isEditingContract)) return;
+    const formData = new FormData(event.currentTarget);
+    const submittedDraft: ContractDraft = {
+      endsOn: formText(formData, "endsOn"),
+      internalNote: formText(formData, "internalNote"),
+      monthlyFeeAmount: formText(formData, "monthlyFeeAmount"),
+      paymentDay: formText(formData, "paymentDay"),
+      startsOn: formText(formData, "startsOn"),
+      vatMode: formText(formData, "vatMode") as VatMode,
+      vatRate:
+        formText(formData, "vatMode") === "exempt"
+          ? "0"
+          : formText(formData, "vatRate"),
+    };
+
+    if (
+      submittedDraft.startsOn === "" ||
+      submittedDraft.endsOn === "" ||
+      submittedDraft.endsOn < submittedDraft.startsOn
+    ) {
+      setContractSaveState("error");
+      setContractError(contractErrorMessage("validation_error"));
+      return;
+    }
+
     setContractSaveState("saving");
+    setContractError(null);
 
     try {
-      const response = await fetch(`/api/customers/${customer.id}/contracts`, {
+      const endpoint =
+        contract === null
+          ? `/api/customers/${customer.id}/contracts`
+          : `/api/customers/${customer.id}/contracts/${contract.id}`;
+      const response = await fetch(endpoint, {
         body: JSON.stringify({
-          endsOn: draft.endsOn,
-          internalNote: draft.internalNote,
-          monthlyFeeAmount: draft.monthlyFeeAmount.replace(",", "."),
-          paymentDay: Number(draft.paymentDay),
-          startsOn: draft.startsOn,
-          status: "active",
-          vatMode: draft.vatMode,
+          endsOn: submittedDraft.endsOn,
+          internalNote: submittedDraft.internalNote,
+          monthlyFeeAmount: submittedDraft.monthlyFeeAmount.replace(",", "."),
+          paymentDay: Number(submittedDraft.paymentDay),
+          startsOn: submittedDraft.startsOn,
+          status: contract?.status ?? "active",
+          vatMode: submittedDraft.vatMode,
           vatRate:
-            draft.vatMode === "exempt"
+            submittedDraft.vatMode === "exempt"
               ? "0"
-              : draft.vatRate.replace(",", "."),
+              : submittedDraft.vatRate.replace(",", "."),
         }),
         credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
-        method: "POST",
+        method: contract === null ? "POST" : "PATCH",
       });
-      if (!response.ok) throw new Error("Contract could not be saved.");
-      const payload = (await response.json()) as { contract: ContractDto };
+      const payload = (await response.json()) as {
+        contract?: ContractDto;
+        status?: string;
+      };
+      if (!response.ok || payload.contract === undefined) {
+        setContractSaveState("error");
+        setContractError(contractErrorMessage(payload.status));
+        return;
+      }
       setPlanLoadState("loading");
       setContract(payload.contract);
       setDraft(contractDraft(payload.contract));
       setContractSaveState("idle");
+      setContractError(null);
+      setIsEditingContract(false);
+      setPeriodTouched(false);
       onContractSaved(payload.contract);
     } catch {
       setContractSaveState("error");
+      setContractError(contractErrorMessage(null));
     }
   }
 
@@ -316,37 +397,65 @@ export function CustomerWorkspace({
     );
   }
 
-  async function savePlan() {
+  async function savePlan(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
     if (!live || contract === null || monthLocked) return;
+    const formData = new FormData(event.currentTarget);
+    const planMonth = formText(formData, "selectedMonth");
+    const submittedVisits = visits.map((visit, index) => ({
+      committedOn: formText(formData, `visits.${index}.committedOn`),
+      internalDurationMinutes:
+        formText(formData, `visits.${index}.internalDurationMinutes`) === ""
+          ? null
+          : Number(
+              formText(formData, `visits.${index}.internalDurationMinutes`),
+            ),
+      internalStartTime:
+        formText(formData, `visits.${index}.internalStartTime`) || null,
+    }));
+
+    if (
+      !/^\d{4}-\d{2}$/u.test(planMonth) ||
+      submittedVisits.some((visit) => visit.committedOn === "") ||
+      new Set(submittedVisits.map((visit) => visit.committedOn)).size !==
+        submittedVisits.length
+    ) {
+      setPlanSaveState("error");
+      setPlanError(planErrorMessage("validation_error"));
+      return;
+    }
+
     setPlanSaveState("saving");
+    setPlanError(null);
     try {
       const response = await fetch(
-        `/api/customers/${customer.id}/contracts/${contract.id}/month-plans/${selectedMonth}`,
+        `/api/customers/${customer.id}/contracts/${contract.id}/month-plans/${planMonth}`,
         {
           body: JSON.stringify({
-            visits: visits.map((visit) => ({
-              committedOn: visit.committedOn,
-              internalDurationMinutes:
-                visit.internalDurationMinutes === ""
-                  ? null
-                  : Number(visit.internalDurationMinutes),
-              internalStartTime: visit.internalStartTime || null,
-            })),
+            visits: submittedVisits,
           }),
           credentials: "same-origin",
           headers: { "Content-Type": "application/json" },
           method: "PUT",
         },
       );
-      if (!response.ok) throw new Error("Monthly plan could not be saved.");
       const payload = (await response.json()) as {
-        monthPlan: { visits: VisitDto[] };
+        monthPlan?: { visits: VisitDto[] };
+        status?: string;
       };
+      if (!response.ok || payload.monthPlan === undefined) {
+        setPlanSaveState("error");
+        setPlanError(planErrorMessage(payload.status));
+        return;
+      }
       setVisits(payload.monthPlan.visits.map(visitDraft));
+      setSelectedMonth(planMonth);
       setPlanSaveState("idle");
+      setPlanError(null);
       onVisitsSaved(payload.monthPlan.visits);
     } catch {
       setPlanSaveState("error");
+      setPlanError(planErrorMessage(null));
     }
   }
 
@@ -354,6 +463,8 @@ export function CustomerWorkspace({
     const visit = visits[index];
     if (!live || contract === null || !visit?.id) return;
     setVisitSaveId(visit.id);
+    setPlanError(null);
+    setPlanSaveState("idle");
     try {
       const response = await fetch(
         `/api/customers/${customer.id}/contracts/${contract.id}/visits/${visit.id}`,
@@ -375,6 +486,8 @@ export function CustomerWorkspace({
       const payload = (await response.json()) as { visit: VisitDto };
       updateVisit(index, visitDraft(payload.visit));
       setVisitSaveId(null);
+      setPlanError(null);
+      setPlanSaveState("idle");
       onVisitsSaved(
         visits.map((item, itemIndex) =>
           itemIndex === index ? payload.visit : (item as unknown as VisitDto),
@@ -383,6 +496,7 @@ export function CustomerWorkspace({
     } catch {
       setVisitSaveId(null);
       setPlanSaveState("error");
+      setPlanError(planErrorMessage(null));
     }
   }
 
@@ -417,16 +531,16 @@ export function CustomerWorkspace({
               <label>
                 <span>Başlangıç</span>
                 <input
-                  disabled={contract !== null}
+                  disabled={contract !== null && !isEditingContract}
                   name="startsOn"
                   required
                   type="date"
                   value={draft.startsOn}
-                  onChange={(event) => {
-                    const startsOn = event.target.value;
+                  onInput={(event) => {
+                    const startsOn = event.currentTarget.value;
                     setDraft((current) => ({
                       ...current,
-                      endsOn: periodTouched
+                      endsOn: periodTouched || contract !== null
                         ? current.endsOn
                         : oneYearLessOneDay(startsOn),
                       startsOn,
@@ -437,16 +551,17 @@ export function CustomerWorkspace({
               <label>
                 <span>Bitiş</span>
                 <input
-                  disabled={contract !== null}
+                  disabled={contract !== null && !isEditingContract}
                   name="endsOn"
                   required
                   type="date"
                   value={draft.endsOn}
-                  onChange={(event) => {
+                  onInput={(event) => {
+                    const endsOn = event.currentTarget.value;
                     setPeriodTouched(true);
                     setDraft((current) => ({
                       ...current,
-                      endsOn: event.target.value,
+                      endsOn,
                     }));
                   }}
                 />
@@ -454,7 +569,7 @@ export function CustomerWorkspace({
               <label>
                 <span>Aylık ücret</span>
                 <input
-                  disabled={contract !== null}
+                  disabled={contract !== null && !isEditingContract}
                   inputMode="decimal"
                   name="monthlyFeeAmount"
                   required
@@ -470,7 +585,7 @@ export function CustomerWorkspace({
               <label>
                 <span>KDV şekli</span>
                 <select
-                  disabled={contract !== null}
+                  disabled={contract !== null && !isEditingContract}
                   name="vatMode"
                   value={draft.vatMode}
                   onChange={(event) =>
@@ -488,7 +603,10 @@ export function CustomerWorkspace({
               <label>
                 <span>KDV oranı (%)</span>
                 <input
-                  disabled={contract !== null || draft.vatMode === "exempt"}
+                  disabled={
+                    (contract !== null && !isEditingContract) ||
+                    draft.vatMode === "exempt"
+                  }
                   inputMode="decimal"
                   name="vatRate"
                   required={draft.vatMode !== "exempt"}
@@ -504,7 +622,7 @@ export function CustomerWorkspace({
               <label>
                 <span>Ödeme günü</span>
                 <input
-                  disabled={contract !== null}
+                  disabled={contract !== null && !isEditingContract}
                   max={31}
                   min={1}
                   name="paymentDay"
@@ -523,7 +641,7 @@ export function CustomerWorkspace({
               <label className="contract-note">
                 <span>İç not</span>
                 <textarea
-                  disabled={contract !== null}
+                  disabled={contract !== null && !isEditingContract}
                   maxLength={2000}
                   name="internalNote"
                   rows={2}
@@ -544,24 +662,65 @@ export function CustomerWorkspace({
                 <div><dt>Vade</dt><dd>Ayın {draft.paymentDay || "—"}. günü</dd></div>
               </dl>
 
-              {contract === null ? (
-                <button
-                  className="primary-action contract-submit"
-                  disabled={contractSaveState === "saving" || !live}
-                  type="submit"
-                >
-                  {!live
-                    ? "Önizleme kaydı"
-                    : contractSaveState === "saving"
-                      ? "Kaydediliyor…"
-                      : "Sözleşmeyi kaydet"}
-                </button>
-              ) : (
-                <p className="saved-line">Sözleşme kaydı oluşturuldu.</p>
-              )}
-              {contractSaveState === "error" ? (
+              <div className="contract-actions">
+                {contract === null ? (
+                  <button
+                    className="primary-action"
+                    disabled={contractSaveState === "saving" || !live}
+                    type="submit"
+                  >
+                    {!live
+                      ? "Önizleme kaydı"
+                      : contractSaveState === "saving"
+                        ? "Kaydediliyor…"
+                        : "Sözleşmeyi kaydet"}
+                  </button>
+                ) : isEditingContract ? (
+                  <>
+                    <button
+                      className="text-action"
+                      disabled={contractSaveState === "saving"}
+                      type="button"
+                      onClick={() => {
+                        setDraft(contractDraft(contract));
+                        setContractError(null);
+                        setContractSaveState("idle");
+                        setIsEditingContract(false);
+                      }}
+                    >
+                      İptal
+                    </button>
+                    <button
+                      className="primary-action"
+                      disabled={contractSaveState === "saving"}
+                      type="submit"
+                    >
+                      {contractSaveState === "saving"
+                        ? "Kaydediliyor…"
+                        : "Değişiklikleri kaydet"}
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <p className="saved-line">Sözleşme kaydı güncel.</p>
+                    <button
+                      className="text-action"
+                      type="button"
+                      onClick={() => {
+                        setContractError(null);
+                        setContractSaveState("idle");
+                        setPeriodTouched(true);
+                        setIsEditingContract(true);
+                      }}
+                    >
+                      Sözleşmeyi düzenle
+                    </button>
+                  </>
+                )}
+              </div>
+              {contractSaveState === "error" && contractError !== null ? (
                 <p className="entry-error" role="alert">
-                  Sözleşme kaydedilemedi. Tarih, ücret ve KDV alanlarını kontrol edin.
+                  {contractError}
                 </p>
               ) : null}
             </form>
@@ -579,16 +738,22 @@ export function CustomerWorkspace({
             {contract === null ? (
               <p className="workspace-message">Önce sözleşmeyi kaydedin.</p>
             ) : (
-              <>
+              <form className="visit-plan-form" onSubmit={savePlan}>
                 <div className="month-toolbar">
                   <label>
                     <span>Plan ayı</span>
                     <input
+                      name="selectedMonth"
                       type="month"
                       value={selectedMonth}
-                      onChange={(event) => {
+                      onInput={(event) => {
+                        if (!/^\d{4}-\d{2}$/u.test(event.currentTarget.value)) {
+                          return;
+                        }
                         setPlanLoadState("loading");
-                        setSelectedMonth(event.target.value);
+                        setPlanError(null);
+                        setPlanSaveState("idle");
+                        setSelectedMonth(event.currentTarget.value);
                       }}
                     />
                   </label>
@@ -614,11 +779,14 @@ export function CustomerWorkspace({
                           <span>Ziyaret günü</span>
                           <input
                             disabled={monthLocked}
+                            name={`visits.${index}.committedOn`}
                             required
                             type="date"
                             value={visit.committedOn}
-                            onChange={(event) =>
-                              updateVisit(index, { committedOn: event.target.value })
+                            onInput={(event) =>
+                              updateVisit(index, {
+                                committedOn: event.currentTarget.value,
+                              })
                             }
                           />
                         </label>
@@ -626,6 +794,7 @@ export function CustomerWorkspace({
                           <span>İç saat</span>
                           <input
                             disabled={monthLocked}
+                            name={`visits.${index}.internalStartTime`}
                             type="time"
                             value={visit.internalStartTime}
                             onChange={(event) =>
@@ -639,6 +808,7 @@ export function CustomerWorkspace({
                             disabled={monthLocked}
                             max={720}
                             min={15}
+                            name={`visits.${index}.internalDurationMinutes`}
                             step={15}
                             type="number"
                             value={visit.internalDurationMinutes}
@@ -694,10 +864,13 @@ export function CustomerWorkspace({
                               <label>
                                 <span>Gerçekleşen gün</span>
                                 <input
+                                  name={`visits.${index}.deliveredOn`}
                                   type="date"
                                   value={visit.deliveredOn ?? visit.committedOn}
-                                  onChange={(event) =>
-                                    updateVisit(index, { deliveredOn: event.target.value })
+                                  onInput={(event) =>
+                                    updateVisit(index, {
+                                      deliveredOn: event.currentTarget.value,
+                                    })
                                   }
                                 />
                               </label>
@@ -742,18 +915,17 @@ export function CustomerWorkspace({
                   <button
                     className="primary-action plan-submit"
                     disabled={planSaveState === "saving"}
-                    type="button"
-                    onClick={() => void savePlan()}
+                    type="submit"
                   >
                     {planSaveState === "saving" ? "Kaydediliyor…" : "Aylık planı kaydet"}
                   </button>
                 )}
-                {planSaveState === "error" ? (
+                {planSaveState === "error" && planError !== null ? (
                   <p className="entry-error" role="alert">
-                    İşlem tamamlanamadı. Tarih, saat ve süre alanlarını kontrol edin.
+                    {planError}
                   </p>
                 ) : null}
-              </>
+              </form>
             )}
           </div>
         </div>

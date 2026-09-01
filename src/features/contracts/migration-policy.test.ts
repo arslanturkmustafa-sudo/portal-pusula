@@ -34,11 +34,11 @@ describe("consulting contract migration policy", () => {
     );
   });
 
-  it("is the final journal entry and has a generated snapshot", () => {
+  it("retains its immutable journal position and generated snapshot", () => {
     const journal = JSON.parse(
       readFileSync(resolve(root, "drizzle/meta/_journal.json"), "utf8"),
     ) as { entries: Array<{ idx: number; tag: string }> };
-    expect(journal.entries.at(-1)).toMatchObject({
+    expect(journal.entries.find((entry) => entry.idx === 5)).toMatchObject({
       idx: 5,
       tag: "0005_consulting_contract_visits",
     });

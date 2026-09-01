@@ -26,7 +26,7 @@ Bu akış uygulamayı dağıtmaz, kullanıcı oluşturmaz, environment değişke
 - yalnız tamamen boş şemada başlar;
 - her guarded DDL ve journal adımının hemen öncesinde ve doğrulama sonrasında canonical session sözleşmesini yeniden kontrol eder; ortadaki bir session sapmasında sonraki mutasyonları güvenli no-op'a çevirir;
 - her DDL adımından sonra beklenen tablo, kolon, constraint veya index'i `information_schema` üzerinden doğrular;
-- migration tamamlanınca dört exact journal kaydını ve toplam yedi teknik tabloyu doğrular;
+- migration tamamlanınca yedi exact journal kaydını ve migration journal'ı dahil toplam on iki tabloyu doğrular;
 - phpMyAdmin çoklu sorgu hatasından sonra devam edecek biçimde ayarlanmış olsa bile guard başarısızlığından sonra yeni DDL veya journal adımı çalıştırmaz;
 - yalnız tüm kontroller ve lock bırakma işlemi geçtiğinde `PORTAL_PUSULA_MIGRATION_BUNDLE_OK` sonucunu üretir.
 
@@ -155,19 +155,24 @@ FROM `__drizzle_migrations`
 ORDER BY id;
 ```
 
-İlk sorgu yalnız şu yedi teknik tabloyu döndürmelidir:
+İlk sorgu yalnız şu on iki tabloyu döndürmelidir:
 
 - `__drizzle_migrations`
 - `_platform_migration_verification`
 - `audit_event`
+- `consulting_contract`
 - `cron_dispatch_gate`
+- `customer`
 - `job_run`
+- `monthly_visit_commitment`
 - `outbox_event`
+- `receivable`
+- `receivable_collection`
 - `scheduled_job`
 
-İkinci sorgu dört satır döndürmeli; sıra, `hash` ve `created_at` değerleri üretilen manifestteki dört migration kaydıyla exact eşleşmelidir. Uygulama tabloları boş kalır; yalnız migration journal'ında dört teknik kayıt bulunur.
+İkinci sorgu yedi satır döndürmeli; sıra, `hash` ve `created_at` değerleri üretilen manifestteki yedi migration kaydıyla exact eşleşmelidir. Uygulama tabloları boş kalır; yalnız migration journal'ında yedi teknik kayıt bulunur.
 
-Kabul kanıtına şunlar kaydedilebilir: UTC zaman, manifestteki `bundleId`, SQL `sqlSha256`, exact başarı imzasının görüldüğü, yedi tablo/dört journal satırı sonucu ve operatör. DB adı, kullanıcı, parola, tam sunucu sürümü, URL query'si, cookie veya Authorization değeri kaydedilmez.
+Kabul kanıtına şunlar kaydedilebilir: UTC zaman, manifestteki `bundleId`, SQL `sqlSha256`, exact başarı imzasının görüldüğü, on iki tablo/yedi journal satırı sonucu ve operatör. DB adı, kullanıcı, parola, tam sunucu sürümü, URL query'si, cookie veya Authorization değeri kaydedilmez.
 
 Kabul tamamlanınca hedefe bağlı SQL ve manifest güvenli deployment alanından kaldırılır. Uygulama ZIP dağıtımı, environment ayarları, readiness ve rollback doğrulaması [Hostinger dağıtım runbook'unda](./hostinger-deploy.md) ayrı kapılardır.
 

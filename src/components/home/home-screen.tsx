@@ -9,14 +9,21 @@ import {
 } from "react";
 
 import { CustomerWorkspace } from "@/components/home/customer-workspace";
+import { FinanceWorkspace } from "@/components/home/finance-workspace";
 
 const navigationItems = [
-  { href: "#musteriler", label: "Müşteriler", shortLabel: "Müşteri", active: true },
-  { href: "#gunluk-plan", label: "Günlük plan", shortLabel: "Plan", active: false },
-  { href: "#gorevler", label: "Görevler", shortLabel: "Görev", active: false },
-  { href: "#finans", label: "Finans", shortLabel: "Finans", active: false },
-  { href: "#projeler", label: "Projeler", shortLabel: "Proje", active: false },
+  { href: "#musteriler", label: "Müşteriler", shortLabel: "Müşteri" },
+  { href: "#gunluk-plan", label: "Günlük plan", shortLabel: "Plan" },
+  { href: "#gorevler", label: "Görevler", shortLabel: "Görev" },
+  { href: "#finans", label: "Finans", shortLabel: "Finans" },
+  { href: "#projeler", label: "Projeler", shortLabel: "Proje" },
 ] as const;
+
+type NavigationHref = (typeof navigationItems)[number]["href"];
+
+function navigationHrefFromHash(hash: string): NavigationHref {
+  return navigationItems.find((item) => item.href === hash)?.href ?? "#musteriler";
+}
 
 type CustomerView = Readonly<{
   code: string;
@@ -177,7 +184,18 @@ export function HomeScreen({ live = false }: HomeScreenProps) {
   const [formOpen, setFormOpen] = useState(false);
   const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<"error" | "idle" | "saving">("idle");
+  const [activeNavigationHref, setActiveNavigationHref] =
+    useState<NavigationHref>("#musteriler");
   const todayLabel = istanbulTodayLabel();
+
+  useEffect(() => {
+    const updateFromHash = () => {
+      setActiveNavigationHref(navigationHrefFromHash(window.location.hash));
+    };
+    updateFromHash();
+    window.addEventListener("hashchange", updateFromHash);
+    return () => window.removeEventListener("hashchange", updateFromHash);
+  }, []);
 
   useEffect(() => {
     if (!live) return;
@@ -219,6 +237,11 @@ export function HomeScreen({ live = false }: HomeScreenProps) {
   const selectedCustomer = useMemo(
     () => customerRows.find((customer) => customer.id === selectedCustomerId) ?? null,
     [customerRows, selectedCustomerId],
+  );
+
+  const financeCustomers = useMemo(
+    () => customerRows.map((customer) => ({ id: customer.id, name: customer.name })),
+    [customerRows],
   );
 
   const handleContractSaved = useCallback(
@@ -349,10 +372,11 @@ export function HomeScreen({ live = false }: HomeScreenProps) {
           <nav className="ledger-nav" aria-label="Ana navigasyon">
             {navigationItems.map((item, index) => (
               <a
-                className={item.active ? "is-active" : undefined}
+                className={activeNavigationHref === item.href ? "is-active" : undefined}
                 href={item.href}
                 key={item.href}
-                aria-current={item.active ? "page" : undefined}
+                aria-current={activeNavigationHref === item.href ? "page" : undefined}
+                onClick={() => setActiveNavigationHref(item.href)}
               >
                 <span className="ledger-nav-index" aria-hidden="true">
                   {String(index + 1).padStart(2, "0")}
@@ -591,14 +615,14 @@ export function HomeScreen({ live = false }: HomeScreenProps) {
               {live ? (
                 <div className="next-action">
                   <span>Planlama alanı</span>
-                  <strong>Takvim ve tahsilat adımı henüz açılmadı.</strong>
-                  <small>Müşteri sözleşmeleri tamamlandığında bu alan otomatik dolacak.</small>
+                  <strong>Takvim adımı henüz açılmadı.</strong>
+                  <small>Tahsilat işlemleri aşağıdaki Finans bölümünden yürütülür.</small>
                 </div>
               ) : (
                 <div className="next-action">
                   <span>Örnek sıradaki işlem</span>
                   <strong>Geciken 2 ödeme için müşterileri ara</strong>
-                  <small>Tahsilat ekranı bir sonraki iş adımında açılacak.</small>
+                  <small>Açık kayıtları Finans bölümünden kontrol edin.</small>
                 </div>
               )}
             </aside>
@@ -618,9 +642,10 @@ export function HomeScreen({ live = false }: HomeScreenProps) {
             </p>
           )}
 
+          <FinanceWorkspace customers={financeCustomers} live={live} />
+
           <section className="future-sections" aria-label="Yakında açılacak çalışma alanları">
             <span id="gorevler">Görevler</span>
-            <span id="finans">Finans</span>
             <span id="projeler">Projeler</span>
           </section>
         </main>

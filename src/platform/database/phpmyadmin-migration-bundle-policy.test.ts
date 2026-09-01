@@ -117,8 +117,8 @@ describe.sequential("clean-only phpMyAdmin migration bundle policy", () => {
     expect(second.summary).toEqual(first.summary);
     expect(second.sql).toBe(first.sql);
     expect(second.manifestText).toBe(first.manifestText);
-    expect(first.summary.migrationCount).toBe(6);
-    expect(first.summary.statementCount).toBe(35);
+    expect(first.summary.migrationCount).toBe(7);
+    expect(first.summary.statementCount).toBe(43);
     expect(first.summary.sqlBytes).toBe(Buffer.byteLength(first.sql));
     expect(first.summary.sqlSha256).toBe(
       createHash("sha256").update(first.sql).digest("hex"),
@@ -174,6 +174,8 @@ describe.sequential("clean-only phpMyAdmin migration bundle policy", () => {
       "job_run",
       "monthly_visit_commitment",
       "outbox_event",
+      "receivable",
+      "receivable_collection",
       "scheduled_job",
     ]);
     expect(manifest.schema.tables.scheduled_job).toContain("lease_token");
@@ -193,6 +195,18 @@ describe.sequential("clean-only phpMyAdmin migration bundle policy", () => {
       {
         name: "fk_monthly_visit_contract",
         tableName: "monthly_visit_commitment",
+      },
+      {
+        name: "fk_receivable_collection_receivable",
+        tableName: "receivable_collection",
+      },
+      {
+        name: "fk_receivable_contract",
+        tableName: "receivable",
+      },
+      {
+        name: "fk_receivable_customer",
+        tableName: "receivable",
       },
     ]);
     expect(manifest.schema.indexes).toContainEqual({
@@ -249,10 +263,16 @@ describe.sequential("clean-only phpMyAdmin migration bundle policy", () => {
         sqlFileName: "0005_consulting_contract_visits.sql",
         statementCount: 6,
       },
+      {
+        createdAt: 1788282029501,
+        hash: "5e559147a2b664853f48dcac08e520c5d976eadc3f6ee98b383bbc397a9dfb91",
+        sqlFileName: "0006_receivables.sql",
+        statementCount: 8,
+      },
     ]);
     expect(
       manifest.migrations.flatMap((migration) => migration.statementHashes),
-    ).toHaveLength(35);
+    ).toHaveLength(43);
     expect(
       manifest.migrations
         .flatMap((migration) => migration.statementHashes)
