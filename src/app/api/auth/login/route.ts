@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { createSessionToken, sessionCookieName, sessionCookieOptions } from "@/platform/auth/session";
+import {
+  createSessionToken,
+  sessionCookieName,
+  sessionCookieOptions,
+} from "@/platform/auth/session";
 import { verifyAdminCredentials } from "@/platform/auth/password";
 import { getAuthEnvironment } from "@/platform/config/auth-env";
 
@@ -9,8 +13,15 @@ export const runtime = "nodejs";
 
 const MAX_FORM_BYTES = 4_096;
 
-function failedLogin(request: NextRequest): NextResponse {
-  const response = NextResponse.redirect(new URL("/giris?hata=1", request.url), 303);
+function sameOriginRedirect(location: string): NextResponse {
+  return new NextResponse(null, {
+    headers: { Location: location },
+    status: 303,
+  });
+}
+
+function failedLogin(): NextResponse {
+  const response = sameOriginRedirect("/giris?hata=1");
   response.headers.set("Cache-Control", "private, no-store, max-age=0, must-revalidate");
   return response;
 }
@@ -22,7 +33,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     declaredLength < 0 ||
     declaredLength > MAX_FORM_BYTES
   ) {
-    return failedLogin(request);
+    return failedLogin();
   }
 
   try {
@@ -36,15 +47,15 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       password.length < 1 ||
       password.length > 256
     ) {
-      return failedLogin(request);
+      return failedLogin();
     }
 
     const environment = getAuthEnvironment();
     const valid = await verifyAdminCredentials(email, password, environment);
-    if (!valid) return failedLogin(request);
+    if (!valid) return failedLogin();
 
     const production = process.env.NODE_ENV === "production";
-    const response = NextResponse.redirect(new URL("/", request.url), 303);
+    const response = sameOriginRedirect("/");
     response.cookies.set({
       name: sessionCookieName(production),
       value: createSessionToken(environment.SESSION_SECRET),
@@ -56,6 +67,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     );
     return response;
   } catch {
-    return failedLogin(request);
+    return failedLogin();
   }
 }

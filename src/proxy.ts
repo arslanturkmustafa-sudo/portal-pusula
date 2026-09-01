@@ -73,8 +73,12 @@ export function proxy(request: NextRequest) {
       );
     }
 
+    const loginUrl = request.nextUrl.clone();
+    loginUrl.pathname = "/giris";
+    loginUrl.search = "";
+    loginUrl.hash = "";
     return finalizeResponse(
-      NextResponse.redirect(new URL("/giris", request.url)),
+      NextResponse.redirect(loginUrl),
       correlationId,
     );
   }

@@ -1,13 +1,16 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 
 import { sessionCookieName, sessionCookieOptions } from "@/platform/auth/session";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-export async function POST(request: NextRequest): Promise<NextResponse> {
+export async function POST(): Promise<NextResponse> {
   const production = process.env.NODE_ENV === "production";
-  const response = NextResponse.redirect(new URL("/giris", request.url), 303);
+  const response = new NextResponse(null, {
+    headers: { Location: "/giris" },
+    status: 303,
+  });
   response.cookies.set({
     name: sessionCookieName(production),
     value: "",

@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
 
+import { signIn } from "./auth";
+
 const expectedCacheEntries = [
   "/icons/portal-pusula-192-v1.png",
   "/icons/portal-pusula-512-v1.png",
@@ -20,7 +22,7 @@ test("exposes a valid standalone manifest and real-size icons", async ({
   };
   expect(manifest.display).toBe("standalone");
 
-  await page.goto("/");
+  await signIn(page);
   for (const icon of manifest.icons) {
     const expectedSize = Number(icon.sizes.split("x")[0]);
     const dimensions = await page.evaluate(async ({ src }) => {
@@ -41,7 +43,7 @@ test("caches only the safe static allowlist and uses a neutral offline fallback"
   page,
   request,
 }) => {
-  await page.goto("/");
+  await signIn(page);
   await page.evaluate(async () => {
     await navigator.serviceWorker.ready;
   });

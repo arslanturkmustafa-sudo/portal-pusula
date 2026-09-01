@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { scryptSync } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { createServer } from "node:net";
 import path from "node:path";
@@ -12,6 +13,23 @@ const startupTimeoutMs = 120_000;
 const shutdownTimeoutMs = 5_000;
 const healthAttemptTimeoutMs = 2_000;
 const startupOutputLimit = 8_192;
+const e2eAdminEmail = "e2e-admin@example.test";
+const e2eAdminPassword = "fake-e2e-password";
+const e2eSalt = Buffer.alloc(16, 11);
+const e2eKey = scryptSync(e2eAdminPassword, e2eSalt, 64, {
+  N: 32_768,
+  r: 8,
+  p: 1,
+  maxmem: 64 * 1024 * 1024,
+});
+const e2ePasswordHash = [
+  "scrypt",
+  "32768",
+  "8",
+  "1",
+  e2eSalt.toString("base64url"),
+  e2eKey.toString("base64url"),
+].join("$");
 
 function sanitizedEnvironment(additions = {}) {
   const environment = {};
@@ -20,6 +38,7 @@ function sanitizedEnvironment(additions = {}) {
     if (
       /^DB_/iu.test(name) ||
       /^READINESS_BEARER_TOKEN$/iu.test(name) ||
+      /^(?:ADMIN_EMAIL|ADMIN_PASSWORD_HASH|SESSION_SECRET)$/u.test(name) ||
       /^PORTAL_PUSULA_E2E_/iu.test(name) ||
       /^(?:FORCE_COLOR|NO_COLOR)$/u.test(name)
     ) {
@@ -230,7 +249,10 @@ async function main() {
     "cli.js",
   );
   const baseEnvironment = sanitizedEnvironment({
+    ADMIN_EMAIL: e2eAdminEmail,
+    ADMIN_PASSWORD_HASH: e2ePasswordHash,
     FORCE_COLOR: "0",
+    SESSION_SECRET: "FakeSessionKey01",
   });
 
   try {
