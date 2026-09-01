@@ -938,7 +938,7 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
         },
         {
           created_at: 1788282029501,
-          hash: "a54ad41d2a07f01c4d4042b56cdf5d4d78668f193d4cb14103914121f0485ee5",
+          hash: "5e559147a2b664853f48dcac08e520c5d976eadc3f6ee98b383bbc397a9dfb91",
           id: 7,
         },
       ]);
