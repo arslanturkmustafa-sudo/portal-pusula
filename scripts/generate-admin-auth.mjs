@@ -2,6 +2,8 @@ import {
   randomBytes,
   scrypt as scryptCallback,
 } from "node:crypto";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import readline from "node:readline";
 
 const ALPHANUMERIC = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
@@ -86,6 +88,18 @@ function randomAlphanumeric(length) {
   return value;
 }
 
+export async function encodePasswordHash(password, salt) {
+  const key = await deriveKey(password, salt);
+  return [
+    "scrypt",
+    "32768",
+    "8",
+    "1",
+    salt.toString("base64url"),
+    key.toString("base64url"),
+  ].join(":");
+}
+
 async function main() {
   const password = await readHidden("Yönetici parolası: ");
   const confirmation = await readHidden("Parolayı tekrar girin: ");
@@ -94,15 +108,7 @@ async function main() {
   }
 
   const salt = randomBytes(16);
-  const key = await deriveKey(password, salt);
-  const passwordHash = [
-    "scrypt",
-    "32768",
-    "8",
-    "1",
-    salt.toString("base64url"),
-    key.toString("base64url"),
-  ].join("$");
+  const passwordHash = await encodePasswordHash(password, salt);
 
   process.stdout.write("\nBu değerleri yalnız Hostinger ortam değişkenlerine kaydedin:\n");
   process.stdout.write("ADMIN_PASSWORD_HASH=" + passwordHash + "\n");
@@ -110,9 +116,16 @@ async function main() {
   process.stdout.write(sessionSecretName + "=" + randomAlphanumeric(16) + "\n");
 }
 
-main().catch((error) => {
-  process.stderr.write(
-    error instanceof Error ? error.message + "\n" : "Kimlik bilgileri üretilemedi.\n",
-  );
-  process.exitCode = 1;
-});
+if (
+  process.argv[1] !== undefined &&
+  resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+) {
+  main().catch((error) => {
+    process.stderr.write(
+      error instanceof Error
+        ? error.message + "\n"
+        : "Kimlik bilgileri üretilemedi.\n",
+    );
+    process.exitCode = 1;
+  });
+}

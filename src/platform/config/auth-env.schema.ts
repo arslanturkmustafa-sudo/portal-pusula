@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 const passwordHashPattern =
-  /^scrypt\$32768\$8\$1\$[A-Za-z0-9_-]{22}\$[A-Za-z0-9_-]{86}$/u;
+  /^(?:scrypt:32768:8:1:[A-Za-z0-9_-]{22}:[A-Za-z0-9_-]{86}|scrypt\$32768\$8\$1\$[A-Za-z0-9_-]{22}\$[A-Za-z0-9_-]{86})$/u;
 
 const authEnvironmentSchema = z
   .object({

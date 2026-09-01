@@ -43,7 +43,7 @@ Yönetici parolası düz metin saklanmaz. Etkileşimli üretici yerel terminalde
 npm run auth:generate
 ```
 
-Komut parolayı gizli girişle alır; `ADMIN_PASSWORD_HASH` ve tam 16 ASCII alfanümerik karakterlik `SESSION_SECRET` üretir. Gerçek e-posta, hash, secret, DB parolası ve bearer token yalnız `.env.local` veya Hostinger environment alanında tutulur; repoya, ZIP'e, loga, belgeye ya da sohbete yazılmaz.
+Komut parolayı gizli girişle alır; Hostinger ortam değişkenlerinde güvenle taşınan `scrypt:32768:8:1:<salt>:<key>` biçiminde `ADMIN_PASSWORD_HASH` ve tam 16 ASCII alfanümerik karakterlik `SESSION_SECRET` üretir. Eski `$` ayraçlı scrypt kayıtları yalnız geriye uyumluluk için okunur; yeni veya yenilenen hash'ler üreticiyle oluşturulmalıdır. Gerçek e-posta, hash, secret, DB parolası ve bearer token yalnız `.env.local` veya Hostinger environment alanında tutulur; repoya, ZIP'e, loga, belgeye ya da sohbete yazılmaz.
 
 Gerekli environment adları:
 

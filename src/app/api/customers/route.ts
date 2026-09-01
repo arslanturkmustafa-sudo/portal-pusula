@@ -11,6 +11,8 @@ import { isAdminAuthenticated } from "@/platform/auth/server-auth";
 import { getDatabaseProbeEnvironment } from "@/platform/config/readiness-env";
 import { getPlatformDatabasePool } from "@/platform/database/mysql-platform";
 import { correlationIdFromHeaders } from "@/platform/http/correlation-id";
+import { requestLogger } from "@/platform/logging/logger";
+import { safeMySqlErrorCode } from "@/platform/logging/mysql-error-code";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -51,10 +53,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return json({ status: "validation_error" }, 400);
   }
 
+  const correlationId = correlationIdFromHeaders(request.headers);
   try {
     const input = createCustomerInputSchema.parse(await request.json());
     const customer = await createCustomer(databasePool(), input, {
-      correlationId: correlationIdFromHeaders(request.headers),
+      correlationId,
     });
     return json({ customer }, 201);
   } catch (error) {
@@ -64,6 +67,16 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if (error instanceof CustomerShortCodeConflictError) {
       return json({ status: "short_code_conflict" }, 409);
     }
+    const mysqlErrorCode = safeMySqlErrorCode(error);
+    requestLogger(correlationId).error(
+      {
+        event: "customer.api.database_failed",
+        method: "POST",
+        mysqlErrorCode,
+        pathname: "/api/customers",
+      },
+      `Customer API database operation failed: ${mysqlErrorCode}`,
+    );
     return json({ status: "service_unavailable" }, 503);
   }
 }

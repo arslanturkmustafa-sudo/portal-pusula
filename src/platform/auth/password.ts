@@ -17,8 +17,22 @@ type ParsedPasswordHash = Readonly<{
   salt: Buffer;
 }>;
 
+export class PasswordVerificationRuntimeError extends Error {
+  constructor() {
+    super("Parola doğrulama işlemi çalıştırılamadı.");
+    this.name = "PasswordVerificationRuntimeError";
+  }
+}
+
 function parsePasswordHash(encodedHash: string): ParsedPasswordHash | null {
-  const parts = encodedHash.split("$");
+  const separator = encodedHash.startsWith("scrypt:")
+    ? ":"
+    : encodedHash.startsWith("scrypt$")
+      ? "$"
+      : null;
+  if (separator === null) return null;
+
+  const parts = encodedHash.split(separator);
   if (
     parts.length !== 6 ||
     parts[0] !== "scrypt" ||
@@ -83,7 +97,7 @@ export async function verifyPassword(
     const actualKey = await deriveKey(password, parsed.salt);
     return timingSafeEqual(actualKey, parsed.derivedKey);
   } catch {
-    return false;
+    throw new PasswordVerificationRuntimeError();
   }
 }
 
