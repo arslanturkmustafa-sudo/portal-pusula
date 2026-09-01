@@ -303,6 +303,7 @@ async function waitForBlockedMigrationRunners(
 async function resetKnownMigrationArtifacts(pool: Pool): Promise<void> {
   // These identifiers are compile-time constants and this suite is enabled only
   // for the disposable MariaDB provisioned by scripts/test-mariadb.mjs.
+  await pool.query("DROP TABLE IF EXISTS `customer`");
   await pool.query("DROP TABLE IF EXISTS `cron_dispatch_gate`");
   await pool.query("DROP TABLE IF EXISTS `job_run`");
   await pool.query("DROP TABLE IF EXISTS `scheduled_job`");
