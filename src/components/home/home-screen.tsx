@@ -1,6 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type FormEvent,
+} from "react";
+
+import { CustomerWorkspace } from "@/components/home/customer-workspace";
 
 const navigationItems = [
   { href: "#musteriler", label: "Müşteriler", shortLabel: "Müşteri", active: true },
@@ -38,7 +46,7 @@ const sampleCustomers: readonly CustomerView[] = [
     contact: "İletişim kaydı bekliyor",
     name: "Atlas Makina",
     id: "sample-1",
-    visit: "Pazartesi",
+    visit: "3 Eylül",
     fee: "120.000 ₺",
     payment: "Ayın 5'i",
     status: "Tahsil edildi",
@@ -49,7 +57,7 @@ const sampleCustomers: readonly CustomerView[] = [
     contact: "İletişim kaydı bekliyor",
     name: "Vega Endüstri",
     id: "sample-2",
-    visit: "Salı",
+    visit: "10 Eylül",
     fee: "50.000 ₺ + KDV",
     payment: "Ayın 10'u",
     status: "Gecikti",
@@ -60,7 +68,7 @@ const sampleCustomers: readonly CustomerView[] = [
     contact: "İletişim kaydı bekliyor",
     name: "Kuzey Lojistik",
     id: "sample-3",
-    visit: "Çarşamba",
+    visit: "Planlanmadı",
     fee: "75.000 ₺",
     payment: "Ayın 15'i",
     status: "Bekliyor",
@@ -71,7 +79,7 @@ const sampleCustomers: readonly CustomerView[] = [
     contact: "İletişim kaydı bekliyor",
     name: "Delta Üretim",
     id: "sample-4",
-    visit: "Perşembe",
+    visit: "17 Eylül",
     fee: "50.000 ₺ + KDV",
     payment: "Ayın 20'si",
     status: "Bekliyor",
@@ -82,7 +90,7 @@ const sampleCustomers: readonly CustomerView[] = [
     contact: "İletişim kaydı bekliyor",
     name: "Rota Teknoloji",
     id: "sample-5",
-    visit: "Cuma",
+    visit: "Planlanmadı",
     fee: "50.000 ₺",
     payment: "Ayın 25'i",
     status: "Gecikti",
@@ -129,8 +137,29 @@ function storedCustomerView(customer: StoredCustomer): CustomerView {
     payment: "—",
     status: customer.status === "active" ? "Aktif" : "Pasif",
     tone: customer.status,
-    visit: "Sözleşme bekliyor",
+    visit: "Planlanmadı",
   };
+}
+
+function contractFeeLabel(contract: {
+  monthlyFeeAmount: string;
+  vatMode: "exempt" | "exclusive" | "inclusive";
+}): string {
+  const amount = new Intl.NumberFormat("tr-TR", {
+    maximumFractionDigits: 2,
+  }).format(Number(contract.monthlyFeeAmount));
+  if (contract.vatMode === "exclusive") return `${amount} ₺ + KDV`;
+  if (contract.vatMode === "inclusive") return `${amount} ₺ (KDV dahil)`;
+  return `${amount} ₺`;
+}
+
+function shortVisitDate(value: string): string {
+  const [year, month, day] = value.split("-").map(Number);
+  return new Intl.DateTimeFormat("tr-TR", {
+    day: "numeric",
+    month: "long",
+    timeZone: "Europe/Istanbul",
+  }).format(new Date(Date.UTC(year, month - 1, day, 12)));
 }
 
 type HomeScreenProps = Readonly<{
@@ -146,6 +175,7 @@ export function HomeScreen({ live = false }: HomeScreenProps) {
   const [filter, setFilter] = useState<"all" | "late">("all");
   const [query, setQuery] = useState("");
   const [formOpen, setFormOpen] = useState(false);
+  const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<"error" | "idle" | "saving">("idle");
   const todayLabel = istanbulTodayLabel();
 
@@ -186,6 +216,70 @@ export function HomeScreen({ live = false }: HomeScreenProps) {
     });
   }, [customerRows, filter, query]);
 
+  const selectedCustomer = useMemo(
+    () => customerRows.find((customer) => customer.id === selectedCustomerId) ?? null,
+    [customerRows, selectedCustomerId],
+  );
+
+  const handleContractSaved = useCallback(
+    (contract: {
+      customerId: string;
+      monthlyFeeAmount: string;
+      paymentDay: number;
+      vatMode: "exempt" | "exclusive" | "inclusive";
+    }) => {
+      setCustomerRows((current) =>
+        current.map((customer) =>
+          customer.id === contract.customerId
+            ? {
+                ...customer,
+                fee: contractFeeLabel(contract),
+                payment: `Ayın ${contract.paymentDay}. günü`,
+              }
+            : customer,
+        ),
+      );
+    },
+    [],
+  );
+
+  const handleVisitsSaved = useCallback(
+    (
+      visits: readonly {
+        committedOn: string;
+        resolutionStatus:
+          | "planned"
+          | "completed"
+          | "makeup_pending"
+          | "cancelled_by_agreement";
+      }[],
+    ) => {
+      if (selectedCustomerId === null) return;
+      const nextVisit = [...visits]
+        .filter(
+          (visit) =>
+            visit.resolutionStatus === "planned" ||
+            visit.resolutionStatus === "makeup_pending",
+        )
+        .sort((left, right) =>
+          left.committedOn.localeCompare(right.committedOn),
+        )[0];
+      setCustomerRows((current) =>
+        current.map((customer) =>
+          customer.id === selectedCustomerId
+            ? {
+                ...customer,
+                visit: nextVisit
+                  ? shortVisitDate(nextVisit.committedOn)
+                  : "Planlanmadı",
+              }
+            : customer,
+        ),
+      );
+    },
+    [selectedCustomerId],
+  );
+
   async function submitCustomer(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = event.currentTarget;
@@ -212,6 +306,7 @@ export function HomeScreen({ live = false }: HomeScreenProps) {
         ...current,
         storedCustomerView(payload.customer),
       ]);
+      setSelectedCustomerId(payload.customer.id);
       setDataState("live");
       setSaveState("idle");
       setFormOpen(false);
@@ -223,7 +318,7 @@ export function HomeScreen({ live = false }: HomeScreenProps) {
 
   const dataMessage =
     dataState === "live"
-      ? "Kayıtlar veritabanından okunuyor; sözleşme alanları bir sonraki dilimde açılacak."
+      ? "Kayıtlar veritabanından okunuyor. Bir müşteri seçerek sözleşme ve aylık ziyaret planını açın."
       : dataState === "loading"
         ? "Müşteri kayıtları yükleniyor…"
         : dataState === "error"
@@ -422,7 +517,7 @@ export function HomeScreen({ live = false }: HomeScreenProps) {
                   <thead>
                     <tr>
                       <th scope="col">Müşteri</th>
-                      <th scope="col">Hizmet günü</th>
+                      <th scope="col">Sonraki ziyaret</th>
                       <th scope="col">Aylık ücret</th>
                       <th scope="col">Ödeme</th>
                       <th scope="col">Durum</th>
@@ -432,12 +527,21 @@ export function HomeScreen({ live = false }: HomeScreenProps) {
                     {visibleCustomers.map((customer) => (
                       <tr key={customer.id}>
                         <td data-label="Müşteri">
-                          <span className="customer-link">
+                          <button
+                            aria-expanded={selectedCustomerId === customer.id}
+                            className="customer-link"
+                            type="button"
+                            onClick={() =>
+                              setSelectedCustomerId((current) =>
+                                current === customer.id ? null : customer.id,
+                              )
+                            }
+                          >
                             <strong>{customer.name}</strong>
                             <small>{customer.code}</small>
-                          </span>
+                          </button>
                         </td>
-                        <td data-label="Hizmet günü">{customer.visit}</td>
+                        <td data-label="Sonraki ziyaret">{customer.visit}</td>
                         <td data-label="Aylık ücret">{customer.fee}</td>
                         <td data-label="Ödeme">{customer.payment}</td>
                         <td data-label="Durum">
@@ -499,6 +603,20 @@ export function HomeScreen({ live = false }: HomeScreenProps) {
               )}
             </aside>
           </div>
+
+          {selectedCustomer ? (
+            <CustomerWorkspace
+              key={selectedCustomer.id}
+              customer={{ id: selectedCustomer.id, name: selectedCustomer.name }}
+              live={live}
+              onContractSaved={handleContractSaved}
+              onVisitsSaved={handleVisitsSaved}
+            />
+          ) : (
+            <p className="workspace-selector-note">
+              Sözleşme ve ziyaret planını açmak için müşteri adını seçin.
+            </p>
+          )}
 
           <section className="future-sections" aria-label="Yakında açılacak çalışma alanları">
             <span id="gorevler">Görevler</span>

@@ -2,7 +2,7 @@
 
 Portal Pusula; Mühendis Kafası, ByPusula, OptiPusula ve 7 Emlak Ajansı çalışmalarını tek yerde yönetmek için geliştirilen responsive iç operasyon uygulamasıdır. Satış amaçlı bir SaaS arayüzü değil, sahibi ve ileride yetkilendirilecek ekip üyeleri için güvenli bir çalışma masasıdır.
 
-## İlk kullanılabilir dilim
+## Kullanılabilir kapsam
 
 Kaynakta çalışan ilk dikey dilim şunları içerir:
 
@@ -12,9 +12,13 @@ Kaynakta çalışan ilk dikey dilim şunları içerir:
 - müşteri oluşturma, listeleme ve güncelleme API'leri;
 - Türkçe metni koruyan MySQL/MariaDB müşteri tablosu;
 - müşteri yazmalarıyla aynı transaction içinde denetim kaydı;
+- müşteri bazlı yıllık danışmanlık sözleşmesi, aylık ücret, KDV biçimi ve ödeme günü kaydı;
+- sabit haftalık gün dayatmayan, her ay tarih seçilen ziyaret planı;
+- ziyaretin iç saat/süre planı ile tamamlandı, telafi bekliyor ve mutabakatla iptal durumları;
+- sözleşme ve ziyaret yazmalarıyla aynı transaction içinde denetim kaydı;
 - PWA kabuğu, liveness/readiness ve mevcut güvenli platform altyapısı.
 
-Sözleşme, ziyaret planı, aylık hakediş, tahsilat ve finans modülleri sıradaki iş dilimleridir. Canlı ekranda bu alanlar veri varmış gibi gösterilmez.
+Aylık hakediş, geçmiş alacak, tahsilat ve gider/kart modülleri sıradaki iş dilimleridir. Canlı ekranda henüz açılmayan alanlar veri varmış gibi gösterilmez.
 
 ## Teknik temel
 
@@ -65,8 +69,9 @@ Cron değişkenleri kaynakta varsayılan kapalı altyapı adayıdır; gerçek i�
 - `0002_platform_state_constraints.sql`
 - `0003_platform_cron_dispatch_gate.sql`
 - `0004_customer.sql`
+- `0005_consulting_contract_visits.sql`
 
-Uygulanmış migration dosyası değiştirilmez; her düzeltme yeni ileri yönlü migration olur. `0004_customer.sql` yalnız müşteri tablosunu ekler. Mevcut Hostinger veritabanına clean-only phpMyAdmin paketi tekrar yüklenmez; journal'ı bulunan hedefte normal migration runner yalnız eksik migration'ı uygular.
+Uygulanmış migration dosyası değiştirilmez; her düzeltme yeni ileri yönlü migration olur. `0004_customer.sql` müşteri tablosunu, `0005_consulting_contract_visits.sql` sözleşme ve aylık ziyaret tablolarını ekler. Mevcut Hostinger veritabanına clean-only phpMyAdmin paketi tekrar yüklenmez; journal'ı bulunan hedefte normal migration runner yalnız eksik migration'ı uygular.
 
 ## Yerel geliştirme
 
@@ -96,10 +101,10 @@ npm run package:hostinger
 
 Canlı kabul sırası:
 
-1. `0004` migration'ını mevcut hedefte normal runner ile uygula.
+1. Mevcut hedefte normal runner ile yalnız eksik `0004`/`0005` migration'larını uygula.
 2. `ADMIN_EMAIL`, `ADMIN_PASSWORD_HASH` ve `SESSION_SECRET` değerlerini Hostinger environment alanına ekle.
 3. Güncel ZIP'i dağıt ve build'in `Akım` olmasını bekle.
-4. `/giris`, yetkisiz yönlendirme, yetkili giriş ve gerçek müşteri ekleme/yeniden okuma akışını doğrula.
+4. `/giris`, yetkisiz yönlendirme, yetkili giriş, müşteri, sözleşme ve aylık ziyaret ekleme/yeniden okuma akışını doğrula.
 5. Sorun çıkarsa yalnız ilgili sınırda hedefli test ve log incelemesi yap.
 
 ## Belgeler

@@ -36,6 +36,13 @@
       "when": 1788262397356,
       "tag": "0004_customer",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "5",
+      "when": 1788265670001,
+      "tag": "0005_consulting_contract_visits",
+      "breakpoints": true
     }
   ]
 }

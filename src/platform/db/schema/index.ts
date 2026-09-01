@@ -4,6 +4,14 @@ export {
   type NewCustomerRecord,
 } from "./customer";
 export {
+  consultingContract,
+  type ConsultingContractRecord,
+  monthlyVisitCommitment,
+  type MonthlyVisitCommitmentRecord,
+  type NewConsultingContractRecord,
+  type NewMonthlyVisitCommitmentRecord,
+} from "./consulting-contract";
+export {
   auditEvent,
   type AuditEventRecord,
   type NewAuditEventRecord,
