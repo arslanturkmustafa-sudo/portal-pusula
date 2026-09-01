@@ -8,6 +8,7 @@
     "npm": ">=12 <13"
   },
   "scripts": {
+    "auth:generate": "node scripts/generate-admin-auth.mjs",
     "dev": "next dev",
     "build": "next build --webpack",
     "db:generate": "drizzle-kit generate",

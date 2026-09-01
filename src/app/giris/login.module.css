@@ -1,0 +1,125 @@
+.page {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background:
+    linear-gradient(90deg, transparent 31px, rgba(29, 41, 37, 0.08) 32px, transparent 33px),
+    var(--paper);
+  background-size: 32px 32px;
+}
+
+.sheet {
+  width: min(100%, 430px);
+  padding: 2rem;
+  border: 1px solid var(--line-strong);
+  background: var(--sheet);
+  box-shadow: 10px 10px 0 rgba(29, 41, 37, 0.09);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  padding-bottom: 1.2rem;
+  border-bottom: 2px solid var(--ink);
+}
+
+.mark {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  background: var(--forest);
+  color: var(--sheet);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+
+.header p,
+.header h1 {
+  margin: 0;
+}
+
+.header p {
+  color: var(--ink-soft);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.62rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.header h1 {
+  margin-top: 0.22rem;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.55rem;
+  font-weight: 500;
+}
+
+.description {
+  margin: 1.2rem 0;
+  color: var(--ink-soft);
+  font-size: 0.78rem;
+  line-height: 1.55;
+}
+
+.form {
+  display: grid;
+  gap: 1rem;
+}
+
+.form label span {
+  display: block;
+  margin-bottom: 0.38rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.form input {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 0.7rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 0;
+  background: var(--sheet);
+  color: var(--ink);
+}
+
+.form button {
+  min-height: 46px;
+  border: 1px solid var(--forest);
+  border-radius: 0;
+  background: var(--forest);
+  color: var(--sheet);
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.error {
+  margin: 0;
+  padding: 0.7rem;
+  border-left: 3px solid var(--terracotta);
+  background: #f8e7e0;
+  color: #82361f;
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
+.sheet footer {
+  margin-top: 1.5rem;
+  padding-top: 0.8rem;
+  border-top: 1px solid var(--line);
+  color: var(--ink-soft);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.58rem;
+}
+
+@media (max-width: 480px) {
+  .sheet {
+    padding: 1.3rem;
+    box-shadow: 6px 6px 0 rgba(29, 41, 37, 0.09);
+  }
+}

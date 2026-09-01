@@ -37,7 +37,10 @@ const textExtensions = new Set([
   ".yaml",
   ".yml",
 ]);
-const safeLiteralValues = new Set(["portal-pusula-local-test-only"]);
+const safeLiteralValues = new Set([
+  "AbcdEFgh12345678",
+  "portal-pusula-local-test-only",
+]);
 const signatures = [
   ["private-key", /-----BEGIN (?:[A-Z0-9 ]+ )?PRIVATE KEY-----/u],
   ["aws-access-key", /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/u],

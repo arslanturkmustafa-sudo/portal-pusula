@@ -29,6 +29,13 @@
       "when": 1788117573101,
       "tag": "0003_platform_cron_dispatch_gate",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "5",
+      "when": 1788262397356,
+      "tag": "0004_customer",
+      "breakpoints": true
     }
   ]
 }

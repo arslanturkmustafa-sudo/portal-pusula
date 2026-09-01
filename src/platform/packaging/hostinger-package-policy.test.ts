@@ -206,11 +206,13 @@ describe.sequential("Hostinger package sensitive-file policy", () => {
     expect(entries).toContain(
       "drizzle/0003_platform_cron_dispatch_gate.sql",
     );
+    expect(entries).toContain("drizzle/0004_customer.sql");
     expect(entries).toContain("drizzle/meta/_journal.json");
     expect(entries).toContain("drizzle/meta/0000_snapshot.json");
     expect(entries).toContain("drizzle/meta/0001_snapshot.json");
     expect(entries).toContain("drizzle/meta/0002_snapshot.json");
     expect(entries).toContain("drizzle/meta/0003_snapshot.json");
+    expect(entries).toContain("drizzle/meta/0004_snapshot.json");
     expect(entries).toContain("public/offline-v1.html");
     expect(entries).toContain("public/icons/portal-pusula-192-v1.png");
 
@@ -218,6 +220,7 @@ describe.sequential("Hostinger package sensitive-file policy", () => {
     expect(entries).not.toContain(
       "scripts/build-phpmyadmin-migration-bundle.mjs",
     );
+    expect(entries).not.toContain("scripts/generate-admin-auth.mjs");
     expect(entries).not.toContain("scripts/probe-readiness-secure.ps1");
     expect(entries).not.toContain("scripts/test-mariadb.mjs");
     expect(entries).not.toContain("scripts/run-e2e.mjs");

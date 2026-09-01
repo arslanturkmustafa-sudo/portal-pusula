@@ -1,6 +1,6 @@
-# Hostinger dağıtım, MySQL readiness ve Komut 3C sınırı
+# Hostinger dağıtım, güvenli giriş ve müşteri dilimi
 
-Bu runbook, canlı Hostinger Business Node.js spike'ında kanıtlanan ZIP dağıtımını ve `SELECT 1` readiness sonucunu kaydeder; Komut 3C ile yerelde bulunan migration/job/outbox/audit/dayanıklı cron-gate temelini bu canlı kanıttan kesin olarak ayırır. Güncel kaynak/ZIP canlıya dağıtılmamıştır, `0001`/`0002`/`0003` Hostinger DB'ye uygulanmamıştır ve varsayılan kapalı cron adayı Hostinger'da yapılandırılmamıştır. Domain/auth tablosu, UI değişikliği veya Dilim 0 `GO` yoktur.
+Bu runbook, Hostinger Business Node.js Web App hedefindeki güncel Portal Pusula dağıtımını kapsar. Kaynakta güvenli yönetici girişi, müşteri arayüzü/API'si ve `0004_customer.sql` hazırdır. Güncel ZIP henüz canlıya dağıtılmamış, `0004` mevcut Hostinger hedefinde uygulanmamış ve auth environment değerleri eklenmemiştir.
 
 ## Kanıtlanan runtime ve dağıtım kararı
 
@@ -59,6 +59,9 @@ Hostinger environment alanında gereken adlar:
 - `DB_USER`
 - `DB_PASSWORD`
 - `READINESS_BEARER_TOKEN`
+- `ADMIN_EMAIL`
+- `ADMIN_PASSWORD_HASH`
+- `SESSION_SECRET`
 - `LOG_LEVEL` — isteğe bağlı, boşsa `info`
 
 Gerçek değerleri Codex okumaz, yazmaz veya sohbet/belgeye istemez. `DB_NAME`, `DB_USER`, `DB_PASSWORD` ve tam 16 karakterlik, yalnız ASCII `A-Z`/`a-z`/`0-9` içeren rastgele readiness token eksik veya biçim dışıysa sınır fail-closed çalışır. 15/17 karakter, boşluk, Türkçe/özel karakter ve semboller kabul edilmez.
