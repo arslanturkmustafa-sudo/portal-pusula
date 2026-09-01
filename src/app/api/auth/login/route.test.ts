@@ -6,9 +6,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   authenticateAccountLogin: vi.fn(),
   getAuthEnvironment: vi.fn(),
+  getAuthStorageMode: vi.fn(),
   getDatabaseProbeEnvironment: vi.fn(),
   getPlatformDatabasePool: vi.fn(),
   requestLogger: vi.fn(),
+  verifyAdminCredentials: vi.fn(),
   warn: vi.fn(),
 }));
 
@@ -17,6 +19,13 @@ vi.mock("@/features/account", () => ({
 }));
 vi.mock("@/platform/config/auth-env", () => ({
   getAuthEnvironment: mocks.getAuthEnvironment,
+}));
+vi.mock("@/platform/config/auth-storage-mode", () => ({
+  getAuthStorageMode: mocks.getAuthStorageMode,
+}));
+vi.mock("@/platform/auth/password", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/platform/auth/password")>()),
+  verifyAdminCredentials: mocks.verifyAdminCredentials,
 }));
 vi.mock("@/platform/config/readiness-env", () => ({
   getDatabaseProbeEnvironment: mocks.getDatabaseProbeEnvironment,
@@ -77,6 +86,7 @@ describe("administrator login diagnostics", () => {
     vi.clearAllMocks();
     mocks.authenticateAccountLogin.mockResolvedValue(null);
     mocks.getAuthEnvironment.mockReturnValue(environment);
+    mocks.getAuthStorageMode.mockReturnValue("database");
     mocks.getDatabaseProbeEnvironment.mockReturnValue({});
     mocks.getPlatformDatabasePool.mockReturnValue({});
     mocks.requestLogger.mockReturnValue({ warn: mocks.warn });
@@ -103,11 +113,25 @@ describe("administrator login diagnostics", () => {
     await expectFailedLogin("credentials_rejected");
   });
 
+  it("uses explicit environment mode without resolving the database", async () => {
+    mocks.getAuthStorageMode.mockReturnValue("environment");
+    mocks.verifyAdminCredentials.mockResolvedValue(true);
+
+    const response = await POST(loginRequest());
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe("/");
+    expect(response.headers.get("set-cookie")).toContain("v1.");
+    expect(mocks.authenticateAccountLogin).not.toHaveBeenCalled();
+    expect(mocks.getDatabaseProbeEnvironment).not.toHaveBeenCalled();
+  });
+
   it("keeps database failures generic externally", async () => {
     mocks.authenticateAccountLogin.mockRejectedValueOnce(
       new Error("database-error-sentinel"),
     );
     await expectFailedLogin("auth_database_unavailable");
+    expect(mocks.verifyAdminCredentials).not.toHaveBeenCalled();
     expect(JSON.stringify(mocks.warn.mock.calls)).not.toContain(
       "database-error-sentinel",
     );

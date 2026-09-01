@@ -3,13 +3,16 @@ import { NextRequest, NextResponse } from "next/server";
 import { authenticateAccountLogin } from "@/features/account";
 import {
   createAccountSessionToken,
+  createSessionToken,
   sessionCookieName,
   sessionCookieOptions,
 } from "@/platform/auth/session";
 import {
   PasswordVerificationRuntimeError,
+  verifyAdminCredentials,
 } from "@/platform/auth/password";
 import { getAuthEnvironment } from "@/platform/config/auth-env";
+import { getAuthStorageMode } from "@/platform/config/auth-storage-mode";
 import { getDatabaseProbeEnvironment } from "@/platform/config/readiness-env";
 import { getPlatformDatabasePool } from "@/platform/database/mysql-platform";
 import { correlationIdFromHeaders } from "@/platform/http/correlation-id";
@@ -77,21 +80,36 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
 
     let environment;
+    let storageMode;
     try {
       environment = getAuthEnvironment();
+      storageMode = getAuthStorageMode();
     } catch {
       return failedLogin(request, "auth_env_invalid");
     }
 
-    let account;
+    let sessionToken: string;
     try {
-      account = await authenticateAccountLogin(
-        getPlatformDatabasePool(getDatabaseProbeEnvironment()),
-        email,
-        password,
-        environment,
-        { correlationId: correlationIdFromHeaders(request.headers) },
-      );
+      if (storageMode === "environment") {
+        if (!(await verifyAdminCredentials(email, password, environment))) {
+          return failedLogin(request, "credentials_rejected");
+        }
+        sessionToken = createSessionToken(environment.SESSION_SECRET);
+      } else {
+        const account = await authenticateAccountLogin(
+          getPlatformDatabasePool(getDatabaseProbeEnvironment()),
+          email,
+          password,
+          environment,
+          { correlationId: correlationIdFromHeaders(request.headers) },
+        );
+        if (!account) return failedLogin(request, "credentials_rejected");
+        sessionToken = createAccountSessionToken(
+          environment.SESSION_SECRET,
+          account.id,
+          account.credentialVersion,
+        );
+      }
     } catch (error) {
       return failedLogin(
         request,
@@ -100,17 +118,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           : "auth_database_unavailable",
       );
     }
-    if (!account) return failedLogin(request, "credentials_rejected");
-
     const production = process.env.NODE_ENV === "production";
     const response = sameOriginRedirect("/");
     response.cookies.set({
       name: sessionCookieName(production),
-      value: createAccountSessionToken(
-        environment.SESSION_SECRET,
-        account.id,
-        account.credentialVersion,
-      ),
+      value: sessionToken,
       ...sessionCookieOptions(production),
     });
     response.headers.set(

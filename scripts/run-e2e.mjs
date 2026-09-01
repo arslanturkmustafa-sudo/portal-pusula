@@ -39,6 +39,7 @@ function sanitizedEnvironment(additions = {}) {
       /^DB_/iu.test(name) ||
       /^READINESS_BEARER_TOKEN$/iu.test(name) ||
       /^(?:ADMIN_EMAIL|ADMIN_PASSWORD_HASH|SESSION_SECRET)$/u.test(name) ||
+      /^PORTAL_PUSULA_AUTH_STORAGE_MODE$/u.test(name) ||
       /^PORTAL_PUSULA_E2E_/iu.test(name) ||
       /^(?:FORCE_COLOR|NO_COLOR)$/u.test(name)
     ) {
@@ -252,6 +253,7 @@ async function main() {
     ADMIN_EMAIL: e2eAdminEmail,
     ADMIN_PASSWORD_HASH: e2ePasswordHash,
     FORCE_COLOR: "0",
+    PORTAL_PUSULA_AUTH_STORAGE_MODE: "environment",
     SESSION_SECRET: "FakeSessionKey01",
   });
 

@@ -60,6 +60,7 @@ Gerekli environment adları:
 | `ADMIN_EMAIL` | Yönetici giriş e-postası |
 | `ADMIN_PASSWORD_HASH` | `auth:generate` çıktısı |
 | `SESSION_SECRET` | `auth:generate` çıktısı; tam 16 ASCII alfanümerik |
+| `PORTAL_PUSULA_AUTH_STORAGE_MODE` | İsteğe bağlı; varsayılan ve canlı değer `database`. `environment` yalnız veritabanısız uyumluluk/E2E koşuları içindir ve parola yönetimini kapatır. |
 | `LOG_LEVEL` | İsteğe bağlı; varsayılan `info` |
 
 Cron değişkenleri kaynakta varsayılan kapalı altyapı adayıdır; gerçek iş ve scheduler hazır olmadan Hostinger'da etkinleştirilmez.

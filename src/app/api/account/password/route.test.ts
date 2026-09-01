@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => {
     CurrentPasswordInvalidError,
     authenticateAdminRequest: vi.fn(),
     changeAccountPassword: vi.fn(),
+    getAuthStorageMode: vi.fn(),
     initializeAccountFromLegacySession: vi.fn(),
   };
 });
@@ -44,6 +45,9 @@ vi.mock("@/platform/config/auth-env", () => ({
     ADMIN_PASSWORD_HASH: "hash",
     SESSION_SECRET: "AbcdEFgh12345678",
   }),
+}));
+vi.mock("@/platform/config/auth-storage-mode", () => ({
+  getAuthStorageMode: mocks.getAuthStorageMode,
 }));
 vi.mock("@/platform/config/readiness-env", () => ({
   getDatabaseProbeEnvironment: () => ({}),
@@ -83,6 +87,7 @@ describe("account password endpoint", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.changeAccountPassword.mockResolvedValue(account);
+    mocks.getAuthStorageMode.mockReturnValue("database");
     mocks.initializeAccountFromLegacySession.mockResolvedValue(account);
   });
 
@@ -127,6 +132,22 @@ describe("account password endpoint", () => {
     expect(JSON.stringify(await response.json())).not.toContain(
       "password-hash-must-not-be-returned",
     );
+  });
+
+  it("keeps password management unavailable in environment mode", async () => {
+    mocks.authenticateAdminRequest.mockResolvedValue({
+      email: account.email,
+      kind: "legacy",
+    });
+    mocks.getAuthStorageMode.mockReturnValue("environment");
+
+    const response = await PATCH(
+      request({ confirmation: nextValue, newPassword: nextValue }),
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({ status: "not_available" });
+    expect(mocks.initializeAccountFromLegacySession).not.toHaveBeenCalled();
   });
 
   it("requires the established account path and rotates to its next version", async () => {

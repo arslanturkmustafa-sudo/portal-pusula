@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { legacyAccountSummary } from "@/features/account";
 import { authenticateAdminRequest } from "@/platform/auth/server-auth";
 import { getAuthEnvironment } from "@/platform/config/auth-env";
+import { getAuthStorageMode } from "@/platform/config/auth-storage-mode";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -33,10 +34,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   if (principal.kind === "legacy") {
     try {
+      const passwordManagementAvailable =
+        getAuthStorageMode() === "database";
       return json({
         account: {
           ...legacyAccountSummary(getAuthEnvironment()),
-          passwordManagementAvailable: true,
+          passwordManagementAvailable,
         },
       });
     } catch {

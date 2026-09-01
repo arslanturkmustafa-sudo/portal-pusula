@@ -12,6 +12,7 @@ import {
   sessionCookieName,
 } from "@/platform/auth/session";
 import { getAuthEnvironment } from "@/platform/config/auth-env";
+import { getAuthStorageMode } from "@/platform/config/auth-storage-mode";
 import { getDatabaseProbeEnvironment } from "@/platform/config/readiness-env";
 import { getPlatformDatabasePool } from "@/platform/database/mysql-platform";
 
@@ -40,16 +41,22 @@ async function authenticateToken(token: string): Promise<AuthenticatedAdmin | nu
 
   try {
     const environment = getAuthEnvironment();
+    const storageMode = getAuthStorageMode();
     const session = parseSessionToken(token, environment.SESSION_SECRET);
     if (!session) return null;
 
-    const pool = getPlatformDatabasePool(getDatabaseProbeEnvironment());
     if (session.kind === "legacy") {
+      if (storageMode === "environment") {
+        return { email: environment.ADMIN_EMAIL, kind: "legacy" };
+      }
+      const pool = getPlatformDatabasePool(getDatabaseProbeEnvironment());
       return (await canUseLegacySession(pool))
         ? { email: environment.ADMIN_EMAIL, kind: "legacy" }
         : null;
     }
 
+    if (storageMode === "environment") return null;
+    const pool = getPlatformDatabasePool(getDatabaseProbeEnvironment());
     const account = await validateAccountSession(
       pool,
       session.accountId,

@@ -20,6 +20,7 @@ import {
 } from "@/platform/auth/session";
 import { authenticateAdminRequest } from "@/platform/auth/server-auth";
 import { getAuthEnvironment } from "@/platform/config/auth-env";
+import { getAuthStorageMode } from "@/platform/config/auth-storage-mode";
 import { getDatabaseProbeEnvironment } from "@/platform/config/readiness-env";
 import { getPlatformDatabasePool } from "@/platform/database/mysql-platform";
 import { correlationIdFromHeaders } from "@/platform/http/correlation-id";
@@ -78,6 +79,9 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
     return json({ status: "unsupported_media_type" }, 415);
   }
   if (principal.kind === "development") {
+    return json({ status: "not_available" }, 409);
+  }
+  if (getAuthStorageMode() === "environment") {
     return json({ status: "not_available" }, 409);
   }
 

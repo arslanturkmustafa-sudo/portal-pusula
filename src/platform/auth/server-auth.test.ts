@@ -7,6 +7,7 @@ vi.mock("server-only", () => ({}));
 
 const mocks = vi.hoisted(() => ({
   canUseLegacySession: vi.fn(),
+  getAuthStorageMode: vi.fn(),
   validateAccountSession: vi.fn(),
 }));
 
@@ -20,6 +21,9 @@ vi.mock("@/platform/config/auth-env", () => ({
     ADMIN_PASSWORD_HASH: "hash",
     SESSION_SECRET: "AbcdEFgh12345678",
   }),
+}));
+vi.mock("@/platform/config/auth-storage-mode", () => ({
+  getAuthStorageMode: mocks.getAuthStorageMode,
 }));
 vi.mock("@/platform/config/readiness-env", () => ({
   getDatabaseProbeEnvironment: () => ({}),
@@ -56,6 +60,7 @@ describe("secure administrator authentication", () => {
       passwordChangedAtUtc: "2026-09-01 09:00:00.000000",
       status: "active",
     });
+    mocks.getAuthStorageMode.mockReturnValue("database");
   });
 
   afterEach(() => {
@@ -80,5 +85,21 @@ describe("secure administrator authentication", () => {
     await expect(
       authenticateAdminRequest(request(createSessionToken(secret))),
     ).resolves.toBeNull();
+  });
+
+  it("accepts only v1 without database access in explicit environment mode", async () => {
+    mocks.getAuthStorageMode.mockReturnValue("environment");
+
+    await expect(
+      authenticateAdminRequest(request(createSessionToken(secret))),
+    ).resolves.toEqual({
+      email: "yonetici@example.com",
+      kind: "legacy",
+    });
+    await expect(
+      authenticateAdminRequest(request(createAccountSessionToken(secret, accountId, 2))),
+    ).resolves.toBeNull();
+    expect(mocks.canUseLegacySession).not.toHaveBeenCalled();
+    expect(mocks.validateAccountSession).not.toHaveBeenCalled();
   });
 });
