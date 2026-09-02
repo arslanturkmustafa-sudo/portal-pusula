@@ -1,0 +1,1805 @@
+{
+  "version": "5",
+  "dialect": "mysql",
+  "id": "7a9576c5-7c3c-47b0-addd-6dfae5a4f7ef",
+  "prevId": "85e666cf-94fa-4f7a-85fa-4aa8aa8c474a",
+  "tables": {
+    "audit_event": {
+      "name": "audit_event",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "char(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "actor_type": {
+          "name": "actor_type",
+          "type": "varchar(16)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "actor_id": {
+          "name": "actor_id",
+          "type": "char(36)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "action": {
+          "name": "action",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "entity_type": {
+          "name": "entity_type",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "entity_id": {
+          "name": "entity_id",
+          "type": "char(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "before_summary": {
+          "name": "before_summary",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "after_summary": {
+          "name": "after_summary",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "correlation_id": {
+          "name": "correlation_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "occurred_at_utc": {
+          "name": "occurred_at_utc",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "idx_audit_event_entity_occurred": {
+          "name": "idx_audit_event_entity_occurred",
+          "columns": [
+            "entity_type",
+            "entity_id",
+            "occurred_at_utc"
+          ],
+          "isUnique": false
+        },
+        "idx_audit_event_correlation_occurred": {
+          "name": "idx_audit_event_correlation_occurred",
+          "columns": [
+            "correlation_id",
+            "occurred_at_utc"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "audit_event_id": {
+          "name": "audit_event_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {
+        "chk_audit_event_actor_type": {
+          "name": "chk_audit_event_actor_type",
+          "value": "`audit_event`.`actor_type` IN ('system', 'user')"
+        },
+        "chk_audit_event_identity_format": {
+          "name": "chk_audit_event_identity_format",
+          "value": "OCTET_LENGTH(`audit_event`.`id`) = 36\n        AND BINARY `audit_event`.`id` REGEXP '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'\n        AND (\n          `audit_event`.`actor_id` IS NULL\n          OR (\n            OCTET_LENGTH(`audit_event`.`actor_id`) = 36\n            AND BINARY `audit_event`.`actor_id` REGEXP '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'\n          )\n        )\n        AND BINARY `audit_event`.`action` REGEXP '^[!-~]+$'\n        AND BINARY `audit_event`.`entity_type` REGEXP '^[!-~]+$'\n        AND OCTET_LENGTH(`audit_event`.`entity_id`) = 36\n        AND BINARY `audit_event`.`entity_id` REGEXP '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'\n        AND BINARY `audit_event`.`correlation_id` REGEXP '^[!-~]+$'"
+        }
+      }
+    },
+    "consulting_contract": {
+      "name": "consulting_contract",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "char(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "customer_id": {
+          "name": "customer_id",
+          "type": "char(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "varchar(16)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'active'"
+        },
+        "starts_on": {
+          "name": "starts_on",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "ends_on": {
+          "name": "ends_on",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "monthly_fee_amount": {
+          "name": "monthly_fee_amount",
+          "type": "decimal(19,4)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "currency": {
+          "name": "currency",
+          "type": "char(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'TRY'"
+        },
+        "vat_mode": {
+          "name": "vat_mode",
+          "type": "varchar(16)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "vat_rate": {
+          "name": "vat_rate",
+          "type": "decimal(5,2)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "payment_day": {
+          "name": "payment_day",
+          "type": "int unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "internal_note": {
+          "name": "internal_note",
+          "type": "varchar(2000)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at_utc": {
+          "name": "created_at_utc",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP(6)"
+        },
+        "updated_at_utc": {
+          "name": "updated_at_utc",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP(6)"
+        }
+      },
+      "indexes": {
+        "uq_consulting_contract_customer_start": {
+          "name": "uq_consulting_contract_customer_start",
+          "columns": [
+            "customer_id",
+            "starts_on"
+          ],
+          "isUnique": true
+        },
+        "idx_consulting_contract_customer_status": {
+          "name": "idx_consulting_contract_customer_status",
+          "columns": [
+            "customer_id",
+            "status",
+            "ends_on"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "fk_consulting_contract_customer": {
+          "name": "fk_consulting_contract_customer",
+          "tableFrom": "consulting_contract",
+          "tableTo": "customer",
+          "columnsFrom": [
+            "customer_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "restrict"
+        }
+      },
+      "compositePrimaryKeys": {
+        "consulting_contract_id": {
+          "name": "consulting_contract_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {
+        "chk_consulting_contract_identity": {
+          "name": "chk_consulting_contract_identity",
+          "value": "OCTET_LENGTH(`consulting_contract`.`id`) = 36\n        AND BINARY `consulting_contract`.`id` REGEXP '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'\n        AND OCTET_LENGTH(`consulting_contract`.`customer_id`) = 36\n        AND BINARY `consulting_contract`.`customer_id` REGEXP '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'"
+        },
+        "chk_consulting_contract_status": {
+          "name": "chk_consulting_contract_status",
+          "value": "BINARY `consulting_contract`.`status` IN (BINARY 'draft', BINARY 'active', BINARY 'closed')"
+        },
+        "chk_consulting_contract_terms": {
+          "name": "chk_consulting_contract_terms",
+          "value": "`consulting_contract`.`starts_on` <= `consulting_contract`.`ends_on`\n        AND `consulting_contract`.`monthly_fee_amount` > 0\n        AND BINARY `consulting_contract`.`currency` = BINARY 'TRY'\n        AND BINARY `consulting_contract`.`vat_mode` IN (BINARY 'exempt', BINARY 'exclusive', BINARY 'inclusive')\n        AND (\n          (`consulting_contract`.`vat_mode` = 'exempt' AND `consulting_contract`.`vat_rate` = 0)\n          OR (`consulting_contract`.`vat_mode` IN ('exclusive', 'inclusive') AND `consulting_contract`.`vat_rate` > 0 AND `consulting_contract`.`vat_rate` <= 100)\n        )\n        AND `consulting_contract`.`payment_day` BETWEEN 1 AND 31"
+        },
+        "chk_consulting_contract_optional_fields": {
+          "name": "chk_consulting_contract_optional_fields",
+          "value": "`consulting_contract`.`internal_note` IS NULL OR CHAR_LENGTH(`consulting_contract`.`internal_note`) BETWEEN 1 AND 2000"
+        },
+        "chk_consulting_contract_timeline": {
+          "name": "chk_consulting_contract_timeline",
+          "value": "`consulting_contract`.`created_at_utc` <= `consulting_contract`.`updated_at_utc`"
+        }
+      }
+    },
+    "cron_dispatch_gate": {
+      "name": "cron_dispatch_gate",
+      "columns": {
+        "gate_key": {
+          "name": "gate_key",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "state": {
+          "name": "state",
+          "type": "varchar(16)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'active'"
+        },
+        "last_permitted_at_utc": {
+          "name": "last_permitted_at_utc",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at_utc": {
+          "name": "created_at_utc",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at_utc": {
+          "name": "updated_at_utc",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "cron_dispatch_gate_gate_key": {
+          "name": "cron_dispatch_gate_gate_key",
+          "columns": [
+            "gate_key"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {
+        "chk_cron_dispatch_gate_key_format": {
+          "name": "chk_cron_dispatch_gate_key_format",
+          "value": "BINARY `cron_dispatch_gate`.`gate_key` REGEXP '^[!-~]+$'"
+        },
+        "chk_cron_dispatch_gate_state": {
+          "name": "chk_cron_dispatch_gate_state",
+          "value": "BINARY `cron_dispatch_gate`.`state` = BINARY 'active'"
+        },
+        "chk_cron_dispatch_gate_timeline": {
+          "name": "chk_cron_dispatch_gate_timeline",
+          "value": "`cron_dispatch_gate`.`created_at_utc` <= `cron_dispatch_gate`.`last_permitted_at_utc`\n        AND `cron_dispatch_gate`.`last_permitted_at_utc` = `cron_dispatch_gate`.`updated_at_utc`"
+        }
+      }
+    },
+    "customer": {
+      "name": "customer",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "char(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "display_name": {
+          "name": "display_name",
+          "type": "varchar(191)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "short_code": {
+          "name": "short_code",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "varchar(16)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'active'"
+        },
+        "contact_note": {
+          "name": "contact_note",
+          "type": "varchar(2000)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "email": {
+          "name": "email",
+          "type": "varchar(254)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "phone": {
+          "name": "phone",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at_utc": {
+          "name": "created_at_utc",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP(6)"
+        },
+        "updated_at_utc": {
+          "name": "updated_at_utc",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP(6)"
+        }
+      },
+      "indexes": {
+        "uq_customer_short_code": {
+          "name": "uq_customer_short_code",
+          "columns": [
+            "short_code"
+          ],
+          "isUnique": true
+        },
+        "idx_customer_status_name": {
+          "name": "idx_customer_status_name",
+          "columns": [
+            "status",
+            "display_name"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "customer_id": {
+          "name": "customer_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {
+        "chk_customer_id_format": {
+          "name": "chk_customer_id_format",
+          "value": "OCTET_LENGTH(`customer`.`id`) = 36\n        AND BINARY `customer`.`id` REGEXP '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'"
+        },
+        "chk_customer_display_name": {
+          "name": "chk_customer_display_name",
+          "value": "CHAR_LENGTH(`customer`.`display_name`) BETWEEN 1 AND 191\n        AND `customer`.`display_name` = TRIM(`customer`.`display_name`)"
+        },
+        "chk_customer_short_code": {
+          "name": "chk_customer_short_code",
+          "value": "BINARY `customer`.`short_code` REGEXP '^[A-Z0-9][A-Z0-9_-]{0,31}$'"
+        },
+        "chk_customer_status": {
+          "name": "chk_customer_status",
+          "value": "BINARY `customer`.`status` IN (BINARY 'active', BINARY 'inactive')"
+        },
+        "chk_customer_optional_fields": {
+          "name": "chk_customer_optional_fields",
+          "value": "(`customer`.`contact_note` IS NULL OR CHAR_LENGTH(`customer`.`contact_note`) BETWEEN 1 AND 2000)\n        AND (`customer`.`email` IS NULL OR CHAR_LENGTH(`customer`.`email`) BETWEEN 3 AND 254)\n        AND (`customer`.`phone` IS NULL OR CHAR_LENGTH(`customer`.`phone`) BETWEEN 3 AND 32)"
+        },
+        "chk_customer_timeline": {
+          "name": "chk_customer_timeline",
+          "value": "`customer`.`created_at_utc` <= `customer`.`updated_at_utc`"
+        }
+      }
+    },
+    "job_run": {
+      "name": "job_run",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "char(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "job_id": {
+          "name": "job_id",
+          "type": "char(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "attempt_no": {
+          "name": "attempt_no",
+          "type": "smallint unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "lease_token": {
+          "name": "lease_token",
+          "type": "char(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "lease_owner": {
+          "name": "lease_owner",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "started_at_utc": {
+          "name": "started_at_utc",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "completed_at_utc": {
+          "name": "completed_at_utc",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "outcome": {
+          "name": "outcome",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'running'"
+        },
+        "correlation_id": {
+          "name": "correlation_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "error_code": {
+          "name": "error_code",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "uq_job_run_job_attempt": {
+          "name": "uq_job_run_job_attempt",
+          "columns": [
+            "job_id",
+            "attempt_no"
+          ],
+          "isUnique": true
+        },
+        "idx_job_run_job_started": {
+          "name": "idx_job_run_job_started",
+          "columns": [
+            "job_id",
+            "started_at_utc"
+          ],
+          "isUnique": false
+        },
+        "idx_job_run_correlation_started": {
+          "name": "idx_job_run_correlation_started",
+          "columns": [
+            "correlation_id",
+            "started_at_utc"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "fk_job_run_scheduled_job": {
+          "name": "fk_job_run_scheduled_job",
+          "tableFrom": "job_run",
+          "tableTo": "scheduled_job",
+          "columnsFrom": [
+            "job_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "restrict"
+        }
+      },
+      "compositePrimaryKeys": {
+        "job_run_id": {
+          "name": "job_run_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {
+        "chk_job_run_outcome_state": {
+          "name": "chk_job_run_outcome_state",
+          "value": "(\n        `job_run`.`outcome` = 'running'\n        AND `job_run`.`completed_at_utc` IS NULL\n      ) OR (\n        `job_run`.`outcome` IN ('succeeded', 'retry', 'dead_letter', 'lease_expired')\n        AND `job_run`.`completed_at_utc` IS NOT NULL\n      )"
+        },
+        "chk_job_run_identity_format": {
+          "name": "chk_job_run_identity_format",
+          "value": "OCTET_LENGTH(`job_run`.`id`) = 36\n        AND BINARY `job_run`.`id` REGEXP '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'\n        AND OCTET_LENGTH(`job_run`.`job_id`) = 36\n        AND BINARY `job_run`.`job_id` REGEXP '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'\n        AND OCTET_LENGTH(`job_run`.`lease_token`) = 36\n        AND BINARY `job_run`.`lease_token` REGEXP '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'\n        AND BINARY `job_run`.`lease_owner` REGEXP '^[!-~]+$'\n        AND BINARY `job_run`.`correlation_id` REGEXP '^[!-~]+$'\n        AND (\n          `job_run`.`error_code` IS NULL\n          OR BINARY `job_run`.`error_code` REGEXP '^[!-~]+$'\n        )"
+        }
+      }
+    },
+    "monthly_visit_commitment": {
+      "name": "monthly_visit_commitment",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "char(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "contract_id": {
+          "name": "contract_id",
+          "type": "char(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "committed_on": {
+          "name": "committed_on",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "resolution_status": {
+          "name": "resolution_status",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'planned'"
+        },
+        "internal_planned_at_utc": {
+          "name": "internal_planned_at_utc",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "internal_duration_minutes": {
+          "name": "internal_duration_minutes",
+          "type": "smallint unsigned",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "delivered_on": {
+          "name": "delivered_on",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "resolution_note": {
+          "name": "resolution_note",
+          "type": "varchar(2000)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at_utc": {
+          "name": "created_at_utc",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP(6)"
+        },
+        "updated_at_utc": {
+          "name": "updated_at_utc",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP(6)"
+        }
+      },
+      "indexes": {
+        "uq_monthly_visit_contract_day": {
+          "name": "uq_monthly_visit_contract_day",
+          "columns": [
+            "contract_id",
+            "committed_on"
+          ],
+          "isUnique": true
+        },
+        "idx_monthly_visit_contract_month": {
+          "name": "idx_monthly_visit_contract_month",
+          "columns": [
+            "contract_id",
+            "committed_on",
+            "resolution_status"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "fk_monthly_visit_contract": {
+          "name": "fk_monthly_visit_contract",
+          "tableFrom": "monthly_visit_commitment",
+          "tableTo": "consulting_contract",
+          "columnsFrom": [
+            "contract_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "restrict"
+        }
+      },
+      "compositePrimaryKeys": {
+        "monthly_visit_commitment_id": {
+          "name": "monthly_visit_commitment_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {
+        "chk_monthly_visit_identity": {
+          "name": "chk_monthly_visit_identity",
+          "value": "OCTET_LENGTH(`monthly_visit_commitment`.`id`) = 36\n        AND BINARY `monthly_visit_commitment`.`id` REGEXP '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'\n        AND OCTET_LENGTH(`monthly_visit_commitment`.`contract_id`) = 36\n        AND BINARY `monthly_visit_commitment`.`contract_id` REGEXP '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'"
+        },
+        "chk_monthly_visit_status": {
+          "name": "chk_monthly_visit_status",
+          "value": "BINARY `monthly_visit_commitment`.`resolution_status` IN (\n        BINARY 'planned', BINARY 'completed', BINARY 'makeup_pending',\n        BINARY 'cancelled_by_agreement'\n      )"
+        },
+        "chk_monthly_visit_internal_plan": {
+          "name": "chk_monthly_visit_internal_plan",
+          "value": "(\n        `monthly_visit_commitment`.`internal_planned_at_utc` IS NULL\n        AND `monthly_visit_commitment`.`internal_duration_minutes` IS NULL\n      ) OR (\n        `monthly_visit_commitment`.`internal_planned_at_utc` IS NOT NULL\n        AND `monthly_visit_commitment`.`internal_duration_minutes` IS NOT NULL\n        AND `monthly_visit_commitment`.`internal_duration_minutes` BETWEEN 15 AND 720\n      )"
+        },
+        "chk_monthly_visit_resolution": {
+          "name": "chk_monthly_visit_resolution",
+          "value": "(\n        `monthly_visit_commitment`.`resolution_status` = 'completed'\n        AND `monthly_visit_commitment`.`delivered_on` IS NOT NULL\n        AND EXTRACT(YEAR_MONTH FROM `monthly_visit_commitment`.`delivered_on`) = EXTRACT(YEAR_MONTH FROM `monthly_visit_commitment`.`committed_on`)\n      ) OR (\n        `monthly_visit_commitment`.`resolution_status` <> 'completed'\n        AND `monthly_visit_commitment`.`delivered_on` IS NULL\n      )"
+        },
+        "chk_monthly_visit_cancellation_note": {
+          "name": "chk_monthly_visit_cancellation_note",
+          "value": "`monthly_visit_commitment`.`resolution_status` <> 'cancelled_by_agreement'\n        OR (\n          `monthly_visit_commitment`.`resolution_note` IS NOT NULL\n          AND CHAR_LENGTH(`monthly_visit_commitment`.`resolution_note`) BETWEEN 1 AND 2000\n        )"
+        },
+        "chk_monthly_visit_optional_fields": {
+          "name": "chk_monthly_visit_optional_fields",
+          "value": "`monthly_visit_commitment`.`resolution_note` IS NULL OR CHAR_LENGTH(`monthly_visit_commitment`.`resolution_note`) BETWEEN 1 AND 2000"
+        },
+        "chk_monthly_visit_timeline": {
+          "name": "chk_monthly_visit_timeline",
+          "value": "`monthly_visit_commitment`.`created_at_utc` <= `monthly_visit_commitment`.`updated_at_utc`"
+        }
+      }
+    },
+    "outbox_event": {
+      "name": "outbox_event",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "char(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "event_type": {
+          "name": "event_type",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "schema_version": {
+          "name": "schema_version",
+          "type": "int unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "payload": {
+          "name": "payload",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "idempotency_key": {
+          "name": "idempotency_key",
+          "type": "varchar(191)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "available_at_utc": {
+          "name": "available_at_utc",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'pending'"
+        },
+        "attempt_count": {
+          "name": "attempt_count",
+          "type": "smallint unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "max_attempts": {
+          "name": "max_attempts",
+          "type": "smallint unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "lease_owner": {
+          "name": "lease_owner",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "lease_token": {
+          "name": "lease_token",
+          "type": "char(36)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "lease_expires_at_utc": {
+          "name": "lease_expires_at_utc",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "delivered_at_utc": {
+          "name": "delivered_at_utc",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "last_error_code": {
+          "name": "last_error_code",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at_utc": {
+          "name": "created_at_utc",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP(6)"
+        },
+        "updated_at_utc": {
+          "name": "updated_at_utc",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP(6)"
+        }
+      },
+      "indexes": {
+        "uq_outbox_event_idempotency": {
+          "name": "uq_outbox_event_idempotency",
+          "columns": [
+            "idempotency_key"
+          ],
+          "isUnique": true
+        },
+        "uq_outbox_event_lease_token": {
+          "name": "uq_outbox_event_lease_token",
+          "columns": [
+            "lease_token"
+          ],
+          "isUnique": true
+        },
+        "idx_outbox_event_claim_ready": {
+          "name": "idx_outbox_event_claim_ready",
+          "columns": [
+            "status",
+            "available_at_utc",
+            "id"
+          ],
+          "isUnique": false
+        },
+        "idx_outbox_event_claim_expired": {
+          "name": "idx_outbox_event_claim_expired",
+          "columns": [
+            "status",
+            "lease_expires_at_utc",
+            "id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "outbox_event_id": {
+          "name": "outbox_event_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {
+        "chk_outbox_event_attempt_bounds": {
+          "name": "chk_outbox_event_attempt_bounds",
+          "value": "`outbox_event`.`max_attempts` >= 1 AND `outbox_event`.`attempt_count` <= `outbox_event`.`max_attempts`"
+        },
+        "chk_outbox_event_status": {
+          "name": "chk_outbox_event_status",
+          "value": "`outbox_event`.`status` IN ('pending', 'retry', 'leased', 'delivered', 'dead_letter')"
+        },
+        "chk_outbox_event_lease_shape": {
+          "name": "chk_outbox_event_lease_shape",
+          "value": "(\n        `outbox_event`.`status` = 'leased'\n        AND `outbox_event`.`lease_owner` IS NOT NULL\n        AND `outbox_event`.`lease_token` IS NOT NULL\n        AND `outbox_event`.`lease_expires_at_utc` IS NOT NULL\n      ) OR (\n        `outbox_event`.`status` <> 'leased'\n        AND `outbox_event`.`lease_owner` IS NULL\n        AND `outbox_event`.`lease_token` IS NULL\n        AND `outbox_event`.`lease_expires_at_utc` IS NULL\n      )"
+        },
+        "chk_outbox_event_identity_format": {
+          "name": "chk_outbox_event_identity_format",
+          "value": "OCTET_LENGTH(`outbox_event`.`id`) = 36\n        AND BINARY `outbox_event`.`id` REGEXP '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'\n        AND BINARY `outbox_event`.`event_type` REGEXP '^[!-~]+$'\n        AND BINARY `outbox_event`.`idempotency_key` REGEXP '^[!-~]+$'\n        AND (\n          `outbox_event`.`lease_owner` IS NULL\n          OR BINARY `outbox_event`.`lease_owner` REGEXP '^[!-~]+$'\n        )\n        AND (\n          `outbox_event`.`lease_token` IS NULL\n          OR (\n            OCTET_LENGTH(`outbox_event`.`lease_token`) = 36\n            AND BINARY `outbox_event`.`lease_token` REGEXP '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'\n          )\n        )\n        AND (\n          `outbox_event`.`last_error_code` IS NULL\n          OR BINARY `outbox_event`.`last_error_code` REGEXP '^[!-~]+$'\n        )"
+        }
+      }
+    },
+    "_platform_migration_verification": {
+      "name": "_platform_migration_verification",
+      "columns": {
+        "probe_id": {
+          "name": "probe_id",
+          "type": "bigint unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "idempotency_key": {
+          "name": "idempotency_key",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "decimal_round_trip_value": {
+          "name": "decimal_round_trip_value",
+          "type": "decimal(19,4)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "observed_at_utc": {
+          "name": "observed_at_utc",
+          "type": "timestamp(6)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP(6)"
+        }
+      },
+      "indexes": {
+        "uq_platform_migration_verification_idempotency": {
+          "name": "uq_platform_migration_verification_idempotency",
+          "columns": [
+            "idempotency_key"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "_platform_migration_verification_probe_id": {
+          "name": "_platform_migration_verification_probe_id",
+          "columns": [
+            "probe_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "receivable": {
+      "name": "receivable",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "char(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "client_operation_key": {
+          "name": "client_operation_key",
+          "type": "char(36)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "customer_id": {
+          "name": "customer_id",
+          "type": "char(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "contract_id": {
+          "name": "contract_id",
+          "type": "char(36)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "source_type": {
+          "name": "source_type",
+          "type": "varchar(24)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "period_month": {
+          "name": "period_month",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "due_on": {
+          "name": "due_on",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "description": {
+          "name": "description",
+          "type": "varchar(191)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "net_amount": {
+          "name": "net_amount",
+          "type": "decimal(19,4)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "vat_amount": {
+          "name": "vat_amount",
+          "type": "decimal(19,4)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "total_amount": {
+          "name": "total_amount",
+          "type": "decimal(19,4)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "currency": {
+          "name": "currency",
+          "type": "char(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'TRY'"
+        },
+        "created_at_utc": {
+          "name": "created_at_utc",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP(6)"
+        },
+        "updated_at_utc": {
+          "name": "updated_at_utc",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP(6)"
+        }
+      },
+      "indexes": {
+        "uq_receivable_contract_month": {
+          "name": "uq_receivable_contract_month",
+          "columns": [
+            "contract_id",
+            "source_type",
+            "period_month"
+          ],
+          "isUnique": true
+        },
+        "uq_receivable_opening_operation": {
+          "name": "uq_receivable_opening_operation",
+          "columns": [
+            "client_operation_key"
+          ],
+          "isUnique": true
+        },
+        "idx_receivable_due_on": {
+          "name": "idx_receivable_due_on",
+          "columns": [
+            "due_on",
+            "customer_id"
+          ],
+          "isUnique": false
+        },
+        "idx_receivable_customer_created": {
+          "name": "idx_receivable_customer_created",
+          "columns": [
+            "customer_id",
+            "created_at_utc"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "fk_receivable_customer": {
+          "name": "fk_receivable_customer",
+          "tableFrom": "receivable",
+          "tableTo": "customer",
+          "columnsFrom": [
+            "customer_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "restrict"
+        },
+        "fk_receivable_contract": {
+          "name": "fk_receivable_contract",
+          "tableFrom": "receivable",
+          "tableTo": "consulting_contract",
+          "columnsFrom": [
+            "contract_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "restrict"
+        }
+      },
+      "compositePrimaryKeys": {
+        "receivable_id": {
+          "name": "receivable_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {
+        "chk_receivable_identity": {
+          "name": "chk_receivable_identity",
+          "value": "OCTET_LENGTH(`receivable`.`id`) = 36\n        AND BINARY `receivable`.`id` REGEXP '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'\n        AND OCTET_LENGTH(`receivable`.`customer_id`) = 36\n        AND BINARY `receivable`.`customer_id` REGEXP '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'\n        AND (`receivable`.`client_operation_key` IS NULL OR (\n          OCTET_LENGTH(`receivable`.`client_operation_key`) = 36\n          AND BINARY `receivable`.`client_operation_key` REGEXP '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'\n        ))\n        AND (`receivable`.`contract_id` IS NULL OR (\n          OCTET_LENGTH(`receivable`.`contract_id`) = 36\n          AND BINARY `receivable`.`contract_id` REGEXP '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'\n        ))"
+        },
+        "chk_receivable_source": {
+          "name": "chk_receivable_source",
+          "value": "(\n          BINARY `receivable`.`source_type` = BINARY 'contract_month'\n          AND `receivable`.`contract_id` IS NOT NULL\n          AND `receivable`.`client_operation_key` IS NULL\n          AND `receivable`.`period_month` IS NOT NULL\n          AND DAYOFMONTH(`receivable`.`period_month`) = 1\n        ) OR (\n          BINARY `receivable`.`source_type` = BINARY 'opening_balance'\n          AND `receivable`.`client_operation_key` IS NOT NULL\n          AND `receivable`.`contract_id` IS NULL\n          AND `receivable`.`period_month` IS NULL\n        )"
+        },
+        "chk_receivable_amounts": {
+          "name": "chk_receivable_amounts",
+          "value": "`receivable`.`net_amount` >= 0\n        AND `receivable`.`vat_amount` >= 0\n        AND `receivable`.`total_amount` > 0\n        AND `receivable`.`total_amount` = `receivable`.`net_amount` + `receivable`.`vat_amount`\n        AND BINARY `receivable`.`currency` = BINARY 'TRY'"
+        },
+        "chk_receivable_description": {
+          "name": "chk_receivable_description",
+          "value": "CHAR_LENGTH(`receivable`.`description`) BETWEEN 1 AND 191\n        AND `receivable`.`description` = TRIM(`receivable`.`description`)"
+        },
+        "chk_receivable_timeline": {
+          "name": "chk_receivable_timeline",
+          "value": "`receivable`.`created_at_utc` <= `receivable`.`updated_at_utc`"
+        }
+      }
+    },
+    "receivable_collection": {
+      "name": "receivable_collection",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "char(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "client_operation_key": {
+          "name": "client_operation_key",
+          "type": "char(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "receivable_id": {
+          "name": "receivable_id",
+          "type": "char(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "amount": {
+          "name": "amount",
+          "type": "decimal(19,4)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "collected_on": {
+          "name": "collected_on",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "note": {
+          "name": "note",
+          "type": "varchar(2000)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at_utc": {
+          "name": "created_at_utc",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP(6)"
+        }
+      },
+      "indexes": {
+        "uq_receivable_collection_operation": {
+          "name": "uq_receivable_collection_operation",
+          "columns": [
+            "client_operation_key"
+          ],
+          "isUnique": true
+        },
+        "idx_receivable_collection_receivable_date": {
+          "name": "idx_receivable_collection_receivable_date",
+          "columns": [
+            "receivable_id",
+            "collected_on",
+            "created_at_utc"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "fk_receivable_collection_receivable": {
+          "name": "fk_receivable_collection_receivable",
+          "tableFrom": "receivable_collection",
+          "tableTo": "receivable",
+          "columnsFrom": [
+            "receivable_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "restrict"
+        }
+      },
+      "compositePrimaryKeys": {
+        "receivable_collection_id": {
+          "name": "receivable_collection_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {
+        "chk_receivable_collection_identity": {
+          "name": "chk_receivable_collection_identity",
+          "value": "OCTET_LENGTH(`receivable_collection`.`id`) = 36\n        AND BINARY `receivable_collection`.`id` REGEXP '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'\n        AND OCTET_LENGTH(`receivable_collection`.`client_operation_key`) = 36\n        AND BINARY `receivable_collection`.`client_operation_key` REGEXP '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'\n        AND OCTET_LENGTH(`receivable_collection`.`receivable_id`) = 36\n        AND BINARY `receivable_collection`.`receivable_id` REGEXP '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'"
+        },
+        "chk_receivable_collection_amount": {
+          "name": "chk_receivable_collection_amount",
+          "value": "`receivable_collection`.`amount` > 0"
+        },
+        "chk_receivable_collection_optional_fields": {
+          "name": "chk_receivable_collection_optional_fields",
+          "value": "`receivable_collection`.`note` IS NULL OR CHAR_LENGTH(`receivable_collection`.`note`) BETWEEN 1 AND 2000"
+        }
+      }
+    },
+    "scheduled_job": {
+      "name": "scheduled_job",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "char(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "job_type": {
+          "name": "job_type",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "payload_schema_version": {
+          "name": "payload_schema_version",
+          "type": "int unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "payload": {
+          "name": "payload",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "scheduled_at_utc": {
+          "name": "scheduled_at_utc",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "available_at_utc": {
+          "name": "available_at_utc",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'pending'"
+        },
+        "attempt_count": {
+          "name": "attempt_count",
+          "type": "smallint unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "max_attempts": {
+          "name": "max_attempts",
+          "type": "smallint unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "lease_owner": {
+          "name": "lease_owner",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "lease_token": {
+          "name": "lease_token",
+          "type": "char(36)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "lease_expires_at_utc": {
+          "name": "lease_expires_at_utc",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "idempotency_key": {
+          "name": "idempotency_key",
+          "type": "varchar(191)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "last_error_code": {
+          "name": "last_error_code",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at_utc": {
+          "name": "created_at_utc",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP(6)"
+        },
+        "updated_at_utc": {
+          "name": "updated_at_utc",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP(6)"
+        }
+      },
+      "indexes": {
+        "uq_scheduled_job_type_idempotency": {
+          "name": "uq_scheduled_job_type_idempotency",
+          "columns": [
+            "job_type",
+            "idempotency_key"
+          ],
+          "isUnique": true
+        },
+        "uq_scheduled_job_lease_token": {
+          "name": "uq_scheduled_job_lease_token",
+          "columns": [
+            "lease_token"
+          ],
+          "isUnique": true
+        },
+        "idx_scheduled_job_claim_ready": {
+          "name": "idx_scheduled_job_claim_ready",
+          "columns": [
+            "status",
+            "available_at_utc",
+            "id"
+          ],
+          "isUnique": false
+        },
+        "idx_scheduled_job_claim_expired": {
+          "name": "idx_scheduled_job_claim_expired",
+          "columns": [
+            "status",
+            "lease_expires_at_utc",
+            "id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "scheduled_job_id": {
+          "name": "scheduled_job_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {
+        "chk_scheduled_job_attempt_bounds": {
+          "name": "chk_scheduled_job_attempt_bounds",
+          "value": "`scheduled_job`.`max_attempts` >= 1 AND `scheduled_job`.`attempt_count` <= `scheduled_job`.`max_attempts`"
+        },
+        "chk_scheduled_job_status": {
+          "name": "chk_scheduled_job_status",
+          "value": "`scheduled_job`.`status` IN ('pending', 'retry', 'leased', 'succeeded', 'dead_letter')"
+        },
+        "chk_scheduled_job_lease_shape": {
+          "name": "chk_scheduled_job_lease_shape",
+          "value": "(\n        `scheduled_job`.`status` = 'leased'\n        AND `scheduled_job`.`lease_owner` IS NOT NULL\n        AND `scheduled_job`.`lease_token` IS NOT NULL\n        AND `scheduled_job`.`lease_expires_at_utc` IS NOT NULL\n      ) OR (\n        `scheduled_job`.`status` <> 'leased'\n        AND `scheduled_job`.`lease_owner` IS NULL\n        AND `scheduled_job`.`lease_token` IS NULL\n        AND `scheduled_job`.`lease_expires_at_utc` IS NULL\n      )"
+        },
+        "chk_scheduled_job_identity_format": {
+          "name": "chk_scheduled_job_identity_format",
+          "value": "OCTET_LENGTH(`scheduled_job`.`id`) = 36\n        AND BINARY `scheduled_job`.`id` REGEXP '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'\n        AND BINARY `scheduled_job`.`job_type` REGEXP '^[!-~]+$'\n        AND BINARY `scheduled_job`.`idempotency_key` REGEXP '^[!-~]+$'\n        AND (\n          `scheduled_job`.`lease_owner` IS NULL\n          OR BINARY `scheduled_job`.`lease_owner` REGEXP '^[!-~]+$'\n        )\n        AND (\n          `scheduled_job`.`lease_token` IS NULL\n          OR (\n            OCTET_LENGTH(`scheduled_job`.`lease_token`) = 36\n            AND BINARY `scheduled_job`.`lease_token` REGEXP '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'\n          )\n        )\n        AND (\n          `scheduled_job`.`last_error_code` IS NULL\n          OR BINARY `scheduled_job`.`last_error_code` REGEXP '^[!-~]+$'\n        )"
+        }
+      }
+    },
+    "user_account": {
+      "name": "user_account",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "char(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "email": {
+          "name": "email",
+          "type": "varchar(254)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "password_hash": {
+          "name": "password_hash",
+          "type": "varchar(191)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "credential_version": {
+          "name": "credential_version",
+          "type": "int unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 1
+        },
+        "status": {
+          "name": "status",
+          "type": "varchar(16)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'active'"
+        },
+        "password_changed_at_utc": {
+          "name": "password_changed_at_utc",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at_utc": {
+          "name": "created_at_utc",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP(6)"
+        },
+        "updated_at_utc": {
+          "name": "updated_at_utc",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP(6)"
+        }
+      },
+      "indexes": {
+        "uq_user_account_email": {
+          "name": "uq_user_account_email",
+          "columns": [
+            "email"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "user_account_id": {
+          "name": "user_account_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {
+        "chk_user_account_id_format": {
+          "name": "chk_user_account_id_format",
+          "value": "OCTET_LENGTH(`user_account`.`id`) = 36\n        AND BINARY `user_account`.`id` REGEXP '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'"
+        },
+        "chk_user_account_email": {
+          "name": "chk_user_account_email",
+          "value": "CHAR_LENGTH(`user_account`.`email`) BETWEEN 3 AND 254\n        AND `user_account`.`email` = TRIM(`user_account`.`email`)\n        AND BINARY `user_account`.`email` = BINARY LOWER(`user_account`.`email`)"
+        },
+        "chk_user_account_password_hash": {
+          "name": "chk_user_account_password_hash",
+          "value": "BINARY `user_account`.`password_hash` REGEXP '^(scrypt:32768:8:1:[A-Za-z0-9_-]{22}:[A-Za-z0-9_-]{86}|scrypt\\$32768\\$8\\$1\\$[A-Za-z0-9_-]{22}\\$[A-Za-z0-9_-]{86})$'"
+        },
+        "chk_user_account_state": {
+          "name": "chk_user_account_state",
+          "value": "`user_account`.`credential_version` >= 1\n        AND BINARY `user_account`.`status` IN (BINARY 'active', BINARY 'disabled')"
+        },
+        "chk_user_account_timeline": {
+          "name": "chk_user_account_timeline",
+          "value": "`user_account`.`created_at_utc` <= `user_account`.`password_changed_at_utc`\n        AND `user_account`.`password_changed_at_utc` <= `user_account`.`updated_at_utc`"
+        }
+      }
+    },
+    "work_task": {
+      "name": "work_task",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "char(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "customer_id": {
+          "name": "customer_id",
+          "type": "char(36)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "assignee_user_account_id": {
+          "name": "assignee_user_account_id",
+          "type": "char(36)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "title": {
+          "name": "title",
+          "type": "varchar(191)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "description": {
+          "name": "description",
+          "type": "varchar(4000)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "varchar(24)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'backlog'"
+        },
+        "priority": {
+          "name": "priority",
+          "type": "varchar(16)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'normal'"
+        },
+        "due_on": {
+          "name": "due_on",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "completed_at_utc": {
+          "name": "completed_at_utc",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "version": {
+          "name": "version",
+          "type": "int unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 1
+        },
+        "created_at_utc": {
+          "name": "created_at_utc",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP(6)"
+        },
+        "updated_at_utc": {
+          "name": "updated_at_utc",
+          "type": "datetime(6)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP(6)"
+        }
+      },
+      "indexes": {
+        "idx_work_task_board": {
+          "name": "idx_work_task_board",
+          "columns": [
+            "status",
+            "due_on",
+            "updated_at_utc"
+          ],
+          "isUnique": false
+        },
+        "idx_work_task_customer_status": {
+          "name": "idx_work_task_customer_status",
+          "columns": [
+            "customer_id",
+            "status",
+            "due_on"
+          ],
+          "isUnique": false
+        },
+        "idx_work_task_assignee_status": {
+          "name": "idx_work_task_assignee_status",
+          "columns": [
+            "assignee_user_account_id",
+            "status",
+            "due_on"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "fk_work_task_customer": {
+          "name": "fk_work_task_customer",
+          "tableFrom": "work_task",
+          "tableTo": "customer",
+          "columnsFrom": [
+            "customer_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "restrict"
+        },
+        "fk_work_task_assignee": {
+          "name": "fk_work_task_assignee",
+          "tableFrom": "work_task",
+          "tableTo": "user_account",
+          "columnsFrom": [
+            "assignee_user_account_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "restrict"
+        }
+      },
+      "compositePrimaryKeys": {
+        "work_task_id": {
+          "name": "work_task_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {
+        "chk_work_task_identity": {
+          "name": "chk_work_task_identity",
+          "value": "OCTET_LENGTH(`work_task`.`id`) = 36\n        AND BINARY `work_task`.`id` REGEXP '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'\n        AND (`work_task`.`customer_id` IS NULL OR (\n          OCTET_LENGTH(`work_task`.`customer_id`) = 36\n          AND BINARY `work_task`.`customer_id` REGEXP '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'\n        ))\n        AND (`work_task`.`assignee_user_account_id` IS NULL OR (\n          OCTET_LENGTH(`work_task`.`assignee_user_account_id`) = 36\n          AND BINARY `work_task`.`assignee_user_account_id` REGEXP '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'\n        ))"
+        },
+        "chk_work_task_title": {
+          "name": "chk_work_task_title",
+          "value": "CHAR_LENGTH(`work_task`.`title`) BETWEEN 1 AND 191\n        AND `work_task`.`title` = TRIM(`work_task`.`title`)"
+        },
+        "chk_work_task_description": {
+          "name": "chk_work_task_description",
+          "value": "`work_task`.`description` IS NULL\n        OR CHAR_LENGTH(`work_task`.`description`) BETWEEN 1 AND 4000"
+        },
+        "chk_work_task_status": {
+          "name": "chk_work_task_status",
+          "value": "BINARY `work_task`.`status` IN (\n        BINARY 'backlog', BINARY 'todo', BINARY 'in_progress',\n        BINARY 'blocked', BINARY 'done'\n      )"
+        },
+        "chk_work_task_priority": {
+          "name": "chk_work_task_priority",
+          "value": "BINARY `work_task`.`priority` IN (\n        BINARY 'low', BINARY 'normal', BINARY 'high', BINARY 'urgent'\n      )"
+        },
+        "chk_work_task_completion": {
+          "name": "chk_work_task_completion",
+          "value": "(\n        `work_task`.`status` = 'done'\n        AND `work_task`.`completed_at_utc` IS NOT NULL\n      ) OR (\n        `work_task`.`status` <> 'done'\n        AND `work_task`.`completed_at_utc` IS NULL\n      )"
+        },
+        "chk_work_task_version": {
+          "name": "chk_work_task_version",
+          "value": "`work_task`.`version` >= 1"
+        },
+        "chk_work_task_timeline": {
+          "name": "chk_work_task_timeline",
+          "value": "`work_task`.`created_at_utc` <= `work_task`.`updated_at_utc`\n        AND (\n          `work_task`.`completed_at_utc` IS NULL\n          OR (\n            `work_task`.`created_at_utc` <= `work_task`.`completed_at_utc`\n            AND `work_task`.`completed_at_utc` <= `work_task`.`updated_at_utc`\n          )\n        )"
+        }
+      }
+    }
+  },
+  "views": {},
+  "_meta": {
+    "schemas": {},
+    "tables": {},
+    "columns": {}
+  },
+  "internal": {
+    "tables": {},
+    "indexes": {}
+  }
+}

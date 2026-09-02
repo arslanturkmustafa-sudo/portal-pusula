@@ -54,3 +54,8 @@ export {
   type NewUserAccountRecord,
   type UserAccountRecord,
 } from "./user-account";
+export {
+  workTask,
+  type NewWorkTaskRecord,
+  type WorkTaskRecord,
+} from "./work-task";

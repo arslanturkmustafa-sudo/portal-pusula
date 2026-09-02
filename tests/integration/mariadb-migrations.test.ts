@@ -27,6 +27,7 @@ const monthlyVisitCommitmentTable = "monthly_visit_commitment";
 const receivableTable = "receivable";
 const receivableCollectionTable = "receivable_collection";
 const userAccountTable = "user_account";
+const workTaskTable = "work_task";
 const platformTables = [
   "audit_event",
   "job_run",
@@ -42,6 +43,7 @@ const allMigratedPlatformTables = [
   receivableTable,
   receivableCollectionTable,
   userAccountTable,
+  workTaskTable,
 ] as const;
 const repositoryRoot = process.cwd();
 const migrationLockWaitTimeoutMs = 5_000;
@@ -313,6 +315,7 @@ async function waitForBlockedMigrationRunners(
 async function resetKnownMigrationArtifacts(pool: Pool): Promise<void> {
   // These identifiers are compile-time constants and this suite is enabled only
   // for the disposable MariaDB provisioned by scripts/test-mariadb.mjs.
+  await pool.query(`DROP TABLE IF EXISTS \`${workTaskTable}\``);
   await pool.query(`DROP TABLE IF EXISTS \`${userAccountTable}\``);
   await pool.query("DROP TABLE IF EXISTS `receivable_collection`");
   await pool.query("DROP TABLE IF EXISTS `receivable`");
@@ -1247,7 +1250,7 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
       const [before] = await pool.query<MigrationRow[]>(
         `SELECT id, hash, created_at FROM \`${migrationTable}\` ORDER BY id`,
       );
-      expect(before).toHaveLength(8);
+      expect(before).toHaveLength(9);
 
       await runMigration();
 
@@ -1261,7 +1264,7 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
       const [migrationRows] = await pool.query<MigrationRow[]>(
         `SELECT id, hash, created_at FROM \`${migrationTable}\` ORDER BY id`,
       );
-      expect(migrationRows).toHaveLength(8);
+      expect(migrationRows).toHaveLength(9);
       const migration = migrationRows[3];
       if (migration === undefined) {
         throw new Error("Expected the fourth applied migration journal row.");
@@ -1380,7 +1383,7 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
           const [journalRows] = await lockConnection.query<MigrationRow[]>(
             `SELECT id, hash, created_at FROM \`${migrationTable}\` ORDER BY id`,
           );
-          expect(journalRows).toHaveLength(8);
+          expect(journalRows).toHaveLength(9);
           expect(await tableExists(lockConnection, verificationTable)).toBe(
             true,
           );
