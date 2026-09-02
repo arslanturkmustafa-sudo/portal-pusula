@@ -129,4 +129,40 @@ describe("AccountWorkspace", () => {
       expect(document.body.textContent).not.toContain("new-password-sentinel");
     });
   });
+
+  it("explains a reverse-proxy origin rejection without exposing passwords", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        jsonResponse({
+          account: {
+            email: "yonetici@example.com",
+            passwordChangedAtUtc: null,
+            passwordManagementAvailable: true,
+            requiresCurrentPassword: true,
+          },
+        }),
+      )
+      .mockResolvedValueOnce(jsonResponse({ status: "forbidden" }, 403));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<AccountWorkspace live />);
+    await screen.findByText("yonetici@example.com");
+    fireEvent.change(screen.getByLabelText("Mevcut parola"), {
+      target: { value: previousValue },
+    });
+    fireEvent.change(screen.getByLabelText("Yeni parola"), {
+      target: { value: nextValue },
+    });
+    fireEvent.change(screen.getByLabelText("Yeni parola tekrarı"), {
+      target: { value: nextValue },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Parolayı değiştir" }));
+
+    expect(
+      await screen.findByText(/Güvenlik doğrulaması tamamlanamadı/u),
+    ).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain(previousValue);
+    expect(document.body.textContent).not.toContain(nextValue);
+  });
 });

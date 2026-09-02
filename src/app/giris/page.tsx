@@ -17,7 +17,7 @@ type LoginPageProps = Readonly<{
 
 export default async function LoginPage({ searchParams }: LoginPageProps) {
   if (await isCurrentAdminAuthenticated()) {
-    redirect("/");
+    redirect("/musteriler");
   }
 
   const { hata } = await searchParams;

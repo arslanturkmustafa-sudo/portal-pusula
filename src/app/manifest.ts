@@ -8,7 +8,7 @@ export default function manifest(): MetadataRoute.Manifest {
     description:
       "Müşteri, planlama, görev ve finans süreçleri için güvenli yönetim çalışma alanı.",
     lang: "tr",
-    start_url: "/",
+    start_url: "/musteriler",
     scope: "/",
     display: "standalone",
     background_color: "#f3efe6",
@@ -36,4 +36,3 @@ export default function manifest(): MetadataRoute.Manifest {
     ],
   };
 }
-

@@ -71,16 +71,31 @@ const account = {
 const previousValue = ["old", "sample"].join("-");
 const nextValue = ["new", "sample"].join("-");
 
-function request(body: Record<string, unknown>, origin = "https://portal.example.test") {
-  return new NextRequest("https://portal.example.test/api/account/password", {
-    body: JSON.stringify(body),
-    headers: {
-      "content-type": "application/json",
-      origin,
-      "x-correlation-id": "22222222-2222-4222-8222-222222222222",
+function request(
+  body: Record<string, unknown>,
+  origin = "https://portal.example.test",
+  options: Readonly<{
+    forwardedProtocol?: string;
+    host?: string;
+    url?: string;
+  }> = {},
+) {
+  return new NextRequest(
+    options.url ?? "https://portal.example.test/api/account/password",
+    {
+      body: JSON.stringify(body),
+      headers: {
+        "content-type": "application/json",
+        ...(options.forwardedProtocol
+          ? { "x-forwarded-proto": options.forwardedProtocol }
+          : {}),
+        ...(options.host ? { host: options.host } : {}),
+        origin,
+        "x-correlation-id": "22222222-2222-4222-8222-222222222222",
+      },
+      method: "PATCH",
     },
-    method: "PATCH",
-  });
+  );
 }
 
 describe("account password endpoint", () => {
@@ -103,6 +118,66 @@ describe("account password endpoint", () => {
       passwordChangedAtUtc: account.passwordChangedAtUtc,
     });
     expect((await PATCH(request({}, "https://attacker.example"))).status).toBe(403);
+    expect(mocks.changeAccountPassword).not.toHaveBeenCalled();
+  });
+
+  it("accepts the public Host origin behind a reverse proxy", async () => {
+    mocks.authenticateAdminRequest.mockResolvedValue({
+      accountId: account.id,
+      credentialVersion: 1,
+      email: account.email,
+      kind: "account",
+      passwordChangedAtUtc: account.passwordChangedAtUtc,
+    });
+
+    const response = await PATCH(
+      request(
+        {
+          confirmation: nextValue,
+          currentPassword: previousValue,
+          newPassword: nextValue,
+        },
+        "https://portal.example.test",
+        {
+          forwardedProtocol: "https",
+          host: "portal.example.test",
+          url: "http://internal-hosting.example/api/account/password",
+        },
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.changeAccountPassword).toHaveBeenCalledOnce();
+  });
+
+  it("does not trust a forwarded host supplied by a cross-site request", async () => {
+    mocks.authenticateAdminRequest.mockResolvedValue({
+      accountId: account.id,
+      credentialVersion: 1,
+      email: account.email,
+      kind: "account",
+      passwordChangedAtUtc: account.passwordChangedAtUtc,
+    });
+
+    const response = await PATCH(
+      new NextRequest("http://internal-hosting.example/api/account/password", {
+        body: JSON.stringify({
+          confirmation: nextValue,
+          currentPassword: previousValue,
+          newPassword: nextValue,
+        }),
+        headers: {
+          "content-type": "application/json",
+          host: "portal.example.test",
+          origin: "https://attacker.example",
+          "x-forwarded-host": "attacker.example",
+          "x-forwarded-proto": "https",
+        },
+        method: "PATCH",
+      }),
+    );
+
+    expect(response.status).toBe(403);
     expect(mocks.changeAccountPassword).not.toHaveBeenCalled();
   });
 

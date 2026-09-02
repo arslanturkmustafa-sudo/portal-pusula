@@ -303,7 +303,8 @@ describe("CustomerWorkspace reliable date writes", () => {
       screen.getByRole("button", { name: "Sözleşmeyi kaydet" }),
     ).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-    expect(screen.queryByDisplayValue("2026-09-02")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Başlangıç")).not.toHaveValue("2026-12-31");
+    expect(screen.getByLabelText("Bitiş")).not.toHaveValue("2026-01-01");
     expect(screen.getByLabelText("Aylık ücret")).toHaveValue("50000");
     expect(
       screen.getByRole("spinbutton", { name: /Ödeme günü/u }),

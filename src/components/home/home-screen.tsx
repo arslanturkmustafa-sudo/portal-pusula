@@ -8,24 +8,8 @@ import {
   type FormEvent,
 } from "react";
 
-import { AccountWorkspace } from "@/components/home/account-workspace";
 import { CustomerWorkspace } from "@/components/home/customer-workspace";
-import { FinanceWorkspace } from "@/components/home/finance-workspace";
-
-const navigationItems = [
-  { href: "#musteriler", label: "Müşteriler", shortLabel: "Müşteri" },
-  { href: "#gunluk-plan", label: "Günlük plan", shortLabel: "Plan" },
-  { href: "#gorevler", label: "Görevler", shortLabel: "Görev" },
-  { href: "#finans", label: "Finans", shortLabel: "Finans" },
-  { href: "#projeler", label: "Projeler", shortLabel: "Proje" },
-  { href: "#hesabim", label: "Hesabım", shortLabel: "Hesap" },
-] as const;
-
-type NavigationHref = (typeof navigationItems)[number]["href"];
-
-function navigationHrefFromHash(hash: string): NavigationHref {
-  return navigationItems.find((item) => item.href === hash)?.href ?? "#musteriler";
-}
+import { PortalPageHeader } from "@/components/portal/portal-page-header";
 
 type CustomerView = Readonly<{
   code: string;
@@ -110,21 +94,6 @@ const sampleCustomers: readonly CustomerView[] = [
   },
 ] as const;
 
-const todayItems = [
-  { time: "09:00", title: "Saha ziyareti", context: "Atlas Makina" },
-  { time: "13:30", title: "Yönetim toplantısı", context: "Vega Endüstri" },
-  { time: "16:00", title: "Tahsilat kontrolü", context: "İç operasyon" },
-] as const;
-
-function istanbulTodayLabel(): string {
-  return new Intl.DateTimeFormat("tr-TR", {
-    day: "numeric",
-    month: "long",
-    timeZone: "Europe/Istanbul",
-    weekday: "long",
-  }).format(new Date());
-}
-
 function generatedCustomerCode(displayName: FormDataEntryValue | null): string {
   const rawName = typeof displayName === "string" ? displayName : "";
   const base = rawName
@@ -192,18 +161,6 @@ export function HomeScreen({ live = false }: HomeScreenProps) {
   const [formOpen, setFormOpen] = useState(false);
   const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<"error" | "idle" | "saving">("idle");
-  const [activeNavigationHref, setActiveNavigationHref] =
-    useState<NavigationHref>("#musteriler");
-  const todayLabel = istanbulTodayLabel();
-
-  useEffect(() => {
-    const updateFromHash = () => {
-      setActiveNavigationHref(navigationHrefFromHash(window.location.hash));
-    };
-    updateFromHash();
-    window.addEventListener("hashchange", updateFromHash);
-    return () => window.removeEventListener("hashchange", updateFromHash);
-  }, []);
 
   useEffect(() => {
     if (!live) return;
@@ -245,11 +202,6 @@ export function HomeScreen({ live = false }: HomeScreenProps) {
   const selectedCustomer = useMemo(
     () => customerRows.find((customer) => customer.id === selectedCustomerId) ?? null,
     [customerRows, selectedCustomerId],
-  );
-
-  const financeCustomers = useMemo(
-    () => customerRows.map((customer) => ({ id: customer.id, name: customer.name })),
-    [customerRows],
   );
 
   const handleContractSaved = useCallback(
@@ -383,80 +335,26 @@ export function HomeScreen({ live = false }: HomeScreenProps) {
           : "Aşağıdaki kayıtlar arayüzü değerlendirmek için hazırlanmış örnek verilerdir.";
 
   return (
-    <>
-      <a className="skip-link" href="#ana-icerik">
-        Ana içeriğe geç
-      </a>
-
-      <div className="workbench-shell">
-        <aside className="ledger-rail">
-          <a className="ledger-brand" href="#musteriler" aria-label="Portal Pusula ana sayfa">
-            <span className="ledger-brand-mark" aria-hidden="true">PP</span>
-            <span>
-              <strong>Portal Pusula</strong>
-              <small>İş kayıt defteri</small>
-            </span>
-          </a>
-
-          <div className="ledger-workspace">
-            <span>Çalışma alanı</span>
-            <strong>Mühendis Kafası</strong>
-          </div>
-
-          <nav className="ledger-nav" aria-label="Ana navigasyon">
-            {navigationItems.map((item, index) => (
-              <a
-                className={activeNavigationHref === item.href ? "is-active" : undefined}
-                href={item.href}
-                key={item.href}
-                aria-current={activeNavigationHref === item.href ? "page" : undefined}
-                onClick={() => setActiveNavigationHref(item.href)}
-              >
-                <span className="ledger-nav-index" aria-hidden="true">
-                  {String(index + 1).padStart(2, "0")}
-                </span>
-                <span className="ledger-nav-label">{item.label}</span>
-                <span className="ledger-nav-short" aria-hidden="true">{item.shortLabel}</span>
-              </a>
-            ))}
-          </nav>
-
-          <div className="ledger-rail-footer">
-            <span className="connection-dot" aria-hidden="true" />
-            <span>
-              <strong>İç kullanım</strong>
-              <small>Yetkili erişim</small>
-            </span>
-          </div>
-        </aside>
-
-        <main className="workbench-main" id="ana-icerik" tabIndex={-1}>
-          <header className="workbench-header">
-            <div>
-              <p className="eyebrow" suppressHydrationWarning>
-                {todayLabel} · Müşteri masası
-              </p>
-              <h1>Müşteriler</h1>
-              <p className="header-note">Sözleşme, ziyaret ve tahsilat durumuna tek bakış.</p>
-            </div>
-            <div className="header-actions">
-              <form action="/api/auth/logout" method="post">
-                <button className="text-action" type="submit">Çıkış</button>
-              </form>
-              <button
-                className="primary-action"
-                type="button"
-                aria-label="Müşteri ekle"
-                aria-expanded={formOpen}
-                onClick={() => {
-                  setFormOpen((current) => !current);
-                  setSaveState("idle");
-                }}
-              >
-                + Müşteri ekle
-              </button>
-            </div>
-          </header>
+    <div className="customer-page-workspace">
+      <PortalPageHeader
+        actions={(
+          <button
+            className="primary-action"
+            type="button"
+            aria-label="Müşteri ekle"
+            aria-expanded={formOpen}
+            onClick={() => {
+              setFormOpen((current) => !current);
+              setSaveState("idle");
+            }}
+          >
+            + Müşteri ekle
+          </button>
+        )}
+        context="Müşteri masası"
+        note="Sözleşme, ziyaret ve tahsilat durumuna tek bakış."
+        title="Müşteriler"
+      />
 
           {formOpen ? (
             <section className="customer-entry" aria-labelledby="customer-entry-title">
@@ -623,43 +521,6 @@ export function HomeScreen({ live = false }: HomeScreenProps) {
               </div>
             </section>
 
-            <aside className="day-sheet" id="gunluk-plan" aria-labelledby="day-sheet-title">
-              <div className="section-heading section-heading-compact">
-                <div>
-                  <p className="section-kicker">Bugün / {live ? "—" : "03"}</p>
-                  <h2 id="day-sheet-title">Bugünün planı</h2>
-                </div>
-              </div>
-
-              <ol className="day-list">
-                {(live ? [] : todayItems).map((item) => (
-                  <li key={`${item.time}-${item.title}`}>
-                    <label>
-                      <input type="checkbox" />
-                      <span className="day-time">{item.time}</span>
-                      <span className="day-copy">
-                        <strong>{item.title}</strong>
-                        <small>{item.context}</small>
-                      </span>
-                    </label>
-                  </li>
-                ))}
-              </ol>
-
-              {live ? (
-                <div className="next-action">
-                  <span>Planlama alanı</span>
-                  <strong>Takvim adımı henüz açılmadı.</strong>
-                  <small>Tahsilat işlemleri aşağıdaki Finans bölümünden yürütülür.</small>
-                </div>
-              ) : (
-                <div className="next-action">
-                  <span>Örnek sıradaki işlem</span>
-                  <strong>Geciken 2 ödeme için müşterileri ara</strong>
-                  <small>Açık kayıtları Finans bölümünden kontrol edin.</small>
-                </div>
-              )}
-            </aside>
           </div>
 
           {selectedCustomer ? (
@@ -684,16 +545,6 @@ export function HomeScreen({ live = false }: HomeScreenProps) {
             </p>
           )}
 
-          <FinanceWorkspace customers={financeCustomers} live={live} />
-
-          <section className="future-sections" aria-label="Yakında açılacak çalışma alanları">
-            <span id="gorevler">Görevler</span>
-            <span id="projeler">Projeler</span>
-          </section>
-
-          <AccountWorkspace live={live} />
-        </main>
-      </div>
-    </>
+    </div>
   );
 }

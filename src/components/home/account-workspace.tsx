@@ -99,7 +99,7 @@ export function AccountWorkspace({ live = false }: AccountWorkspaceProps) {
         headers: { "Content-Type": "application/json" },
         method: "PATCH",
       });
-      const payload = (await response.json()) as {
+      const payload = (await response.json().catch(() => ({}))) as {
         account?: AccountView;
         status?: string;
       };
@@ -113,6 +113,18 @@ export function AccountWorkspace({ live = false }: AccountWorkspaceProps) {
         } else if (payload.status === "validation_error") {
           setErrorMessage(
             "Yeni parola 8-256 karakter olmalı ve parola tekrarı eşleşmelidir.",
+          );
+        } else if (payload.status === "forbidden") {
+          setErrorMessage(
+            "Güvenlik doğrulaması tamamlanamadı. Sayfayı yenileyip tekrar deneyin.",
+          );
+        } else if (payload.status === "not_available") {
+          setErrorMessage(
+            "Bu kurulumda uygulama içinden parola değiştirme kullanılamıyor.",
+          );
+        } else if (payload.status === "service_unavailable") {
+          setErrorMessage(
+            "Parola servisine şu anda ulaşılamadı. Birkaç saniye sonra yeniden deneyin.",
           );
         } else {
           setErrorMessage("Parola değiştirilemedi. Lütfen yeniden deneyin.");

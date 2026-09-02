@@ -11,7 +11,7 @@ describe("PWA manifest", () => {
       name: "Portal Pusula",
       short_name: "Pusula",
       lang: "tr",
-      start_url: "/",
+      start_url: "/musteriler",
       scope: "/",
       display: "standalone",
     });
@@ -25,4 +25,3 @@ describe("PWA manifest", () => {
     expect(value.icons?.every((icon) => icon.src.startsWith("/"))).toBe(true);
   });
 });
-
