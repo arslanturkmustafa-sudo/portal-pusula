@@ -24,10 +24,15 @@ test("protects and renders the accessible customer workbench", async ({ page }) 
   await expect(
     page.getByRole("region", { name: "Müşteri kayıtları" }),
   ).toBeVisible();
-  await expect(
-    page.getByRole("complementary", { name: "Bugünün planı" }),
-  ).toBeVisible();
   await expect(page.getByText("Atlas Makina")).toHaveCount(0);
+
+  await page.getByRole("link", { name: "Günlük plan" }).click();
+  await expect(page).toHaveURL(/\/gunluk-plan$/u);
+  await expect(
+    page.getByRole("heading", { level: 1, name: "Günlük plan" }),
+  ).toBeVisible();
+  await page.getByRole("link", { name: "Müşteriler" }).click();
+  await expect(page).toHaveURL(/\/musteriler$/u);
 
   const skipLink = page.getByRole("link", { name: "Ana içeriğe geç" });
   await page.keyboard.press("Tab");

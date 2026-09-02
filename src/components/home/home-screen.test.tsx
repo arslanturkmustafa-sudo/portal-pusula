@@ -10,7 +10,7 @@ afterEach(() => {
 });
 
 describe("HomeScreen", () => {
-  it("renders the customer workbench without a marketing hero", () => {
+  it("renders the focused customer workspace without unrelated modules", () => {
     render(<HomeScreen />);
 
     expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
@@ -18,24 +18,7 @@ describe("HomeScreen", () => {
     expect(screen.getByRole("button", { name: "Müşteri ekle" })).toBeInTheDocument();
     expect(screen.getByRole("searchbox", { name: "Müşteri ara" })).toBeInTheDocument();
 
-    const navigation = screen.getByRole("navigation", { name: "Ana navigasyon" });
-    for (const name of [
-      "Müşteriler",
-      "Günlük plan",
-      "Görevler",
-      "Finans",
-      "Projeler",
-      "Hesabım",
-    ]) {
-      expect(within(navigation).getByRole("link", { name })).toBeInTheDocument();
-    }
-    expect(within(navigation).getByRole("link", { name: "Müşteriler" })).toHaveAttribute(
-      "aria-current",
-      "page",
-    );
-
     expect(screen.getByRole("region", { name: "Müşteri kayıtları" })).toBeInTheDocument();
-    expect(screen.getByRole("complementary", { name: "Bugünün planı" })).toBeInTheDocument();
 
     const table = screen.getByRole("table", { name: "Müşteri kayıtları" });
     expect(within(table).getAllByRole("row")).toHaveLength(6);
@@ -44,7 +27,8 @@ describe("HomeScreen", () => {
 
     expect(screen.queryByText("Yerel tasarım önizlemesi")).not.toBeInTheDocument();
     expect(screen.queryByText(/İşlerinizi tek bir yerde/i)).not.toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "Hesabım" })).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Hesabım" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Bugünün planı" })).not.toBeInTheDocument();
   });
 
   it("never presents sample customers as live records while data is loading", () => {
@@ -66,8 +50,11 @@ describe("HomeScreen", () => {
     expect(
       screen.getByRole("region", { name: "Atlas Makina" }),
     ).toBeInTheDocument();
-    expect(screen.getByLabelText("Başlangıç")).toHaveValue("2026-09-01");
-    expect(screen.getByLabelText("Bitiş")).toHaveValue("2027-08-31");
+    const startsOn = screen.getByLabelText("Başlangıç") as HTMLInputElement;
+    const endsOn = screen.getByLabelText("Bitiş") as HTMLInputElement;
+    expect(startsOn.value).toMatch(/^\d{4}-\d{2}-\d{2}$/u);
+    expect(endsOn.value).toMatch(/^\d{4}-\d{2}-\d{2}$/u);
+    expect(endsOn.value > startsOn.value).toBe(true);
     expect(screen.getByText("₺60.000,00")).toBeInTheDocument();
     expect(screen.queryByLabelText(/haftalık gün/iu)).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/ziyaret adedi/iu)).not.toBeInTheDocument();

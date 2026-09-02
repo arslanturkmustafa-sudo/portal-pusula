@@ -40,9 +40,32 @@ function json(body: unknown, status = 200): NextResponse {
 }
 
 function sameOrigin(request: NextRequest): boolean {
-  const origin = request.headers.get("origin");
+  const originHeader = request.headers.get("origin");
   try {
-    return origin !== null && new URL(origin).origin === new URL(request.url).origin;
+    if (originHeader === null) return false;
+
+    const origin = new URL(originHeader);
+    const requestUrl = new URL(request.url);
+    if (origin.origin === requestUrl.origin) return true;
+
+    // Reverse proxies can expose their internal application hostname through
+    // request.url while preserving the browser-facing hostname in Host. Host
+    // is a forbidden browser request header, so matching it keeps the CSRF
+    // boundary intact without tying the route to Hostinger's internal URL.
+    const host = request.headers.get("host")?.trim().toLowerCase();
+    if (!host || origin.host !== host) return false;
+
+    const forwardedProtocol = request.headers
+      .get("x-forwarded-proto")
+      ?.split(",", 1)[0]
+      ?.trim()
+      .toLowerCase();
+    const acceptedProtocols = new Set([requestUrl.protocol]);
+    if (forwardedProtocol === "http" || forwardedProtocol === "https") {
+      acceptedProtocols.add(`${forwardedProtocol}:`);
+    }
+
+    return acceptedProtocols.has(origin.protocol);
   } catch {
     return false;
   }

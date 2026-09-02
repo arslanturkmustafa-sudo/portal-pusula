@@ -120,7 +120,7 @@ describe("administrator login diagnostics", () => {
     const response = await POST(loginRequest());
 
     expect(response.status).toBe(303);
-    expect(response.headers.get("location")).toBe("/");
+    expect(response.headers.get("location")).toBe("/musteriler");
     expect(response.headers.get("set-cookie")).toContain("v1.");
     expect(mocks.authenticateAccountLogin).not.toHaveBeenCalled();
     expect(mocks.getDatabaseProbeEnvironment).not.toHaveBeenCalled();

@@ -119,7 +119,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       );
     }
     const production = process.env.NODE_ENV === "production";
-    const response = sameOriginRedirect("/");
+    const response = sameOriginRedirect("/musteriler");
     response.cookies.set({
       name: sessionCookieName(production),
       value: sessionToken,
