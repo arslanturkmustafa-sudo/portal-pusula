@@ -237,6 +237,66 @@ describe("TasksWorkspace", () => {
     expect(await screen.findByText("v5")).toBeInTheDocument();
   });
 
+  it("keeps the editor version snapshot so a concurrent board update is fenced", async () => {
+    const initialTask = taskFixture("todo", {
+      id: "task-conflict",
+      title: "Müşteriyi ara",
+    });
+    const patchBodies: Array<Record<string, unknown>> = [];
+    const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+      const url = String(input);
+      if (url === "/api/tasks/task-conflict" && init?.method === "PATCH") {
+        const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+        patchBodies.push(body);
+        if (patchBodies.length === 1) {
+          return jsonResponse({
+            task: { ...initialTask, status: "in_progress", version: 4 },
+          });
+        }
+        return jsonResponse({ status: "version_conflict" }, 409);
+      }
+      if (url === "/api/tasks") return jsonResponse({ tasks: [initialTask] });
+      if (url === "/api/customers") {
+        return jsonResponse({ customers: [customer] });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+
+    render(<TasksWorkspace />);
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Müşteriyi ara görevini düzenle",
+      }),
+    );
+    await user.clear(screen.getByLabelText("Görev başlığı"));
+    await user.type(screen.getByLabelText("Görev başlığı"), "Müşteriyi tekrar ara");
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Müşteriyi ara durumu" }),
+      "in_progress",
+    );
+    await screen.findByText(
+      "Müşteriyi ara görevi Devam ediyor sütununa taşındı.",
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Değişiklikleri kaydet" }),
+    );
+
+    await waitFor(() => expect(patchBodies).toHaveLength(2));
+    expect(patchBodies[1]).toMatchObject({
+      status: "todo",
+      title: "Müşteriyi tekrar ara",
+      version: 3,
+    });
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Görev başka bir işlemde değişti. Sayfayı yenileyip yeniden deneyin.",
+    );
+    expect(
+      screen.getByRole("heading", { name: "Görevi güncelle" }),
+    ).toBeInTheDocument();
+  });
+
   it("shows loading and a recoverable board error", async () => {
     let taskRequestCount = 0;
     const fetchMock = vi.fn<typeof fetch>(async (input) => {

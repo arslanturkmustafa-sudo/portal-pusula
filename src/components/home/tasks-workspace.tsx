@@ -296,7 +296,7 @@ export function TasksWorkspace() {
   const [dueFilter, setDueFilter] = useState<DueFilter>("all");
   const [mobileStatus, setMobileStatus] = useState<TaskStatus>("todo");
   const [editorOpen, setEditorOpen] = useState(false);
-  const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
+  const [editingTask, setEditingTask] = useState<TaskDto | null>(null);
   const [draft, setDraft] = useState<TaskDraft>(() => emptyDraft());
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [formError, setFormError] = useState<string | null>(null);
@@ -375,7 +375,7 @@ export function TasksWorkspace() {
 
   useEffect(() => {
     if (editorOpen) titleInputRef.current?.focus();
-  }, [editingTaskId, editorOpen]);
+  }, [editingTask?.id, editorOpen]);
 
   useEffect(() => {
     if (focusTaskId === null) return;
@@ -384,11 +384,6 @@ export function TasksWorkspace() {
     card.focus();
     setFocusTaskId(null);
   }, [focusTaskId, mobileStatus, tasks]);
-
-  const editingTask = useMemo(
-    () => tasks.find((task) => task.id === editingTaskId) ?? null,
-    [editingTaskId, tasks],
-  );
 
   const visibleTasks = useMemo(() => {
     const search = canonicalSearch(query);
@@ -427,7 +422,7 @@ export function TasksWorkspace() {
 
   function openCreateEditor() {
     setDraft(emptyDraft());
-    setEditingTaskId(null);
+    setEditingTask(null);
     setFormError(null);
     setSaveState("idle");
     setEditorOpen(true);
@@ -435,16 +430,16 @@ export function TasksWorkspace() {
 
   function openEditEditor(task: TaskDto) {
     setDraft(taskDraft(task));
-    setEditingTaskId(task.id);
+    setEditingTask(task);
     setFormError(null);
     setSaveState("idle");
     setEditorOpen(true);
   }
 
   function closeEditor(returnFocus = true) {
-    const editedId = editingTaskId;
+    const editedId = editingTask?.id ?? null;
     setEditorOpen(false);
-    setEditingTaskId(null);
+    setEditingTask(null);
     setFormError(null);
     setSaveState("idle");
     if (!returnFocus) return;
@@ -890,7 +885,7 @@ export function TasksWorkspace() {
                           {columnTasks.map((task) => (
                             <li key={task.id}>
                               <TaskCard
-                                editing={editingTaskId === task.id && editorOpen}
+                                editing={editingTask?.id === task.id && editorOpen}
                                 onEdit={openEditEditor}
                                 onStatusChange={(item, status) =>
                                   void changeTaskStatus(item, status)
