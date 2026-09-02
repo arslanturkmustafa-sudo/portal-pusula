@@ -25,6 +25,7 @@ export function PortalNavigation() {
         const active = isActivePath(pathname, item.href);
         return (
           <Link
+            aria-label={item.label}
             className={active ? "is-active" : undefined}
             href={item.href}
             key={item.href}

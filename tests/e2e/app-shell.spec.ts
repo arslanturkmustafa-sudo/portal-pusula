@@ -26,6 +26,12 @@ test("protects and renders the accessible customer workbench", async ({ page }) 
   ).toBeVisible();
   await expect(page.getByText("Atlas Makina")).toHaveCount(0);
 
+  const skipLink = page.getByRole("link", { name: "Ana içeriğe geç" });
+  await page.keyboard.press("Tab");
+  await expect(skipLink).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(page.locator("main#ana-icerik")).toBeFocused();
+
   await page.getByRole("link", { name: "Günlük plan" }).click();
   await expect(page).toHaveURL(/\/gunluk-plan$/u);
   await expect(
@@ -33,12 +39,6 @@ test("protects and renders the accessible customer workbench", async ({ page }) 
   ).toBeVisible();
   await page.getByRole("link", { name: "Müşteriler" }).click();
   await expect(page).toHaveURL(/\/musteriler$/u);
-
-  const skipLink = page.getByRole("link", { name: "Ana içeriğe geç" });
-  await page.keyboard.press("Tab");
-  await expect(skipLink).toBeFocused();
-  await page.keyboard.press("Enter");
-  await expect(page.locator("main#ana-icerik")).toBeFocused();
 
   await expect(
     page.getByRole("heading", { name: /İşlerinizi tek bir yerde/i }),
