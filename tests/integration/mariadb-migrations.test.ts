@@ -534,7 +534,7 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
 
     it("creates the complete schema and preserves the core platform metadata contracts", async () => {
       const [tableRows] = await pool.query<RowDataPacket[]>("SHOW TABLES");
-      expect(tableRows).toHaveLength(13);
+      expect(tableRows).toHaveLength(14);
 
       const [statusRows] = await pool.execute<PlatformTableStatusRow[]>(
         `SELECT TABLE_NAME, ENGINE, TABLE_COLLATION
@@ -907,7 +907,7 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
       ]);
     });
 
-    it("records the immutable 0000 through 0007 migration hash chain", async () => {
+    it("records the immutable 0000 through 0008 migration hash chain", async () => {
       const [rows] = await pool.query<MigrationRow[]>(
         `SELECT id, hash, created_at FROM \`${migrationTable}\` ORDER BY id`,
       );
@@ -951,6 +951,11 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
           created_at: 1788288108173,
           hash: "4ec9220ec18d7766ccb52535586082a6a6bcb69f9b0ceed1aa4d8f3344adb380",
           id: 8,
+        },
+        {
+          created_at: 1788352666114,
+          hash: "9835a13facbd1a0485bcc4cb6e6776e0f2d64b9b1d1c59aa0798fa97dbb21aa3",
+          id: 9,
         },
       ]);
     });
