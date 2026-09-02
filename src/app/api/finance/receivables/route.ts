@@ -18,7 +18,7 @@ function json(body: unknown, status = 200): NextResponse {
 }
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  if (!isAdminAuthenticated(request)) {
+  if (!(await isAdminAuthenticated(request))) {
     return json({ status: "unauthorized" }, 401);
   }
 

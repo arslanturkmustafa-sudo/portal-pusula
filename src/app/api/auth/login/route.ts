@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { authenticateAccountLogin } from "@/features/account";
 import {
+  createAccountSessionToken,
   createSessionToken,
   sessionCookieName,
   sessionCookieOptions,
@@ -10,6 +12,9 @@ import {
   verifyAdminCredentials,
 } from "@/platform/auth/password";
 import { getAuthEnvironment } from "@/platform/config/auth-env";
+import { getAuthStorageMode } from "@/platform/config/auth-storage-mode";
+import { getDatabaseProbeEnvironment } from "@/platform/config/readiness-env";
+import { getPlatformDatabasePool } from "@/platform/database/mysql-platform";
 import { correlationIdFromHeaders } from "@/platform/http/correlation-id";
 import { requestLogger } from "@/platform/logging/logger";
 
@@ -19,6 +24,7 @@ export const runtime = "nodejs";
 const MAX_FORM_BYTES = 4_096;
 
 type LoginDiagnosticCategory =
+  | "auth_database_unavailable"
   | "auth_env_invalid"
   | "auth_scrypt_runtime_error"
   | "credentials_rejected";
@@ -74,30 +80,49 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
 
     let environment;
+    let storageMode;
     try {
       environment = getAuthEnvironment();
+      storageMode = getAuthStorageMode();
     } catch {
       return failedLogin(request, "auth_env_invalid");
     }
 
-    let valid: boolean;
+    let sessionToken: string;
     try {
-      valid = await verifyAdminCredentials(email, password, environment);
+      if (storageMode === "environment") {
+        if (!(await verifyAdminCredentials(email, password, environment))) {
+          return failedLogin(request, "credentials_rejected");
+        }
+        sessionToken = createSessionToken(environment.SESSION_SECRET);
+      } else {
+        const account = await authenticateAccountLogin(
+          getPlatformDatabasePool(getDatabaseProbeEnvironment()),
+          email,
+          password,
+          environment,
+          { correlationId: correlationIdFromHeaders(request.headers) },
+        );
+        if (!account) return failedLogin(request, "credentials_rejected");
+        sessionToken = createAccountSessionToken(
+          environment.SESSION_SECRET,
+          account.id,
+          account.credentialVersion,
+        );
+      }
     } catch (error) {
       return failedLogin(
         request,
         error instanceof PasswordVerificationRuntimeError
           ? "auth_scrypt_runtime_error"
-          : "credentials_rejected",
+          : "auth_database_unavailable",
       );
     }
-    if (!valid) return failedLogin(request, "credentials_rejected");
-
     const production = process.env.NODE_ENV === "production";
     const response = sameOriginRedirect("/");
     response.cookies.set({
       name: sessionCookieName(production),
-      value: createSessionToken(environment.SESSION_SECRET),
+      value: sessionToken,
       ...sessionCookieOptions(production),
     });
     response.headers.set(

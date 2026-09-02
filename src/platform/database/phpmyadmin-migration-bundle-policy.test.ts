@@ -117,8 +117,8 @@ describe.sequential("clean-only phpMyAdmin migration bundle policy", () => {
     expect(second.summary).toEqual(first.summary);
     expect(second.sql).toBe(first.sql);
     expect(second.manifestText).toBe(first.manifestText);
-    expect(first.summary.migrationCount).toBe(7);
-    expect(first.summary.statementCount).toBe(43);
+    expect(first.summary.migrationCount).toBe(8);
+    expect(first.summary.statementCount).toBe(44);
     expect(first.summary.sqlBytes).toBe(Buffer.byteLength(first.sql));
     expect(first.summary.sqlSha256).toBe(
       createHash("sha256").update(first.sql).digest("hex"),
@@ -177,6 +177,7 @@ describe.sequential("clean-only phpMyAdmin migration bundle policy", () => {
       "receivable",
       "receivable_collection",
       "scheduled_job",
+      "user_account",
     ]);
     expect(manifest.schema.tables.scheduled_job).toContain("lease_token");
     expect(manifest.schema.checks).toContainEqual({
@@ -269,10 +270,16 @@ describe.sequential("clean-only phpMyAdmin migration bundle policy", () => {
         sqlFileName: "0006_receivables.sql",
         statementCount: 8,
       },
+      {
+        createdAt: 1788288108173,
+        hash: "4ec9220ec18d7766ccb52535586082a6a6bcb69f9b0ceed1aa4d8f3344adb380",
+        sqlFileName: "0007_user_account.sql",
+        statementCount: 1,
+      },
     ]);
     expect(
       manifest.migrations.flatMap((migration) => migration.statementHashes),
-    ).toHaveLength(43);
+    ).toHaveLength(44);
     expect(
       manifest.migrations
         .flatMap((migration) => migration.statementHashes)

@@ -2,7 +2,7 @@
 
 ## Amaç ve güven modeli
 
-Bu belge mevcut platform altyapısının tehdit sınırını kaydeder. Portal Pusula artık tek yönetici için environment tabanlı parola doğrulama ve imzalı 8 saatlik oturum uygular. Ana sayfa ile müşteri API'leri hem proxy hem server/API katmanında korunur. Çok kullanıcılı RBAC, organization/workspace izolasyonu ve parola kurtarma henüz yoktur.
+Bu belge mevcut platform altyapısının tehdit sınırını kaydeder. Portal Pusula tek yönetici için DB tabanlı hesap, scrypt parola doğrulama ve imzalı 8 saatlik oturum uygular; ilk hesap mevcut environment kimliğinden tek seferlik güvenli geçişle oluşturulabilir. Parola değişikliği kimlik bilgisi sürümünü artırarak diğer hesap oturumlarını geçersiz kılar. Ana sayfa ile müşteri API'leri hem proxy hem server/API katmanında korunur. Çok kullanıcılı RBAC, organization/workspace izolasyonu ve parola kurtarma henüz yoktur.
 
 Korunan varlıklar server-side environment secret'ları, DB erişimi, migration bütünlüğü, job/outbox/audit kayıtları, iç endpoint'lerin varlık/çalışma ayrıntıları ve gelecekteki iş verisidir. Hostinger paneli, public internet/CDN, Node runtime, MariaDB, cron scheduler ve geliştirici çalışma alanı ayrı güven sınırlarıdır.
 
@@ -17,8 +17,11 @@ Yalnız aşağıdaki environment **adları** geçerli mevcut sözleşmedir:
 - `CRON_ENDPOINT_ENABLED`, `CRON_BEARER_TOKEN`, `CRON_MIN_INTERVAL_SECONDS`;
 - isteğe bağlı `LOG_LEVEL`.
 - `ADMIN_EMAIL`, `ADMIN_PASSWORD_HASH`, `SESSION_SECRET`.
+- isteğe bağlı `PORTAL_PUSULA_AUTH_STORAGE_MODE`; tanımsızsa ve canlıda `database`, yalnız veritabanısız uyumluluk/E2E koşusunda exact `environment`.
 
 Gerçek değerler repoya, ZIP'e, checkpoint'e, belgeye, sohbete, CLI argümanına, URL'ye, loga, audit payload'ına veya hata metnine yazılmaz. Connection string üretilmez. Readiness ve cron token'ları farklı olmak zorundadır; cron minimum aralığı yalnız canonical `60..86400` saniye olabilir. Environment eksik veya biçim dışıysa davranış fail-closed'dur.
+
+Kimlik depolama modu varsayılan olarak DB tabanlıdır. DB yapılandırması eksik veya erişilemez olduğunda environment kimliğine otomatik geri dönüş yapılmaz. Yalnız açıkça seçilen `environment` modu DB'ye dokunmadan eski v1 oturumunu kullanır; bu modda uygulama içi parola yönetimi kapalıdır ve Hostinger canlı ortamında kullanılmaz.
 
 Canlı panelde secret gösteren rollback ekranı daha önce gözlendi; değerler kaydedilmeden ekrandan çıkıldı ve ilgili secret'lar kullanıcı tarafından rotasyonla geçersiz kılındı. Güvenli, model-visible olmayan yöntem bulunana kadar bu ekran yeniden açılmaz ve canlı rollback `BLOCKED` kalır.
 

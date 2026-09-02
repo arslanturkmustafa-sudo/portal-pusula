@@ -68,7 +68,7 @@ export async function GET(
   request: NextRequest,
   context: MonthPlanRouteContext,
 ): Promise<NextResponse> {
-  if (!isAdminAuthenticated(request)) {
+  if (!(await isAdminAuthenticated(request))) {
     return json({ status: "unauthorized" }, 401);
   }
 
@@ -90,7 +90,7 @@ export async function PUT(
   request: NextRequest,
   context: MonthPlanRouteContext,
 ): Promise<NextResponse> {
-  if (!isAdminAuthenticated(request)) {
+  if (!(await isAdminAuthenticated(request))) {
     return json({ status: "unauthorized" }, 401);
   }
   if (bodyIsTooLarge(request)) {

@@ -1,6 +1,6 @@
-# Migration runbook'u — müşteri, sözleşme, ziyaret ve alacak dilimi
+# Migration runbook'u — müşteri, sözleşme, ziyaret, alacak ve hesap dilimi
 
-Bu runbook Portal Pusula'nın migration mekanizmasını, platform temelini ve ilk operasyon domain tablolarını kapsar. Sürümlü sıra iki immutable migration ve bunları değiştirmeden eklenen beş ileri yönlü migration'dan oluşur:
+Bu runbook Portal Pusula'nın migration mekanizmasını, platform temelini ve ilk operasyon domain tablolarını kapsar. Sürümlü sıra iki immutable migration ve bunları değiştirmeden eklenen altı ileri yönlü migration'dan oluşur:
 
 - `0000_platform_migration_verification.sql`: yalnız sentetik `DECIMAL(19,4)`, UTC, transaction ve DB-level idempotency doğrulamasına ayrılmış `_platform_migration_verification` tablosu;
 - `0001_platform_job_outbox_audit.sql`: yalnız `scheduled_job`, `job_run`, `outbox_event` ve `audit_event` platform tabloları;
@@ -9,8 +9,9 @@ Bu runbook Portal Pusula'nın migration mekanizmasını, platform temelini ve il
 - `0004_customer.sql`: müşteri kimliği, iletişim bilgisi ve aktif/pasif durumunu tutan ilk domain tablosunu ekler;
 - `0005_consulting_contract_visits.sql`: müşteri sözleşmesi ile tarih bazlı aylık ziyaret taahhütlerini, iç saat/süreyi ve gerçekleşme durumunu ekler;
 - `0006_receivables.sql`: sözleşme ayı ve açılış bakiyesi kaynaklı alacak snapshot'larını, kısmi tahsilatları; sözleşme/ay tekilliği ile açılış bakiyesi ve tahsilat istemci işlem anahtarlarına ait idempotency kısıtlarını ekler.
+- `0007_user_account.sql`: tek yönetici hesabının normalize e-posta, scrypt parola özeti, hesap durumu ve oturumları geçersiz kılan kimlik bilgisi sürümünü ekler.
 
-Bu şema henüz gider, kart, vergi tahmini, görev, kullanıcı, workspace/organization veya RBAC tablosu içermez. Yönetici auth'u environment tabanlıdır ve ayrı auth tablosu kullanmaz. Immutable `0000`/`0001` dosyaları değiştirilmemiştir; `0002`–`0006` ayrı ileri yönlü migration'lardır. Uygulanan her migration daha sonra değiştirilemez; sonraki düzeltme yine yeni migration olmalıdır.
+Bu şema henüz gider, kart, vergi tahmini, görev, çok kullanıcılı workspace/organization veya RBAC tablolarını içermez. İlk yönetici hesabı güvenli geçişte mevcut environment kimliğinden oluşturulur; sonraki giriş ve parola değişiklikleri `user_account` üzerinden yürür. Immutable `0000`/`0001` dosyaları değiştirilmemiştir; `0002`–`0007` ayrı ileri yönlü migration'lardır. Uygulanan her migration daha sonra değiştirilemez; sonraki düzeltme yine yeni migration olmalıdır.
 
 Bu adımlar canlı Hostinger veritabanına uygulanmaz. Gerçek veritabanı parolası veya başka bir sır CLI argümanına, komut geçmişine, loga, test çıktısına ya da sürümlü dosyaya yazılmaz.
 

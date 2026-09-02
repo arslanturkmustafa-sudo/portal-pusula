@@ -58,10 +58,39 @@ type ContractDraft = {
   vatRate: string;
 };
 
+type EditableCustomer = Readonly<{
+  contactNote?: string | null;
+  displayName?: string;
+  email?: string | null;
+  id: string;
+  name: string;
+  phone?: string | null;
+  shortCode?: string;
+  status?: "active" | "inactive";
+}>;
+
+type CustomerDto = Readonly<{
+  contactNote: string | null;
+  displayName: string;
+  email: string | null;
+  id: string;
+  phone: string | null;
+  shortCode: string;
+  status: "active" | "inactive";
+}>;
+
+type CustomerDraft = {
+  contactNote: string;
+  displayName: string;
+  email: string;
+  phone: string;
+};
+
 type CustomerWorkspaceProps = Readonly<{
-  customer: Readonly<{ id: string; name: string }>;
+  customer: EditableCustomer;
   live: boolean;
   onContractSaved: (contract: ContractDto) => void;
+  onCustomerSaved?: (customer: CustomerDto) => void;
   onVisitsSaved: (visits: readonly VisitDto[]) => void;
 }>;
 
@@ -84,6 +113,16 @@ function contractErrorMessage(status: unknown): string {
     return "Bitiş tarihi başlangıçtan önce olamaz; ücret, ödeme günü ve KDV alanlarını da kontrol edin.";
   }
   return "Sözleşme kaydedilemedi. Lütfen yeniden deneyin.";
+}
+
+function customerErrorMessage(status: unknown): string {
+  if (status === "validation_error") {
+    return "Müşteri bilgilerini kontrol edin. E-posta ve telefon biçimi geçerli olmalıdır.";
+  }
+  if (status === "customer_not_found") {
+    return "Müşteri kaydı bulunamadı. Sayfayı yenileyip yeniden deneyin.";
+  }
+  return "Müşteri bilgileri kaydedilemedi. Lütfen yeniden deneyin.";
 }
 
 function planErrorMessage(status: unknown): string {
@@ -133,6 +172,54 @@ function emptyContractDraft(): ContractDraft {
   };
 }
 
+function nextIsoDate(value: string): string {
+  const date = new Date(`${value}T12:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + 1);
+  return date.toISOString().slice(0, 10);
+}
+
+function sortedContracts(contracts: readonly ContractDto[]): ContractDto[] {
+  return [...contracts].sort((left, right) =>
+    left.startsOn.localeCompare(right.startsOn) || left.id.localeCompare(right.id),
+  );
+}
+
+function selectedContractFrom(
+  contracts: readonly ContractDto[],
+): ContractDto | null {
+  const today = istanbulToday();
+  const current = contracts.find(
+    (item) =>
+      item.status === "active" &&
+      item.startsOn <= today &&
+      item.endsOn >= today,
+  );
+  return current ?? contracts.at(-1) ?? null;
+}
+
+function monthForContract(contract: ContractDto): string {
+  const currentMonth = currentIstanbulMonth();
+  if (
+    `${currentMonth}-01` <= contract.endsOn &&
+    `${currentMonth}-31` >= contract.startsOn
+  ) {
+    return currentMonth;
+  }
+  return contract.startsOn.slice(0, 7);
+}
+
+function nextContractDraft(contracts: readonly ContractDto[]): ContractDraft {
+  const latest = sortedContracts(contracts).at(-1);
+  if (!latest) return emptyContractDraft();
+  const startsOn = nextIsoDate(latest.endsOn);
+  return {
+    ...contractDraft(latest),
+    endsOn: oneYearLessOneDay(startsOn),
+    internalNote: "",
+    startsOn,
+  };
+}
+
 function currentIstanbulMonth(): string {
   return istanbulToday().slice(0, 7);
 }
@@ -178,6 +265,30 @@ function contractDraft(contract: ContractDto): ContractDraft {
   };
 }
 
+function customerDraft(
+  customer: Readonly<{
+    contactNote?: string | null;
+    displayName?: string;
+    email?: string | null;
+    name?: string;
+    phone?: string | null;
+  }>,
+): CustomerDraft {
+  return {
+    contactNote: customer.contactNote ?? "",
+    displayName: customer.displayName ?? customer.name ?? "",
+    email: customer.email ?? "",
+    phone: customer.phone ?? "",
+  };
+}
+
+function contractPeriodLabel(contract: ContractDto): string {
+  const amount = new Intl.NumberFormat("tr-TR", {
+    maximumFractionDigits: 2,
+  }).format(Number(contract.monthlyFeeAmount));
+  return `${contract.startsOn} – ${contract.endsOn} · ${amount} ₺`;
+}
+
 function formatMoney(value: number): string {
   if (!Number.isFinite(value)) return "—";
   return new Intl.NumberFormat("tr-TR", {
@@ -204,12 +315,17 @@ function CustomerWorkspaceSession({
   customer,
   live,
   onContractSaved,
+  onCustomerSaved,
   onVisitsSaved,
 }: CustomerWorkspaceProps) {
   const [loadState, setLoadState] = useState<LoadState>(
     live ? "loading" : "ready",
   );
-  const [contract, setContract] = useState<ContractDto | null>(null);
+  const [contracts, setContracts] = useState<readonly ContractDto[]>([]);
+  const [selectedContractId, setSelectedContractId] = useState<string | null>(
+    null,
+  );
+  const [isCreatingContract, setIsCreatingContract] = useState(false);
   const [draft, setDraft] = useState<ContractDraft>(emptyContractDraft);
   const [contractSaveState, setContractSaveState] =
     useState<SaveState>("idle");
@@ -222,6 +338,30 @@ function CustomerWorkspaceSession({
   const [planError, setPlanError] = useState<string | null>(null);
   const [visitSaveId, setVisitSaveId] = useState<string | null>(null);
   const [periodTouched, setPeriodTouched] = useState(false);
+  const [customerRecord, setCustomerRecord] = useState<CustomerDto>(() => ({
+    contactNote: customer.contactNote ?? null,
+    displayName: customer.displayName ?? customer.name,
+    email: customer.email ?? null,
+    id: customer.id,
+    phone: customer.phone ?? null,
+    shortCode: customer.shortCode ?? "",
+    status: customer.status ?? "active",
+  }));
+  const [customerEditDraft, setCustomerEditDraft] = useState<CustomerDraft>(
+    () => customerDraft(customer),
+  );
+  const [customerSaveState, setCustomerSaveState] =
+    useState<SaveState>("idle");
+  const [customerError, setCustomerError] = useState<string | null>(null);
+  const [isEditingCustomer, setIsEditingCustomer] = useState(false);
+
+  const contract = useMemo(
+    () =>
+      isCreatingContract
+        ? null
+        : contracts.find((item) => item.id === selectedContractId) ?? null,
+    [contracts, isCreatingContract, selectedContractId],
+  );
 
   useEffect(() => {
     if (!live) return;
@@ -237,17 +377,20 @@ function CustomerWorkspaceSession({
         return (await response.json()) as { contracts?: ContractDto[] };
       })
       .then((payload) => {
-        const selected =
-          payload.contracts?.find((item) => item.status === "active") ??
-          payload.contracts?.[0] ??
-          null;
+        const ordered = sortedContracts(payload.contracts ?? []);
+        const selected = selectedContractFrom(ordered);
         if (selected) setPlanLoadState("loading");
-        setContract(selected);
+        setContracts(ordered);
+        setSelectedContractId(selected?.id ?? null);
+        setIsCreatingContract(false);
         setIsEditingContract(false);
         setContractError(null);
         if (selected) {
           setDraft(contractDraft(selected));
+          setSelectedMonth(monthForContract(selected));
           onContractSaved(selected);
+        } else {
+          setDraft(emptyContractDraft());
         }
         setLoadState("ready");
       })
@@ -258,6 +401,44 @@ function CustomerWorkspaceSession({
 
     return () => controller.abort();
   }, [customer.id, live, onContractSaved]);
+
+  useEffect(() => {
+    const hasCompleteCustomer =
+      customer.displayName !== undefined &&
+      customer.email !== undefined &&
+      customer.phone !== undefined &&
+      customer.contactNote !== undefined;
+    if (!live || hasCompleteCustomer) return;
+    const controller = new AbortController();
+
+    void fetch("/api/customers", {
+      cache: "no-store",
+      credentials: "same-origin",
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Customer list is unavailable.");
+        return (await response.json()) as { customers?: CustomerDto[] };
+      })
+      .then((payload) => {
+        const stored = payload.customers?.find((item) => item.id === customer.id);
+        if (!stored) return;
+        setCustomerRecord(stored);
+        setCustomerEditDraft(customerDraft(stored));
+      })
+      .catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+      });
+
+    return () => controller.abort();
+  }, [
+    customer.contactNote,
+    customer.displayName,
+    customer.email,
+    customer.id,
+    customer.phone,
+    live,
+  ]);
 
   useEffect(() => {
     if (!live || contract === null) return;
@@ -312,6 +493,118 @@ function CustomerWorkspaceSession({
   const monthLocked = visits.some(
     (visit) => visit.resolutionStatus !== "planned",
   );
+  const planMutationPending =
+    planSaveState === "saving" || visitSaveId !== null;
+
+  function selectContract(contractId: string) {
+    if (planMutationPending) return;
+    const selected = contracts.find((item) => item.id === contractId);
+    if (!selected) return;
+    setSelectedContractId(selected.id);
+    setIsCreatingContract(false);
+    setIsEditingContract(false);
+    setDraft(contractDraft(selected));
+    setSelectedMonth(monthForContract(selected));
+    setVisits([]);
+    setPlanLoadState(live ? "loading" : "ready");
+    setPlanSaveState("idle");
+    setPlanError(null);
+    setContractSaveState("idle");
+    setContractError(null);
+    setPeriodTouched(false);
+  }
+
+  function startNewContract() {
+    if (planMutationPending) return;
+    setIsCreatingContract(true);
+    setIsEditingContract(false);
+    setDraft(nextContractDraft(contracts));
+    setVisits([]);
+    setPlanLoadState("ready");
+    setPlanSaveState("idle");
+    setPlanError(null);
+    setContractSaveState("idle");
+    setContractError(null);
+    setPeriodTouched(false);
+  }
+
+  function cancelContractEdit() {
+    if (isCreatingContract) {
+      const selected = contracts.find((item) => item.id === selectedContractId);
+      setIsCreatingContract(false);
+      if (selected) {
+        setDraft(contractDraft(selected));
+        setSelectedMonth(monthForContract(selected));
+        setPlanLoadState(live ? "loading" : "ready");
+      }
+    } else if (contract) {
+      setDraft(contractDraft(contract));
+    }
+    setContractError(null);
+    setContractSaveState("idle");
+    setIsEditingContract(false);
+    setPeriodTouched(false);
+  }
+
+  async function saveCustomer(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!live || !isEditingCustomer) return;
+    const formData = new FormData(event.currentTarget);
+    const submitted: CustomerDraft = {
+      contactNote: formText(formData, "customerContactNote").trim(),
+      displayName: formText(formData, "customerDisplayName").trim(),
+      email: formText(formData, "customerEmail").trim().toLowerCase(),
+      phone: formText(formData, "customerPhone").trim(),
+    };
+    const body: Record<string, string | null> = {};
+    if (submitted.displayName !== customerRecord.displayName) {
+      body.displayName = submitted.displayName;
+    }
+    if ((submitted.email || null) !== customerRecord.email) {
+      body.email = submitted.email || null;
+    }
+    if ((submitted.phone || null) !== customerRecord.phone) {
+      body.phone = submitted.phone || null;
+    }
+    if ((submitted.contactNote || null) !== customerRecord.contactNote) {
+      body.contactNote = submitted.contactNote || null;
+    }
+    if (Object.keys(body).length === 0) {
+      setIsEditingCustomer(false);
+      setCustomerSaveState("idle");
+      setCustomerError(null);
+      return;
+    }
+
+    setCustomerSaveState("saving");
+    setCustomerError(null);
+    try {
+      const response = await fetch(`/api/customers/${customer.id}`, {
+        body: JSON.stringify(body),
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        method: "PATCH",
+      });
+      const payload = (await response.json()) as {
+        customer?: CustomerDto;
+        status?: string;
+      };
+      if (!response.ok || payload.customer === undefined) {
+        setCustomerSaveState("error");
+        setCustomerError(customerErrorMessage(payload.status));
+        return;
+      }
+      setCustomerRecord(payload.customer);
+      setCustomerEditDraft(customerDraft(payload.customer));
+      setCustomerSaveState("idle");
+      setCustomerError(null);
+      setIsEditingCustomer(false);
+      onCustomerSaved?.(payload.customer);
+    } catch {
+      setCustomerSaveState("error");
+      setCustomerError(customerErrorMessage(null));
+    }
+  }
 
   async function saveContract(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -375,14 +668,21 @@ function CustomerWorkspaceSession({
         setContractError(contractErrorMessage(payload.status));
         return;
       }
+      const nextContracts = sortedContracts([
+        ...contracts.filter((item) => item.id !== payload.contract?.id),
+        payload.contract,
+      ]);
+      setContracts(nextContracts);
+      setSelectedContractId(payload.contract.id);
+      setIsCreatingContract(false);
       setPlanLoadState("loading");
-      setContract(payload.contract);
+      setSelectedMonth(monthForContract(payload.contract));
       setDraft(contractDraft(payload.contract));
       setContractSaveState("idle");
       setContractError(null);
       setIsEditingContract(false);
       setPeriodTouched(false);
-      onContractSaved(payload.contract);
+      onContractSaved(selectedContractFrom(nextContracts) ?? payload.contract);
     } catch {
       setContractSaveState("error");
       setContractError(contractErrorMessage(null));
@@ -505,10 +805,141 @@ function CustomerWorkspaceSession({
       <header className="customer-workspace-heading">
         <div>
           <p className="section-kicker">Müşteri çalışma kaydı</p>
-          <h2 id="customer-workspace-title">{customer.name}</h2>
+          <h2 id="customer-workspace-title">{customerRecord.displayName}</h2>
         </div>
-        <span>{contract ? "Sözleşme açık" : "Sözleşme bekliyor"}</span>
+        <span>
+          {contracts.length > 0
+            ? `${contracts.length} çalışma dönemi`
+            : "Sözleşme bekliyor"}
+        </span>
       </header>
+
+      <div className="customer-profile-sheet">
+        <div className="workspace-section-title">
+          <span>00</span>
+          <div>
+            <h3>Müşteri bilgileri</h3>
+            <p>İletişim ve kayıt bilgilerini buradan güncelleyin.</p>
+          </div>
+        </div>
+
+        {isEditingCustomer ? (
+          <form className="customer-profile-form" onSubmit={saveCustomer}>
+            <label>
+              <span>Müşteri / şirket adı</span>
+              <input
+                maxLength={191}
+                name="customerDisplayName"
+                required
+                value={customerEditDraft.displayName}
+                onChange={(event) =>
+                  setCustomerEditDraft((current) => ({
+                    ...current,
+                    displayName: event.target.value,
+                  }))
+                }
+              />
+            </label>
+            <label>
+              <span>E-posta</span>
+              <input
+                autoComplete="email"
+                maxLength={254}
+                name="customerEmail"
+                type="email"
+                value={customerEditDraft.email}
+                onChange={(event) =>
+                  setCustomerEditDraft((current) => ({
+                    ...current,
+                    email: event.target.value,
+                  }))
+                }
+              />
+            </label>
+            <label>
+              <span>Telefon</span>
+              <input
+                autoComplete="tel"
+                maxLength={32}
+                name="customerPhone"
+                type="tel"
+                value={customerEditDraft.phone}
+                onChange={(event) =>
+                  setCustomerEditDraft((current) => ({
+                    ...current,
+                    phone: event.target.value,
+                  }))
+                }
+              />
+            </label>
+            <label className="customer-profile-note">
+              <span>İletişim notu</span>
+              <textarea
+                maxLength={2000}
+                name="customerContactNote"
+                rows={2}
+                value={customerEditDraft.contactNote}
+                onChange={(event) =>
+                  setCustomerEditDraft((current) => ({
+                    ...current,
+                    contactNote: event.target.value,
+                  }))
+                }
+              />
+            </label>
+            <div className="customer-profile-actions">
+              <button
+                className="text-action"
+                disabled={customerSaveState === "saving"}
+                type="button"
+                onClick={() => {
+                  setCustomerEditDraft(customerDraft(customerRecord));
+                  setCustomerSaveState("idle");
+                  setCustomerError(null);
+                  setIsEditingCustomer(false);
+                }}
+              >
+                İptal
+              </button>
+              <button
+                className="primary-action"
+                disabled={customerSaveState === "saving" || !live}
+                type="submit"
+              >
+                {customerSaveState === "saving"
+                  ? "Kaydediliyor…"
+                  : "Müşteri bilgilerini kaydet"}
+              </button>
+            </div>
+            {customerSaveState === "error" && customerError !== null ? (
+              <p className="entry-error" role="alert">{customerError}</p>
+            ) : null}
+          </form>
+        ) : (
+          <div className="customer-profile-summary">
+            <dl>
+              <div><dt>E-posta</dt><dd>{customerRecord.email ?? "—"}</dd></div>
+              <div><dt>Telefon</dt><dd>{customerRecord.phone ?? "—"}</dd></div>
+              <div>
+                <dt>İletişim notu</dt>
+                <dd>{customerRecord.contactNote ?? "—"}</dd>
+              </div>
+            </dl>
+            <button
+              className="text-action"
+              type="button"
+              onClick={() => {
+                setCustomerEditDraft(customerDraft(customerRecord));
+                setCustomerSaveState("idle");
+                setCustomerError(null);
+                setIsEditingCustomer(true);
+              }}
+            >
+              Müşteri bilgilerini düzenle
+            </button>
+          </div>
+        )}
+      </div>
 
       {loadState === "loading" ? (
         <p className="workspace-message">Sözleşme bilgileri yükleniyor…</p>
@@ -523,9 +954,61 @@ function CustomerWorkspaceSession({
               <span>01</span>
               <div>
                 <h3>Çalışma şartları</h3>
-                <p>Aylık danışmanlık sözleşmesinin temel kaydı.</p>
+                <p>Yıllık sözleşme dönemlerini ve her dönemin ücretini yönetin.</p>
               </div>
             </div>
+
+            <div className="contract-period-toolbar">
+              <div className="contract-period-list" aria-label="Çalışma dönemleri">
+                {contracts.map((item) => (
+                  <button
+                    aria-pressed={!isCreatingContract && item.id === contract?.id}
+                    className={
+                      !isCreatingContract && item.id === contract?.id
+                        ? "is-selected"
+                        : undefined
+                    }
+                    key={item.id}
+                    disabled={
+                      isCreatingContract ||
+                      isEditingContract ||
+                      contractSaveState === "saving" ||
+                      planMutationPending
+                    }
+                    type="button"
+                    onClick={() => selectContract(item.id)}
+                  >
+                    <strong>{contractPeriodLabel(item)}</strong>
+                    <small>
+                      {item.status === "active"
+                        ? "Aktif"
+                        : item.status === "draft"
+                          ? "Taslak"
+                          : "Kapalı"}
+                    </small>
+                  </button>
+                ))}
+              </div>
+              <button
+                className="text-action"
+                disabled={
+                  isCreatingContract ||
+                  isEditingContract ||
+                  contractSaveState === "saving" ||
+                  planMutationPending
+                }
+                type="button"
+                onClick={startNewContract}
+              >
+                + Yeni dönem ekle
+              </button>
+            </div>
+
+            {isCreatingContract ? (
+              <p className="workspace-message">
+                Yeni çalışma dönemi hazırlanıyor. Tarih ve ücret bilgilerini kontrol edin.
+              </p>
+            ) : null}
 
             <form className="contract-form" onSubmit={saveContract}>
               <label>
@@ -664,29 +1147,38 @@ function CustomerWorkspaceSession({
 
               <div className="contract-actions">
                 {contract === null ? (
-                  <button
-                    className="primary-action"
-                    disabled={contractSaveState === "saving" || !live}
-                    type="submit"
-                  >
-                    {!live
-                      ? "Önizleme kaydı"
-                      : contractSaveState === "saving"
-                        ? "Kaydediliyor…"
-                        : "Sözleşmeyi kaydet"}
-                  </button>
+                  <>
+                    {isCreatingContract && contracts.length > 0 ? (
+                      <button
+                        className="text-action"
+                        disabled={contractSaveState === "saving"}
+                        type="button"
+                        onClick={cancelContractEdit}
+                      >
+                        Vazgeç
+                      </button>
+                    ) : null}
+                    <button
+                      className="primary-action"
+                      disabled={contractSaveState === "saving" || !live}
+                      type="submit"
+                    >
+                      {!live
+                        ? "Önizleme kaydı"
+                        : contractSaveState === "saving"
+                          ? "Kaydediliyor…"
+                          : isCreatingContract
+                            ? "Yeni dönemi kaydet"
+                            : "Sözleşmeyi kaydet"}
+                    </button>
+                  </>
                 ) : isEditingContract ? (
                   <>
                     <button
                       className="text-action"
                       disabled={contractSaveState === "saving"}
                       type="button"
-                      onClick={() => {
-                        setDraft(contractDraft(contract));
-                        setContractError(null);
-                        setContractSaveState("idle");
-                        setIsEditingContract(false);
-                      }}
+                      onClick={cancelContractEdit}
                     >
                       İptal
                     </button>

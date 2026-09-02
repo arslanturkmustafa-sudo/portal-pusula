@@ -60,6 +60,7 @@ Gerekli environment adları:
 | `ADMIN_EMAIL` | Yönetici giriş e-postası |
 | `ADMIN_PASSWORD_HASH` | `auth:generate` çıktısı |
 | `SESSION_SECRET` | `auth:generate` çıktısı; tam 16 ASCII alfanümerik |
+| `PORTAL_PUSULA_AUTH_STORAGE_MODE` | İsteğe bağlı; varsayılan ve canlı değer `database`. `environment` yalnız veritabanısız uyumluluk/E2E koşuları içindir ve parola yönetimini kapatır. |
 | `LOG_LEVEL` | İsteğe bağlı; varsayılan `info` |
 
 Cron değişkenleri kaynakta varsayılan kapalı altyapı adayıdır; gerçek iş ve scheduler hazır olmadan Hostinger'da etkinleştirilmez.
@@ -73,8 +74,9 @@ Cron değişkenleri kaynakta varsayılan kapalı altyapı adayıdır; gerçek i�
 - `0004_customer.sql`
 - `0005_consulting_contract_visits.sql`
 - `0006_receivables.sql`
+- `0007_user_account.sql`
 
-Uygulanmış migration dosyası değiştirilmez; her düzeltme yeni ileri yönlü migration olur. `0004_customer.sql` müşteri tablosunu, `0005_consulting_contract_visits.sql` sözleşme ve aylık ziyaret tablolarını, `0006_receivables.sql` alacak ve tahsilat tablolarını ekler. Mevcut Hostinger veritabanına clean-only phpMyAdmin paketi tekrar yüklenmez; journal'ı bulunan ve SSH/npm erişimi olmayan hedefte [seçili incremental phpMyAdmin paketi](docs/phpmyadmin-incremental-migration.md) yalnız sıradaki migration'ı uygular.
+Uygulanmış migration dosyası değiştirilmez; her düzeltme yeni ileri yönlü migration olur. `0004_customer.sql` müşteri tablosunu, `0005_consulting_contract_visits.sql` sözleşme ve aylık ziyaret tablolarını, `0006_receivables.sql` alacak ve tahsilat tablolarını, `0007_user_account.sql` ise uygulama içinden parola yönetilebilen yönetici hesabını ekler. Mevcut Hostinger veritabanına clean-only phpMyAdmin paketi tekrar yüklenmez; journal'ı bulunan ve SSH/npm erişimi olmayan hedefte [seçili incremental phpMyAdmin paketi](docs/phpmyadmin-incremental-migration.md) yalnız sıradaki migration'ı uygular.
 
 ## Yerel geliştirme
 

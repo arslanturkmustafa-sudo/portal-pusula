@@ -2,7 +2,11 @@ import { scryptSync } from "node:crypto";
 
 import { describe, expect, it } from "vitest";
 
-import { verifyAdminCredentials } from "@/platform/auth/password";
+import {
+  hashPassword,
+  verifyAdminCredentials,
+  verifyPassword,
+} from "@/platform/auth/password";
 
 describe("administrator credentials", () => {
   const salt = Buffer.alloc(16, 7);
@@ -48,4 +52,15 @@ describe("administrator credentials", () => {
       ).resolves.toBe(false);
     },
   );
+
+  it("creates a fresh Hostinger-safe hash for an application password", async () => {
+    const candidate = ["uygulama", "ornek", "deger"].join("-");
+    const hash = await hashPassword(candidate);
+
+    expect(hash).toMatch(
+      /^scrypt:32768:8:1:[A-Za-z0-9_-]{22}:[A-Za-z0-9_-]{86}$/u,
+    );
+    await expect(verifyPassword(candidate, hash)).resolves.toBe(true);
+    await expect(verifyPassword("wrong-password", hash)).resolves.toBe(false);
+  });
 });

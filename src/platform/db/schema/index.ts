@@ -49,3 +49,8 @@ export {
   type ReceivableCollectionRecord,
   type ReceivableRecord,
 } from "./receivable";
+export {
+  userAccount,
+  type NewUserAccountRecord,
+  type UserAccountRecord,
+} from "./user-account";

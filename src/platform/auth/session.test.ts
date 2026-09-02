@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  createAccountSessionToken,
   createSessionToken,
+  parseSessionToken,
   SESSION_TTL_SECONDS,
   verifySessionToken,
 } from "@/platform/auth/session";
@@ -18,5 +20,28 @@ describe("admin session token", () => {
     expect(
       verifySessionToken(token, secret, now + (SESSION_TTL_SECONDS + 1) * 1_000),
     ).toBe(false);
+  });
+
+  it("carries canonical account identity and credential version in v2", () => {
+    const secret = "AbcdEFgh12345678";
+    const now = Date.UTC(2026, 8, 1, 9, 0, 0);
+    const accountId = "11111111-1111-4111-8111-111111111111";
+    const token = createAccountSessionToken(secret, accountId, 3, now);
+
+    expect(parseSessionToken(token, secret, now + 1_000)).toEqual({
+      accountId,
+      credentialVersion: 3,
+      kind: "account",
+    });
+    expect(parseSessionToken(token.replace(".3.", ".4."), secret, now + 1_000)).toBeNull();
+  });
+
+  it("parses v1 only as a bounded transition session", () => {
+    const secret = "AbcdEFgh12345678";
+    const now = Date.UTC(2026, 8, 1, 9, 0, 0);
+
+    expect(parseSessionToken(createSessionToken(secret, now), secret, now)).toEqual({
+      kind: "legacy",
+    });
   });
 });

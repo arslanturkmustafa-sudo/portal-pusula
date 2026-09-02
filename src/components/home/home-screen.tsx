@@ -8,6 +8,7 @@ import {
   type FormEvent,
 } from "react";
 
+import { AccountWorkspace } from "@/components/home/account-workspace";
 import { CustomerWorkspace } from "@/components/home/customer-workspace";
 import { FinanceWorkspace } from "@/components/home/finance-workspace";
 
@@ -17,6 +18,7 @@ const navigationItems = [
   { href: "#gorevler", label: "Görevler", shortLabel: "Görev" },
   { href: "#finans", label: "Finans", shortLabel: "Finans" },
   { href: "#projeler", label: "Projeler", shortLabel: "Proje" },
+  { href: "#hesabim", label: "Hesabım", shortLabel: "Hesap" },
 ] as const;
 
 type NavigationHref = (typeof navigationItems)[number]["href"];
@@ -28,10 +30,13 @@ function navigationHrefFromHash(hash: string): NavigationHref {
 type CustomerView = Readonly<{
   code: string;
   contact: string;
+  contactNote?: string | null;
+  email?: string | null;
   fee: string;
   id: string;
   name: string;
   payment: string;
+  phone?: string | null;
   status: string;
   tone: "active" | "inactive" | "late" | "paid" | "waiting";
   visit: string;
@@ -138,10 +143,13 @@ function storedCustomerView(customer: StoredCustomer): CustomerView {
   return {
     code: customer.shortCode,
     contact: customer.email ?? customer.phone ?? "İletişim bilgisi yok",
+    contactNote: customer.contactNote,
+    email: customer.email,
     fee: "—",
     id: customer.id,
     name: customer.displayName,
     payment: "—",
+    phone: customer.phone,
     status: customer.status === "active" ? "Aktif" : "Pasif",
     tone: customer.status,
     visit: "Planlanmadı",
@@ -260,6 +268,32 @@ export function HomeScreen({ live = false }: HomeScreenProps) {
                 payment: `Ayın ${contract.paymentDay}. günü`,
               }
             : customer,
+        ),
+      );
+    },
+    [],
+  );
+
+  const handleCustomerSaved = useCallback(
+    (customer: {
+      contactNote: string | null;
+      displayName: string;
+      email: string | null;
+      id: string;
+      phone: string | null;
+    }) => {
+      setCustomerRows((current) =>
+        current.map((row) =>
+          row.id === customer.id
+            ? {
+                ...row,
+                contact: customer.email ?? customer.phone ?? "İletişim bilgisi yok",
+                contactNote: customer.contactNote,
+                email: customer.email,
+                name: customer.displayName,
+                phone: customer.phone,
+              }
+            : row,
         ),
       );
     },
@@ -631,9 +665,17 @@ export function HomeScreen({ live = false }: HomeScreenProps) {
           {selectedCustomer ? (
             <CustomerWorkspace
               key={selectedCustomer.id}
-              customer={{ id: selectedCustomer.id, name: selectedCustomer.name }}
+              customer={{
+                contactNote: selectedCustomer.contactNote ?? null,
+                displayName: selectedCustomer.name,
+                email: selectedCustomer.email ?? null,
+                id: selectedCustomer.id,
+                name: selectedCustomer.name,
+                phone: selectedCustomer.phone ?? null,
+              }}
               live={live}
               onContractSaved={handleContractSaved}
+              onCustomerSaved={handleCustomerSaved}
               onVisitsSaved={handleVisitsSaved}
             />
           ) : (
@@ -648,6 +690,8 @@ export function HomeScreen({ live = false }: HomeScreenProps) {
             <span id="gorevler">Görevler</span>
             <span id="projeler">Projeler</span>
           </section>
+
+          <AccountWorkspace live={live} />
         </main>
       </div>
     </>

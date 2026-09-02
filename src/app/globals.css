@@ -547,6 +547,80 @@ button, a { color: inherit; }
   font-size: 0.62rem;
   text-transform: uppercase;
 }
+.customer-profile-sheet {
+  padding: 1.15rem 0 1.3rem;
+  border-top: 1px solid var(--line-strong);
+}
+.customer-profile-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem 0.85rem;
+}
+.customer-profile-form label > span,
+.account-password-form label > span {
+  display: block;
+  margin-bottom: 0.3rem;
+  color: var(--ink-soft);
+  font-size: 0.61rem;
+  font-weight: 700;
+}
+.customer-profile-form input,
+.customer-profile-form textarea,
+.account-password-form input {
+  width: 100%;
+  min-height: 38px;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 0;
+  background: var(--sheet);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.7rem;
+}
+.customer-profile-form textarea { resize: vertical; }
+.customer-profile-note,
+.customer-profile-actions,
+.customer-profile-form > .entry-error {
+  grid-column: 1 / -1;
+}
+.customer-profile-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.7rem;
+}
+.customer-profile-summary {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.customer-profile-summary dl {
+  min-width: 0;
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0;
+  border-top: 1px solid var(--line);
+}
+.customer-profile-summary dl > div {
+  min-width: 0;
+  padding: 0.6rem 0.75rem;
+  border-right: 1px solid var(--line);
+}
+.customer-profile-summary dl > div:first-child { padding-left: 0; }
+.customer-profile-summary dl > div:last-child { border-right: 0; }
+.customer-profile-summary dt {
+  color: var(--ink-soft);
+  font-size: 0.59rem;
+  font-weight: 700;
+}
+.customer-profile-summary dd {
+  overflow-wrap: anywhere;
+  margin: 0.28rem 0 0;
+  font-size: 0.69rem;
+  line-height: 1.45;
+}
 .customer-workspace-grid {
   display: grid;
   grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.08fr);
@@ -586,6 +660,52 @@ button, a { color: inherit; }
   color: var(--ink-soft);
   font-size: 0.67rem;
   line-height: 1.45;
+}
+.contract-period-toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.8rem;
+  margin-bottom: 1rem;
+  padding: 0.7rem 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+.contract-period-list {
+  min-width: 0;
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+.contract-period-list > button {
+  min-width: min(100%, 170px);
+  display: grid;
+  gap: 0.16rem;
+  padding: 0.48rem 0.58rem;
+  border: 1px solid var(--line-strong);
+  background: var(--sheet);
+  color: var(--ink);
+  cursor: pointer;
+  text-align: left;
+}
+.contract-period-list > button:hover { background: var(--sheet-soft); }
+.contract-period-list > button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+.contract-period-list > button.is-selected {
+  border-color: var(--terracotta);
+  box-shadow: inset 3px 0 0 var(--terracotta);
+}
+.contract-period-list strong {
+  font-size: 0.61rem;
+  font-weight: 700;
+  line-height: 1.35;
+}
+.contract-period-list small {
+  color: var(--ink-soft);
+  font-size: 0.56rem;
 }
 .contract-form {
   display: grid;
@@ -733,6 +853,70 @@ button, a { color: inherit; }
   border-left: 3px solid var(--terracotta);
   color: var(--ink-soft);
   font-size: 0.64rem;
+  line-height: 1.45;
+}
+
+.account-workspace {
+  scroll-margin-top: 1rem;
+  padding: 1.5rem 0 2rem;
+  border-top: 2px solid var(--ink);
+  border-bottom: 1px solid var(--line-strong);
+}
+.account-workspace-grid {
+  display: grid;
+  grid-template-columns: minmax(230px, 0.72fr) minmax(0, 1.28fr);
+  border-top: 1px solid var(--line-strong);
+}
+.account-identity {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 1.1rem 1.35rem 1.1rem 0;
+  border-right: 1px solid var(--line-strong);
+}
+.account-identity span {
+  color: var(--ink-soft);
+  font-size: 0.59rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.account-identity strong {
+  overflow-wrap: anywhere;
+  margin-top: 0.5rem;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.05rem;
+  font-weight: 500;
+}
+.account-identity small {
+  margin-top: 0.65rem;
+  color: var(--ink-soft);
+  font-size: 0.61rem;
+  line-height: 1.45;
+}
+.account-password-form {
+  display: grid;
+  gap: 0.72rem;
+  padding: 1.1rem 0 1.1rem 1.35rem;
+}
+.account-password-form > .entry-actions,
+.account-password-form > .entry-error,
+.account-workspace-note,
+.account-password-hint,
+.account-workspace-success {
+  margin: 0;
+}
+.account-workspace-note,
+.account-password-hint {
+  color: var(--ink-soft);
+  font-size: 0.64rem;
+  line-height: 1.45;
+}
+.account-password-hint { margin-top: -0.25rem; }
+.account-workspace-success {
+  padding: 0.65rem 0 0 0.7rem;
+  border-left: 3px solid #47745f;
+  color: var(--ink-soft);
+  font-size: 0.66rem;
   line-height: 1.45;
 }
 
@@ -1011,7 +1195,7 @@ button, a { color: inherit; }
     bottom: 0;
     left: 0;
     display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(6, minmax(0, 1fr));
     border-top: 1px solid var(--line-strong);
     background: color-mix(in srgb, var(--sheet) 94%, transparent);
     backdrop-filter: blur(14px);
@@ -1127,6 +1311,27 @@ button, a { color: inherit; }
     flex-direction: column;
     padding: 1rem 0;
   }
+  .customer-profile-form { grid-template-columns: 1fr; }
+  .customer-profile-form > * { grid-column: 1; }
+  .customer-profile-summary {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .customer-profile-summary dl { grid-template-columns: 1fr; }
+  .customer-profile-summary dl > div,
+  .customer-profile-summary dl > div:first-child {
+    padding: 0.55rem 0;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .customer-profile-summary dl > div:last-child { border-bottom: 0; }
+  .customer-profile-summary button { align-self: flex-start; }
+  .contract-period-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .contract-period-list { display: grid; }
+  .contract-period-list > button { width: 100%; }
   .contract-form { grid-template-columns: 1fr; }
   .contract-form > * { grid-column: 1; }
   .contract-checkline { grid-template-columns: 1fr; }
@@ -1140,6 +1345,13 @@ button, a { color: inherit; }
   .visit-note { grid-column: 1 / -1; }
   .visit-remove,
   .visit-resolution-save { grid-column: 2; }
+  .account-workspace-grid { grid-template-columns: 1fr; }
+  .account-identity {
+    padding-right: 0;
+    border-right: 0;
+    border-bottom: 1px solid var(--line-strong);
+  }
+  .account-password-form { padding-left: 0; }
   .finance-workspace { padding-top: 1.35rem; }
   .finance-actions {
     width: 100%;

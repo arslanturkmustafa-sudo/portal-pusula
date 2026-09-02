@@ -31,7 +31,7 @@ function invalidBody(request: NextRequest): boolean {
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  if (!isAdminAuthenticated(request)) {
+  if (!(await isAdminAuthenticated(request))) {
     return json({ status: "unauthorized" }, 401);
   }
   if (invalidBody(request)) return json({ status: "validation_error" }, 400);

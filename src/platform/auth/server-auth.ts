@@ -3,8 +3,29 @@ import "server-only";
 import { cookies } from "next/headers";
 import type { NextRequest } from "next/server";
 
-import { sessionCookieName, verifySessionToken } from "@/platform/auth/session";
+import {
+  canUseLegacySession,
+  validateAccountSession,
+} from "@/features/account";
+import {
+  parseSessionToken,
+  sessionCookieName,
+} from "@/platform/auth/session";
 import { getAuthEnvironment } from "@/platform/config/auth-env";
+import { getAuthStorageMode } from "@/platform/config/auth-storage-mode";
+import { getDatabaseProbeEnvironment } from "@/platform/config/readiness-env";
+import { getPlatformDatabasePool } from "@/platform/database/mysql-platform";
+
+export type AuthenticatedAdmin =
+  | Readonly<{ kind: "development" }>
+  | Readonly<{ email: string; kind: "legacy" }>
+  | Readonly<{
+      accountId: string;
+      credentialVersion: number;
+      email: string;
+      kind: "account";
+      passwordChangedAtUtc: string;
+    }>;
 
 export function isDevelopmentAuthenticationBypassed(): boolean {
   return (
@@ -15,27 +36,65 @@ export function isDevelopmentAuthenticationBypassed(): boolean {
   );
 }
 
-export function isAdminAuthenticated(request: NextRequest): boolean {
-  if (isDevelopmentAuthenticationBypassed()) return true;
+async function authenticateToken(token: string): Promise<AuthenticatedAdmin | null> {
+  if (isDevelopmentAuthenticationBypassed()) return { kind: "development" };
 
   try {
     const environment = getAuthEnvironment();
-    const token = request.cookies.get(sessionCookieName())?.value ?? "";
-    return verifySessionToken(token, environment.SESSION_SECRET);
+    const storageMode = getAuthStorageMode();
+    const session = parseSessionToken(token, environment.SESSION_SECRET);
+    if (!session) return null;
+
+    if (session.kind === "legacy") {
+      if (storageMode === "environment") {
+        return { email: environment.ADMIN_EMAIL, kind: "legacy" };
+      }
+      const pool = getPlatformDatabasePool(getDatabaseProbeEnvironment());
+      return (await canUseLegacySession(pool))
+        ? { email: environment.ADMIN_EMAIL, kind: "legacy" }
+        : null;
+    }
+
+    if (storageMode === "environment") return null;
+    const pool = getPlatformDatabasePool(getDatabaseProbeEnvironment());
+    const account = await validateAccountSession(
+      pool,
+      session.accountId,
+      session.credentialVersion,
+    );
+    return account
+      ? {
+          accountId: account.id,
+          credentialVersion: account.credentialVersion,
+          email: account.email,
+          kind: "account",
+          passwordChangedAtUtc: account.passwordChangedAtUtc,
+        }
+      : null;
   } catch {
-    return false;
+    return null;
   }
 }
 
-export async function isCurrentAdminAuthenticated(): Promise<boolean> {
-  if (isDevelopmentAuthenticationBypassed()) return true;
+export function authenticateAdminRequest(
+  request: NextRequest,
+): Promise<AuthenticatedAdmin | null> {
+  return authenticateToken(
+    request.cookies.get(sessionCookieName())?.value ?? "",
+  );
+}
 
-  try {
-    const environment = getAuthEnvironment();
-    const cookieStore = await cookies();
-    const token = cookieStore.get(sessionCookieName())?.value ?? "";
-    return verifySessionToken(token, environment.SESSION_SECRET);
-  } catch {
-    return false;
-  }
+export async function isAdminAuthenticated(
+  request: NextRequest,
+): Promise<boolean> {
+  return (await authenticateAdminRequest(request)) !== null;
+}
+
+export async function authenticateCurrentAdmin(): Promise<AuthenticatedAdmin | null> {
+  const cookieStore = await cookies();
+  return authenticateToken(cookieStore.get(sessionCookieName())?.value ?? "");
+}
+
+export async function isCurrentAdminAuthenticated(): Promise<boolean> {
+  return (await authenticateCurrentAdmin()) !== null;
 }
