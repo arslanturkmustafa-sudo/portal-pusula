@@ -181,6 +181,12 @@ try {
     publishedPort,
   );
 
+  console.log("Running 0010 to 0011 incremental migration and backfill tests...");
+  await runIntegrationFile(
+    "mariadb-phpmyadmin-incremental.test.ts",
+    publishedPort,
+  );
+
   console.log("Running migration runner correctness tests against disposable MariaDB...");
   await runIntegrationFile(
     "mariadb-migrations.test.ts",

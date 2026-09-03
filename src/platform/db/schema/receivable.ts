@@ -14,6 +14,7 @@ import {
 
 import { consultingContract } from "./consulting-contract";
 import { customer } from "./customer";
+import { customerProject } from "./customer-project";
 
 export const receivable = mysqlTable(
   "receivable",
@@ -21,6 +22,7 @@ export const receivable = mysqlTable(
     id: char("id", { length: 36 }).primaryKey(),
     clientOperationKey: char("client_operation_key", { length: 36 }),
     customerId: char("customer_id", { length: 36 }).notNull(),
+    projectId: char("project_id", { length: 36 }),
     contractId: char("contract_id", { length: 36 }),
     sourceType: varchar("source_type", { length: 24 }).notNull(),
     periodMonth: date("period_month", { mode: "string" }),
@@ -102,6 +104,13 @@ export const receivable = mysqlTable(
       .onDelete("restrict")
       .onUpdate("restrict"),
     foreignKey({
+      name: "fk_receivable_customer_project",
+      columns: [table.customerId, table.projectId],
+      foreignColumns: [customerProject.customerId, customerProject.projectId],
+    })
+      .onDelete("restrict")
+      .onUpdate("restrict"),
+    foreignKey({
       name: "fk_receivable_contract",
       columns: [table.contractId],
       foreignColumns: [consultingContract.id],
@@ -120,6 +129,15 @@ export const receivable = mysqlTable(
     index("idx_receivable_customer_created").on(
       table.customerId,
       table.createdAtUtc,
+    ),
+    index("idx_receivable_customer_project").on(
+      table.customerId,
+      table.projectId,
+    ),
+    index("idx_receivable_project_due").on(
+      table.projectId,
+      table.dueOn,
+      table.customerId,
     ),
   ],
 );

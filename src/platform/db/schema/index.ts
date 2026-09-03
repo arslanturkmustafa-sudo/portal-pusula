@@ -4,6 +4,11 @@ export {
   type NewCustomerRecord,
 } from "./customer";
 export {
+  customerProject,
+  type CustomerProjectRecord,
+  type NewCustomerProjectRecord,
+} from "./customer-project";
+export {
   consultingContract,
   type ConsultingContractRecord,
   monthlyVisitCommitment,
@@ -78,3 +83,14 @@ export {
   type NewCreditCardRecord,
   type NewExpenseRecord,
 } from "./finance-spending";
+export {
+  partnershipCommission,
+  partnershipContribution,
+  partnershipContributionReceipt,
+  type NewPartnershipCommissionRecord,
+  type NewPartnershipContributionRecord,
+  type NewPartnershipContributionReceiptRecord,
+  type PartnershipCommissionRecord,
+  type PartnershipContributionRecord,
+  type PartnershipContributionReceiptRecord,
+} from "./partnership-finance";

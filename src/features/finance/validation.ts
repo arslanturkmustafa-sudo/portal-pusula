@@ -65,6 +65,12 @@ export const generateReceivableInputSchema = z
   })
   .strict();
 
+export const financeReceivableListFilterSchema = z
+  .object({
+    projectId: canonicalUuidSchema.optional(),
+  })
+  .strict();
+
 export const openingBalanceInputSchema = z
   .object({
     clientOperationKey: canonicalUuidSchema,
@@ -72,6 +78,7 @@ export const openingBalanceInputSchema = z
     description: z.string().trim().min(1).max(191),
     dueOn: isoDateSchema,
     netAmount: moneySchema(false),
+    projectId: canonicalUuidSchema,
     vatAmount: moneySchema(false).default("0.0000"),
   })
   .strict()
@@ -105,6 +112,9 @@ export const createCollectionInputSchema = z
 
 export type GenerateReceivableInput = z.infer<
   typeof generateReceivableInputSchema
+>;
+export type FinanceReceivableListFilter = z.infer<
+  typeof financeReceivableListFilterSchema
 >;
 export type OpeningBalanceInput = z.infer<typeof openingBalanceInputSchema>;
 export type CreateCollectionInput = z.infer<

@@ -207,12 +207,16 @@ describe.sequential("Hostinger package sensitive-file policy", () => {
       "drizzle/0003_platform_cron_dispatch_gate.sql",
     );
     expect(entries).toContain("drizzle/0004_customer.sql");
+    expect(entries).toContain(
+      "drizzle/0011_customer_projects_partnership.sql",
+    );
     expect(entries).toContain("drizzle/meta/_journal.json");
     expect(entries).toContain("drizzle/meta/0000_snapshot.json");
     expect(entries).toContain("drizzle/meta/0001_snapshot.json");
     expect(entries).toContain("drizzle/meta/0002_snapshot.json");
     expect(entries).toContain("drizzle/meta/0003_snapshot.json");
     expect(entries).toContain("drizzle/meta/0004_snapshot.json");
+    expect(entries).toContain("drizzle/meta/0011_snapshot.json");
     expect(entries).toContain("public/offline-v1.html");
     expect(entries).toContain("public/icons/portal-pusula-192-v1.png");
 

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import {
   useEffect,
   useMemo,
@@ -37,6 +38,14 @@ export type ProjectDto = Readonly<{
   targetEndsOn: string | null;
   updatedAtUtc: string;
   version: number;
+}>;
+
+type CustomerDto = Readonly<{
+  displayName: string;
+  id: string;
+  projects: readonly Readonly<{ id: string }>[];
+  shortCode: string;
+  status: "active" | "inactive";
 }>;
 
 type ProjectDraft = {
@@ -186,6 +195,7 @@ function budgetLabel(value: string | null): string {
 
 export function ProjectsWorkspace() {
   const [projects, setProjects] = useState<readonly ProjectDto[]>([]);
+  const [customers, setCustomers] = useState<readonly CustomerDto[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [requestRevision, setRequestRevision] = useState(0);
@@ -208,34 +218,58 @@ export function ProjectsWorkspace() {
   useEffect(() => {
     const controller = new AbortController();
     let current = true;
-    void fetch("/api/projects", {
-      cache: "no-store",
-      credentials: "same-origin",
-      signal: controller.signal,
-    })
-      .then(async (response) => {
-        if (response.status === 401) {
+    void Promise.all([
+      fetch("/api/projects", {
+        cache: "no-store",
+        credentials: "same-origin",
+        signal: controller.signal,
+      }),
+      fetch("/api/customers", {
+        cache: "no-store",
+        credentials: "same-origin",
+        signal: controller.signal,
+      }),
+    ])
+      .then(async ([projectsResponse, customersResponse]) => {
+        if (projectsResponse.status === 401 || customersResponse.status === 401) {
           redirectToLogin();
           return null;
         }
-        if (!response.ok) throw new Error("Project workspace is unavailable.");
-        const payload = (await response.json()) as { projects?: ProjectDto[] };
-        if (!Array.isArray(payload.projects)) {
+        if (!projectsResponse.ok || !customersResponse.ok) {
+          throw new Error("Project workspace is unavailable.");
+        }
+        const [projectPayload, customerPayload] = (await Promise.all([
+          projectsResponse.json(),
+          customersResponse.json(),
+        ])) as [
+          { projects?: ProjectDto[] },
+          { customers?: CustomerDto[] },
+        ];
+        if (
+          !Array.isArray(projectPayload.projects) ||
+          !Array.isArray(customerPayload.customers)
+        ) {
           throw new Error("Project workspace response is invalid.");
         }
-        return payload.projects;
+        return {
+          customers: customerPayload.customers,
+          projects: projectPayload.projects,
+        };
       })
       .then((payload) => {
         if (!current || payload === null) return;
-        setProjects(payload);
+        setProjects(payload.projects);
+        setCustomers(payload.customers);
         setSelectedProjectId((existing) =>
-          payload.some((project) => project.id === existing)
+          payload.projects.some((project) => project.id === existing)
             ? existing
-            : (payload[0]?.id ?? null),
+            : (payload.projects[0]?.id ?? null),
         );
         if (
           initialPortfolio.every((item) =>
-            payload.some((project) => project.shortCode === item.shortCode),
+            payload.projects.some(
+              (project) => project.shortCode === item.shortCode,
+            ),
           )
         ) {
           setInitializationError(null);
@@ -280,6 +314,21 @@ export function ProjectsWorkspace() {
       ),
     [projects],
   );
+  const selectedProjectCustomers = useMemo(
+    () =>
+      selectedProject === null
+        ? []
+        : customers.filter((customer) =>
+            customer.projects.some((project) => project.id === selectedProject.id),
+          ),
+    [customers, selectedProject],
+  );
+
+  function customerCount(projectId: string): number {
+    return customers.filter((customer) =>
+      customer.projects.some((project) => project.id === projectId),
+    ).length;
+  }
 
   function openCreateEditor() {
     setDraft(emptyDraft());
@@ -597,6 +646,9 @@ export function ProjectsWorkspace() {
                     <span>
                       <strong>{project.displayName}</strong>
                       <small>{typeLabels[project.projectType]} · {project.shortCode}</small>
+                      <small className="project-customer-count">
+                        {customerCount(project.id)} müşteri
+                      </small>
                     </span>
                     <i className={`portfolio-status-dot status-${project.status}`}>
                       {statusLabels[project.status]}
@@ -749,6 +801,36 @@ export function ProjectsWorkspace() {
                   <div><dt>Planlanan bütçe</dt><dd>{budgetLabel(selectedProject.budgetAmount)}</dd></div>
                   <div><dt>Kayıt sürümü</dt><dd>v{selectedProject.version}</dd></div>
                 </dl>
+                <section
+                  className="project-customer-sheet"
+                  aria-labelledby="project-customer-title"
+                >
+                  <div>
+                    <span>MÜŞTERİLER / {String(selectedProjectCustomers.length).padStart(2, "0")}</span>
+                    <h3 id="project-customer-title">Bağlı müşteriler</h3>
+                  </div>
+                  {selectedProjectCustomers.length > 0 ? (
+                    <ul>
+                      {selectedProjectCustomers.map((customer) => (
+                        <li key={customer.id}>
+                          <strong>{customer.displayName}</strong>
+                          <small>
+                            {customer.shortCode}
+                            {customer.status === "inactive" ? " · pasif" : ""}
+                          </small>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p>Bu projeye henüz müşteri bağlanmadı.</p>
+                  )}
+                  <Link
+                    className="project-customer-manage-link"
+                    href={`/musteriler?projectId=${encodeURIComponent(selectedProject.id)}`}
+                  >
+                    Müşterileri görüntüle ve düzenle
+                  </Link>
+                </section>
                 <div className="project-dossier-note">
                   <span>İÇ NOT</span>
                   <p>{selectedProject.internalNote ?? "Not eklenmedi."}</p>

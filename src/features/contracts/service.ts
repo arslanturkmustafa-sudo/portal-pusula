@@ -4,10 +4,14 @@ import { randomUUID } from "node:crypto";
 
 import type { Pool } from "mysql2/promise";
 
-import { findCustomerForUpdate } from "@/features/customers/repository";
+import {
+  findActiveCustomerProjectForUpdate,
+  findCustomerForUpdate,
+} from "@/features/customers/repository";
 import { summarizeVisitMonth } from "@/features/contracts/month-summary";
 import {
   contractHasVisitOutsideRange,
+  contractHasReceivable,
   deletePlannedMonthVisits,
   findOverlappingContract,
   findOwnedContractForUpdate,
@@ -55,6 +59,20 @@ export class ContractPeriodConflictError extends Error {
   constructor() {
     super("The contract period overlaps an existing contract.");
     this.name = "ContractPeriodConflictError";
+  }
+}
+
+export class ContractProjectUnavailableError extends Error {
+  constructor() {
+    super("The project is not an active project for this customer.");
+    this.name = "ContractProjectUnavailableError";
+  }
+}
+
+export class ContractProjectLockedError extends Error {
+  constructor() {
+    super("The contract project cannot change after a receivable is created.");
+    this.name = "ContractProjectLockedError";
   }
 }
 
@@ -153,6 +171,7 @@ function contractAuditSummary(contract: ConsultingContract) {
     endsOn: contract.endsOn,
     monthlyFeeAmount: contract.monthlyFeeAmount,
     paymentDay: contract.paymentDay,
+    projectId: contract.projectId,
     startsOn: contract.startsOn,
     status: contract.status,
     vatMode: contract.vatMode,
@@ -233,12 +252,22 @@ export async function createCustomerContract(
       const customer = await findCustomerForUpdate(connection, customerId);
       if (!customer) throw new ContractResourceNotFoundError();
       if (customer.status !== "active") throw new ContractCustomerInactiveError();
+      if (
+        !(await findActiveCustomerProjectForUpdate(
+          connection,
+          customerId,
+          input.projectId,
+        ))
+      ) {
+        throw new ContractProjectUnavailableError();
+      }
 
       if (
         input.status !== "closed" &&
         (await findOverlappingContract(
           connection,
           customerId,
+          input.projectId,
           input.startsOn,
           input.endsOn,
         ))
@@ -255,6 +284,7 @@ export async function createCustomerContract(
         internalNote: input.internalNote,
         monthlyFeeAmount: input.monthlyFeeAmount,
         paymentDay: input.paymentDay,
+        projectId: input.projectId,
         startsOn: input.startsOn,
         status: input.status,
         updatedAtUtc: now,
@@ -305,12 +335,33 @@ export async function updateCustomerContract(
         contractId,
       );
       if (!before) throw new ContractResourceNotFoundError();
+      const projectChanged = input.projectId !== before.projectId;
+      const reopensHistoricalContract =
+        before.status === "closed" && input.status !== "closed";
+      if (projectChanged || reopensHistoricalContract) {
+        if (
+          !(await findActiveCustomerProjectForUpdate(
+            connection,
+            customerId,
+            input.projectId,
+          ))
+        ) {
+          throw new ContractProjectUnavailableError();
+        }
+        if (
+          projectChanged &&
+          (await contractHasReceivable(connection, contractId))
+        ) {
+          throw new ContractProjectLockedError();
+        }
+      }
 
       if (
         input.status !== "closed" &&
         (await findOverlappingContract(
           connection,
           customerId,
+          input.projectId,
           input.startsOn,
           input.endsOn,
           contractId,

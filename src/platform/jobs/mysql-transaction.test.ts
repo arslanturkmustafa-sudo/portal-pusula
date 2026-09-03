@@ -12,7 +12,10 @@ import {
   MySqlSessionContractError,
   registerMySqlPoolDatabase,
 } from "@/platform/database/mysql-session-contract";
-import { withUtcTransaction } from "@/platform/jobs/mysql-transaction";
+import {
+  withUtcConsistentRead,
+  withUtcTransaction,
+} from "@/platform/jobs/mysql-transaction";
 
 const databaseName = "unit_test_db";
 
@@ -79,6 +82,20 @@ function createHarness(options: {
 }
 
 describe("strict MySQL transaction", () => {
+  it("uses one read-only repeatable snapshot for multi-query reports", async () => {
+    const { connection, events, pool } = createHarness();
+    const operation = vi.fn(async () => "report");
+
+    await expect(withUtcConsistentRead(pool, operation)).resolves.toBe("report");
+
+    expect(events.indexOf("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ"))
+      .toBeLessThan(events.indexOf("START TRANSACTION READ ONLY"));
+    expect(operation).toHaveBeenCalledExactlyOnceWith(connection);
+    expect(connection.beginTransaction).not.toHaveBeenCalled();
+    expect(connection.commit).toHaveBeenCalledOnce();
+    expect(connection.release).toHaveBeenCalledOnce();
+  });
+
   it("establishes the canonical session before isolation and BEGIN", async () => {
     const { connection, events, pool } = createHarness();
     const operation = vi.fn(async () => "completed");

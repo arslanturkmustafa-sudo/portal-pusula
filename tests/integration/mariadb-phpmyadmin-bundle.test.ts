@@ -21,6 +21,9 @@ const disposableMariaDbEnabled =
 const repositoryRoot = process.cwd();
 const journalTable = "__drizzle_migrations";
 const knownTablesInDropOrder = [
+  "partnership_contribution_receipt",
+  "partnership_contribution",
+  "partnership_commission",
   "credit_card_installment",
   "expense",
   "credit_card",
@@ -32,6 +35,7 @@ const knownTablesInDropOrder = [
   "receivable",
   "monthly_visit_commitment",
   "consulting_contract",
+  "customer_project",
   "customer",
   "cron_dispatch_gate",
   "job_run",
@@ -466,8 +470,8 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
           },
           sessionRestored: true,
         });
-        expect(await tableNames(pool)).toHaveLength(19);
-        expect(await journalRows(pool)).toHaveLength(11);
+        expect(await tableNames(pool)).toHaveLength(23);
+        expect(await journalRows(pool)).toHaveLength(12);
       } catch (error) {
         reusable = false;
         throw error;
@@ -633,11 +637,11 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
         tablesAfter,
       }).toEqual({
         diagnostics: {
-          application_columns: 201,
-          checks: 96,
-          foreign_keys: 13,
-          indexes: 62,
-          matching_application_tables: 18,
+          application_columns: 247,
+          checks: 119,
+          foreign_keys: 20,
+          indexes: 77,
+          matching_application_tables: 22,
           matching_journal_tables: 1,
           sql_mode: expect.any(String),
         },
@@ -655,10 +659,14 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
           "credit_card_installment",
           "cron_dispatch_gate",
           "customer",
+          "customer_project",
           "expense",
           "job_run",
           "monthly_visit_commitment",
           "outbox_event",
+          "partnership_commission",
+          "partnership_contribution",
+          "partnership_contribution_receipt",
           "project",
           "receivable",
           "receivable_collection",
@@ -667,7 +675,7 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
           "work_task",
           "work_task_project",
         ],
-        journalCount: 11,
+        journalCount: 12,
       });
 
       await expect(
@@ -681,7 +689,7 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
 
       const bundleSchema = await schemaDefinitionSnapshot(pool);
       await expect(runMigration()).resolves.toBeUndefined();
-      expect(await journalRows(pool)).toHaveLength(11);
+      expect(await journalRows(pool)).toHaveLength(12);
       expect(await schemaDefinitionSnapshot(pool)).toEqual(bundleSchema);
 
       await resetKnownTables(pool);

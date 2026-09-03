@@ -7,6 +7,8 @@ import {
   updateVisitResolutionInputSchema,
 } from "@/features/contracts/validation";
 
+const projectId = "30000000-0000-4000-8000-000000000001";
+
 describe("contract validation", () => {
   it("normalizes a 50.000 TL plus VAT agreement without floating point loss", () => {
     const result = createContractInputSchema.parse({
@@ -14,6 +16,7 @@ describe("contract validation", () => {
       internalNote: "Yıllık danışmanlık anlaşması",
       monthlyFeeAmount: "50000",
       paymentDay: 5,
+      projectId,
       startsOn: "2026-09-01",
       vatMode: "exclusive",
       vatRate: "20",
@@ -30,6 +33,7 @@ describe("contract validation", () => {
       internalNote: null,
       monthlyFeeAmount: "50000",
       paymentDay: 5,
+      projectId,
       startsOn: "2026-09-01",
       vatMode: "exempt",
       vatRate: "0",
@@ -57,6 +61,7 @@ describe("contract validation", () => {
         internalNote: null,
         monthlyFeeAmount: "60000",
         paymentDay: 15,
+        projectId,
         startsOn: "2026-02-01",
         status: "active",
         vatMode: "exempt",
@@ -71,11 +76,30 @@ describe("contract validation", () => {
         endsOn: "2026-12-31",
         monthlyFeeAmount: "60000",
         paymentDay: 15,
+        projectId,
         startsOn: "2026-02-01",
         status: "active",
         vatMode: "exempt",
         vatRate: "0",
       }).success,
+    ).toBe(false);
+  });
+
+  it("requires a canonical project id for every contract terms document", () => {
+    const terms = {
+      endsOn: "2027-08-31",
+      internalNote: null,
+      monthlyFeeAmount: "50000",
+      paymentDay: 5,
+      startsOn: "2026-09-01",
+      vatMode: "exempt" as const,
+      vatRate: "0",
+    };
+
+    expect(createContractInputSchema.safeParse(terms).success).toBe(false);
+    expect(
+      createContractInputSchema.safeParse({ ...terms, projectId: "PROJECT" })
+        .success,
     ).toBe(false);
   });
 });

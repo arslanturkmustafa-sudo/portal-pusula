@@ -7,12 +7,26 @@ import { FinanceWorkspace } from "@/components/home/finance-workspace";
 type StoredCustomer = Readonly<{
   displayName: string;
   id: string;
+  projects?: readonly Readonly<{
+    displayName: string;
+    id: string;
+    shortCode: string;
+    status: "planned" | "active" | "on_hold" | "completed" | "cancelled";
+  }>[];
 }>;
 
 type FinanceCustomer = Readonly<{
   id: string;
   name: string;
+  projects: readonly Readonly<{
+    displayName: string;
+    id: string;
+    shortCode: string;
+    status: "planned" | "active" | "on_hold" | "completed" | "cancelled";
+  }>[];
 }>;
+
+type FinanceProject = NonNullable<FinanceCustomer["projects"]>[number];
 
 function redirectToLogin(): void {
   window.location.assign(new URL("/giris", window.location.origin).toString());
@@ -20,6 +34,7 @@ function redirectToLogin(): void {
 
 export function FinancePageWorkspace() {
   const [customers, setCustomers] = useState<readonly FinanceCustomer[]>([]);
+  const [projects, setProjects] = useState<readonly FinanceProject[]>([]);
   const [loadState, setLoadState] = useState<"error" | "loading" | "ready">(
     "loading",
   );
@@ -46,6 +61,7 @@ export function FinancePageWorkspace() {
           (payload.customers ?? []).map((customer) => ({
             id: customer.id,
             name: customer.displayName,
+            projects: customer.projects ?? [],
           })),
         );
         setLoadState("ready");
@@ -53,6 +69,34 @@ export function FinancePageWorkspace() {
       .catch((error: unknown) => {
         if (error instanceof DOMException && error.name === "AbortError") return;
         setLoadState("error");
+      });
+
+    return () => controller.abort();
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    void fetch("/api/projects", {
+      cache: "no-store",
+      credentials: "same-origin",
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (response.status === 401) {
+          redirectToLogin();
+          return null;
+        }
+        if (!response.ok) throw new Error("Project list is unavailable.");
+        return (await response.json()) as { projects?: FinanceProject[] };
+      })
+      .then((payload) => {
+        if (!payload) return;
+        setProjects(payload.projects ?? []);
+      })
+      .catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        setProjects([]);
       });
 
     return () => controller.abort();
@@ -66,7 +110,7 @@ export function FinancePageWorkspace() {
           müşteri seçilerek işlem yapılamayabilir.
         </p>
       ) : null}
-      <FinanceWorkspace customers={customers} live />
+      <FinanceWorkspace customers={customers} live projects={projects} />
     </>
   );
 }

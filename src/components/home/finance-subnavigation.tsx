@@ -7,6 +7,8 @@ const financeSections = [
   { href: "/finans", label: "Alacaklar" },
   { href: "/finans/giderler", label: "Giderler" },
   { href: "/finans/kartlar", label: "Kartlar ve ödeme planı" },
+  { href: "/finans/raporlar", label: "Proje görünümü" },
+  { href: "/finans/ortaklik", label: "Ortaklık hesabı" },
 ] as const;
 
 function isCurrentSection(pathname: string, href: string): boolean {

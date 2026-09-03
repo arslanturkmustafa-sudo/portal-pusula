@@ -33,6 +33,20 @@ const project = {
   updatedAtUtc: "2026-09-03 08:00:00.000000",
   version: 1,
 };
+const customer = {
+  displayName: "Zevahir Home",
+  id: "10000000-0000-4000-8000-000000000001",
+  projects: [
+    {
+      displayName: project.displayName,
+      id: project.id,
+      shortCode: project.shortCode,
+      status: project.status,
+    },
+  ],
+  shortCode: "ZEVAHIR",
+  status: "active" as const,
+};
 
 describe("ProjectsWorkspace", () => {
   it("opens a portfolio record and saves a complete versioned edit", async () => {
@@ -54,6 +68,9 @@ describe("ProjectsWorkspace", () => {
       }
       if (url === "/api/projects") {
         return jsonResponse({ projects: [project] });
+      }
+      if (url === "/api/customers") {
+        return jsonResponse({ customers: [customer] });
       }
       throw new Error(`Unexpected request: ${url}`);
     });
@@ -116,6 +133,9 @@ describe("ProjectsWorkspace", () => {
       if (url === "/api/projects") {
         return jsonResponse({ projects: [preciseProject] });
       }
+      if (url === "/api/customers") {
+        return jsonResponse({ customers: [customer] });
+      }
       throw new Error(`Unexpected request: ${url}`);
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -162,6 +182,7 @@ describe("ProjectsWorkspace", () => {
         );
       }
       if (url === "/api/projects") return jsonResponse({ projects: [] });
+      if (url === "/api/customers") return jsonResponse({ customers: [] });
       throw new Error(`Unexpected request: ${url}`);
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -207,6 +228,7 @@ describe("ProjectsWorkspace", () => {
         );
       }
       if (url === "/api/projects") return jsonResponse({ projects: [] });
+      if (url === "/api/customers") return jsonResponse({ customers: [] });
       throw new Error(`Unexpected request: ${url}`);
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -237,5 +259,27 @@ describe("ProjectsWorkspace", () => {
     ]);
     expect(await screen.findByText("7 Emlak Ajansı")).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("shows linked customers in the project index and dossier", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async (input) => {
+      const url = String(input);
+      if (url === "/api/projects") return jsonResponse({ projects: [project] });
+      if (url === "/api/customers") {
+        return jsonResponse({ customers: [customer] });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<ProjectsWorkspace />);
+
+    expect(await screen.findByText("1 müşteri")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Bağlı müşteriler" }))
+      .toBeInTheDocument();
+    expect(screen.getByText("Zevahir Home")).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "Müşterileri görüntüle ve düzenle" }),
+    ).toHaveAttribute("href", `/musteriler?projectId=${project.id}`);
   });
 });

@@ -15,12 +15,14 @@ import {
 } from "drizzle-orm/mysql-core";
 
 import { customer } from "./customer";
+import { customerProject } from "./customer-project";
 
 export const consultingContract = mysqlTable(
   "consulting_contract",
   {
     id: char("id", { length: 36 }).primaryKey(),
     customerId: char("customer_id", { length: 36 }).notNull(),
+    projectId: char("project_id", { length: 36 }),
     status: varchar("status", { length: 16 }).default("active").notNull(),
     startsOn: date("starts_on", { mode: "string" }).notNull(),
     endsOn: date("ends_on", { mode: "string" }).notNull(),
@@ -85,12 +87,26 @@ export const consultingContract = mysqlTable(
     })
       .onDelete("restrict")
       .onUpdate("restrict"),
-    uniqueIndex("uq_consulting_contract_customer_start").on(
+    foreignKey({
+      name: "fk_consulting_contract_customer_project",
+      columns: [table.customerId, table.projectId],
+      foreignColumns: [customerProject.customerId, customerProject.projectId],
+    })
+      .onDelete("restrict")
+      .onUpdate("restrict"),
+    uniqueIndex("uq_consulting_contract_customer_project_start").on(
       table.customerId,
+      table.projectId,
       table.startsOn,
     ),
     index("idx_consulting_contract_customer_status").on(
       table.customerId,
+      table.status,
+      table.endsOn,
+    ),
+    index("idx_consulting_contract_customer_project_status").on(
+      table.customerId,
+      table.projectId,
       table.status,
       table.endsOn,
     ),

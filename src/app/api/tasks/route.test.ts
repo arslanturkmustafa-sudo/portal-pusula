@@ -8,6 +8,7 @@ vi.mock("server-only", () => ({}));
 const mocks = vi.hoisted(() => {
   class TaskAssigneeNotFoundError extends Error {}
   class TaskCustomerNotFoundError extends Error {}
+  class TaskCustomerProjectMismatchError extends Error {}
   class TaskProjectNotFoundError extends Error {}
   return {
     authenticateAdminRequest: vi.fn(),
@@ -18,6 +19,7 @@ const mocks = vi.hoisted(() => {
     requestLogger: vi.fn(),
     TaskAssigneeNotFoundError,
     TaskCustomerNotFoundError,
+    TaskCustomerProjectMismatchError,
     TaskProjectNotFoundError,
   };
 });
@@ -28,6 +30,7 @@ vi.mock("@/features/tasks", () => ({
   listTasks: mocks.listTasks,
   TaskAssigneeNotFoundError: mocks.TaskAssigneeNotFoundError,
   TaskCustomerNotFoundError: mocks.TaskCustomerNotFoundError,
+  TaskCustomerProjectMismatchError: mocks.TaskCustomerProjectMismatchError,
   TaskProjectNotFoundError: mocks.TaskProjectNotFoundError,
 }));
 vi.mock("@/platform/auth/server-auth", () => ({

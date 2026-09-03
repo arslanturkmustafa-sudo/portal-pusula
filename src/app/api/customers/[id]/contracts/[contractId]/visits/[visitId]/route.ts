@@ -13,6 +13,11 @@ import { isAdminAuthenticated } from "@/platform/auth/server-auth";
 import { getDatabaseProbeEnvironment } from "@/platform/config/readiness-env";
 import { getPlatformDatabasePool } from "@/platform/database/mysql-platform";
 import { correlationIdFromHeaders } from "@/platform/http/correlation-id";
+import {
+  isJsonWriteRequest,
+  isSameOriginWriteRequest,
+  readJsonWriteBody,
+} from "@/platform/http/write-request";
 import { PlatformInputError } from "@/platform/validation/canonical-identifiers";
 
 export const dynamic = "force-dynamic";
@@ -43,14 +48,16 @@ export async function PATCH(
     return json({ status: "unauthorized" }, 401);
   }
 
-  const declaredLength = Number(request.headers.get("content-length") ?? "0");
-  if (!Number.isFinite(declaredLength) || declaredLength > 16_384) {
-    return json({ status: "validation_error" }, 400);
+  if (!isSameOriginWriteRequest(request)) return json({ status: "forbidden" }, 403);
+  if (!isJsonWriteRequest(request)) {
+    return json({ status: "unsupported_media_type" }, 415);
   }
 
   try {
     const { contractId, id, visitId } = await context.params;
-    const input = updateVisitResolutionInputSchema.parse(await request.json());
+    const input = updateVisitResolutionInputSchema.parse(
+      await readJsonWriteBody(request, 16_384),
+    );
     const visit = await updateMonthlyVisit(
       databasePool(),
       id,

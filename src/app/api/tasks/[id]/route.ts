@@ -6,6 +6,7 @@ import { z } from "zod";
 import {
   TaskAssigneeNotFoundError,
   TaskCustomerNotFoundError,
+  TaskCustomerProjectMismatchError,
   TaskNotFoundError,
   TaskProjectNotFoundError,
   TaskVersionConflictError,
@@ -135,6 +136,9 @@ export async function PATCH(
     }
     if (error instanceof TaskProjectNotFoundError) {
       return json({ status: "project_not_found" }, 404);
+    }
+    if (error instanceof TaskCustomerProjectMismatchError) {
+      return json({ status: "customer_project_mismatch" }, 409);
     }
     if (error instanceof TaskVersionConflictError) {
       return json({ status: "version_conflict" }, 409);

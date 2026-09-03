@@ -8,6 +8,7 @@ vi.mock("server-only", () => ({}));
 const mocks = vi.hoisted(() => {
   class TaskAssigneeNotFoundError extends Error {}
   class TaskCustomerNotFoundError extends Error {}
+  class TaskCustomerProjectMismatchError extends Error {}
   class TaskNotFoundError extends Error {}
   class TaskProjectNotFoundError extends Error {}
   class TaskVersionConflictError extends Error {}
@@ -17,6 +18,7 @@ const mocks = vi.hoisted(() => {
     requestLogger: vi.fn(),
     TaskAssigneeNotFoundError,
     TaskCustomerNotFoundError,
+    TaskCustomerProjectMismatchError,
     TaskNotFoundError,
     TaskProjectNotFoundError,
     TaskVersionConflictError,
@@ -27,6 +29,7 @@ const mocks = vi.hoisted(() => {
 vi.mock("@/features/tasks", () => ({
   TaskAssigneeNotFoundError: mocks.TaskAssigneeNotFoundError,
   TaskCustomerNotFoundError: mocks.TaskCustomerNotFoundError,
+  TaskCustomerProjectMismatchError: mocks.TaskCustomerProjectMismatchError,
   TaskNotFoundError: mocks.TaskNotFoundError,
   TaskProjectNotFoundError: mocks.TaskProjectNotFoundError,
   TaskVersionConflictError: mocks.TaskVersionConflictError,

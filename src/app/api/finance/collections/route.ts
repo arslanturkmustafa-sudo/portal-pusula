@@ -13,6 +13,11 @@ import { isAdminAuthenticated } from "@/platform/auth/server-auth";
 import { getDatabaseProbeEnvironment } from "@/platform/config/readiness-env";
 import { getPlatformDatabasePool } from "@/platform/database/mysql-platform";
 import { correlationIdFromHeaders } from "@/platform/http/correlation-id";
+import {
+  isJsonWriteRequest,
+  isSameOriginWriteRequest,
+  readJsonWriteBody,
+} from "@/platform/http/write-request";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -30,13 +35,15 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (!(await isAdminAuthenticated(request))) {
     return json({ status: "unauthorized" }, 401);
   }
-  const length = Number(request.headers.get("content-length") ?? "0");
-  if (!Number.isFinite(length) || length > 16_384) {
-    return json({ status: "validation_error" }, 400);
+  if (!isSameOriginWriteRequest(request)) return json({ status: "forbidden" }, 403);
+  if (!isJsonWriteRequest(request)) {
+    return json({ status: "unsupported_media_type" }, 415);
   }
 
   try {
-    const input = createCollectionInputSchema.parse(await request.json());
+    const input = createCollectionInputSchema.parse(
+      await readJsonWriteBody(request, 16_384),
+    );
     const result = await createReceivableCollection(
       getPlatformDatabasePool(getDatabaseProbeEnvironment()),
       input,

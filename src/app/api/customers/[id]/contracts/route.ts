@@ -4,6 +4,7 @@ import { z } from "zod";
 import {
   ContractCustomerInactiveError,
   ContractPeriodConflictError,
+  ContractProjectUnavailableError,
   ContractResourceNotFoundError,
   createContractInputSchema,
   createCustomerContract,
@@ -13,6 +14,11 @@ import { isAdminAuthenticated } from "@/platform/auth/server-auth";
 import { getDatabaseProbeEnvironment } from "@/platform/config/readiness-env";
 import { getPlatformDatabasePool } from "@/platform/database/mysql-platform";
 import { correlationIdFromHeaders } from "@/platform/http/correlation-id";
+import {
+  isJsonWriteRequest,
+  isSameOriginWriteRequest,
+  readJsonWriteBody,
+} from "@/platform/http/write-request";
 import { PlatformInputError } from "@/platform/validation/canonical-identifiers";
 
 export const dynamic = "force-dynamic";
@@ -33,11 +39,6 @@ function json(body: unknown, status = 200): NextResponse {
 
 function databasePool() {
   return getPlatformDatabasePool(getDatabaseProbeEnvironment());
-}
-
-function bodyIsTooLarge(request: NextRequest): boolean {
-  const declaredLength = Number(request.headers.get("content-length") ?? "0");
-  return !Number.isFinite(declaredLength) || declaredLength > 16_384;
 }
 
 export async function GET(
@@ -70,13 +71,16 @@ export async function POST(
   if (!(await isAdminAuthenticated(request))) {
     return json({ status: "unauthorized" }, 401);
   }
-  if (bodyIsTooLarge(request)) {
-    return json({ status: "validation_error" }, 400);
+  if (!isSameOriginWriteRequest(request)) return json({ status: "forbidden" }, 403);
+  if (!isJsonWriteRequest(request)) {
+    return json({ status: "unsupported_media_type" }, 415);
   }
 
   try {
     const { id } = await context.params;
-    const input = createContractInputSchema.parse(await request.json());
+    const input = createContractInputSchema.parse(
+      await readJsonWriteBody(request, 16_384),
+    );
     const contract = await createCustomerContract(databasePool(), id, input, {
       correlationId: correlationIdFromHeaders(request.headers),
     });
@@ -97,6 +101,9 @@ export async function POST(
     }
     if (error instanceof ContractPeriodConflictError) {
       return json({ status: "contract_period_conflict" }, 409);
+    }
+    if (error instanceof ContractProjectUnavailableError) {
+      return json({ status: "project_unavailable" }, 409);
     }
     return json({ status: "service_unavailable" }, 503);
   }

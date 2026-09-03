@@ -3,6 +3,8 @@ import { z } from "zod";
 
 import {
   ContractPeriodConflictError,
+  ContractProjectLockedError,
+  ContractProjectUnavailableError,
   ContractResourceNotFoundError,
   ContractVisitRangeConflictError,
   updateContractInputSchema,
@@ -12,6 +14,11 @@ import { isAdminAuthenticated } from "@/platform/auth/server-auth";
 import { getDatabaseProbeEnvironment } from "@/platform/config/readiness-env";
 import { getPlatformDatabasePool } from "@/platform/database/mysql-platform";
 import { correlationIdFromHeaders } from "@/platform/http/correlation-id";
+import {
+  isJsonWriteRequest,
+  isSameOriginWriteRequest,
+  readJsonWriteBody,
+} from "@/platform/http/write-request";
 import { PlatformInputError } from "@/platform/validation/canonical-identifiers";
 
 export const dynamic = "force-dynamic";
@@ -42,14 +49,16 @@ export async function PATCH(
     return json({ status: "unauthorized" }, 401);
   }
 
-  const declaredLength = Number(request.headers.get("content-length") ?? "0");
-  if (!Number.isFinite(declaredLength) || declaredLength > 16_384) {
-    return json({ status: "validation_error" }, 400);
+  if (!isSameOriginWriteRequest(request)) return json({ status: "forbidden" }, 403);
+  if (!isJsonWriteRequest(request)) {
+    return json({ status: "unsupported_media_type" }, 415);
   }
 
   try {
     const { contractId, id } = await context.params;
-    const input = updateContractInputSchema.parse(await request.json());
+    const input = updateContractInputSchema.parse(
+      await readJsonWriteBody(request, 16_384),
+    );
     const contract = await updateCustomerContract(
       databasePool(),
       id,
@@ -74,6 +83,12 @@ export async function PATCH(
     }
     if (error instanceof ContractVisitRangeConflictError) {
       return json({ status: "contract_visit_range_conflict" }, 409);
+    }
+    if (error instanceof ContractProjectUnavailableError) {
+      return json({ status: "project_unavailable" }, 409);
+    }
+    if (error instanceof ContractProjectLockedError) {
+      return json({ status: "contract_project_locked" }, 409);
     }
     return json({ status: "service_unavailable" }, 503);
   }

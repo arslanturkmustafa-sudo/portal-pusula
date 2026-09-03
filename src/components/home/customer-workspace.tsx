@@ -9,11 +9,24 @@ import {
 } from "react";
 
 type VatMode = "exempt" | "exclusive" | "inclusive";
+type ProjectStatus =
+  | "planned"
+  | "active"
+  | "on_hold"
+  | "completed"
+  | "cancelled";
 type VisitStatus =
   | "planned"
   | "completed"
   | "makeup_pending"
   | "cancelled_by_agreement";
+
+type ProjectDto = Readonly<{
+  displayName: string;
+  id: string;
+  shortCode: string;
+  status: ProjectStatus;
+}>;
 
 type ContractDto = Readonly<{
   currency: "TRY";
@@ -23,6 +36,7 @@ type ContractDto = Readonly<{
   internalNote: string | null;
   monthlyFeeAmount: string;
   paymentDay: number;
+  projectId: string | null;
   startsOn: string;
   status: "draft" | "active" | "closed";
   vatMode: VatMode;
@@ -54,6 +68,7 @@ type ContractDraft = {
   internalNote: string;
   monthlyFeeAmount: string;
   paymentDay: string;
+  projectId: string;
   startsOn: string;
   vatMode: VatMode;
   vatRate: string;
@@ -66,6 +81,7 @@ type EditableCustomer = Readonly<{
   id: string;
   name: string;
   phone?: string | null;
+  projects?: readonly ProjectDto[];
   shortCode?: string;
   status?: "active" | "inactive";
 }>;
@@ -76,6 +92,7 @@ type CustomerDto = Readonly<{
   email: string | null;
   id: string;
   phone: string | null;
+  projects: readonly ProjectDto[];
   shortCode: string;
   status: "active" | "inactive";
 }>;
@@ -85,9 +102,11 @@ type CustomerDraft = {
   displayName: string;
   email: string;
   phone: string;
+  projectIds: readonly string[];
 };
 
 type CustomerWorkspaceProps = Readonly<{
+  availableProjects?: readonly ProjectDto[];
   customer: EditableCustomer;
   live: boolean;
   onContractSaved: (contract: ContractDto) => void;
@@ -97,6 +116,18 @@ type CustomerWorkspaceProps = Readonly<{
 
 type LoadState = "error" | "loading" | "ready";
 type SaveState = "error" | "idle" | "saving";
+
+function canAcceptNewCustomerLink(status: ProjectStatus): boolean {
+  return status === "active" || status === "planned" || status === "on_hold";
+}
+
+function customerProjectStatusSuffix(status: ProjectStatus): string {
+  if (status === "active") return "";
+  if (status === "planned") return " · planlandı";
+  if (status === "on_hold") return " · beklemede";
+  if (status === "completed") return " · tamamlandı";
+  return " · iptal";
+}
 
 function formText(formData: FormData, name: string): string {
   const value = formData.get(name);
@@ -110,15 +141,33 @@ function contractErrorMessage(status: unknown): string {
   if (status === "contract_visit_range_conflict") {
     return "Yeni tarih aralığının dışında kalan ziyaretler var. Önce bu ziyaretleri düzenleyin.";
   }
+  if (status === "customer_project_inactive" || status === "project_unavailable") {
+    return "Sözleşme yalnız müşterinin aktif bağlı projelerinden birine bağlanabilir.";
+  }
+  if (status === "contract_project_locked") {
+    return "Bu sözleşme için alacak oluştuğundan proje değiştirilemez.";
+  }
   if (status === "validation_error") {
-    return "Bitiş tarihi başlangıçtan önce olamaz; ücret, ödeme günü ve KDV alanlarını da kontrol edin.";
+    return "Proje seçimini, tarih aralığını, ücret, ödeme günü ve KDV alanlarını kontrol edin.";
   }
   return "Sözleşme kaydedilemedi. Lütfen yeniden deneyin.";
 }
 
 function customerErrorMessage(status: unknown): string {
+  if (status === "project_not_found") {
+    return "Seçilen projelerden biri bulunamadı. Sayfayı yenileyip yeniden deneyin.";
+  }
+  if (status === "project_unavailable") {
+    return "Müşteri yalnız planlanan, aktif veya beklemedeki projelere bağlanabilir.";
+  }
+  if (status === "project_link_version_conflict") {
+    return "Proje bağlantıları başka bir işlemde değişti. Sayfayı yenileyip yeniden deneyin.";
+  }
+  if (status === "project_link_in_use") {
+    return "Aktif sözleşmesi veya tamamlanmamış görevi bulunan proje bağlantısı kaldırılamaz.";
+  }
   if (status === "validation_error") {
-    return "Müşteri bilgilerini kontrol edin. E-posta ve telefon biçimi geçerli olmalıdır.";
+    return "Müşteri bilgilerini ve en az bir uygun proje seçimini kontrol edin.";
   }
   if (status === "customer_not_found") {
     return "Müşteri kaydı bulunamadı. Sayfayı yenileyip yeniden deneyin.";
@@ -160,13 +209,19 @@ function oneYearLessOneDay(startsOn: string): string {
   return next.toISOString().slice(0, 10);
 }
 
-function emptyContractDraft(): ContractDraft {
+function defaultProjectId(projects: readonly ProjectDto[]): string {
+  const activeProjects = projects.filter((project) => project.status === "active");
+  return activeProjects.length === 1 ? activeProjects[0].id : "";
+}
+
+function emptyContractDraft(projectId = ""): ContractDraft {
   const startsOn = istanbulToday();
   return {
     endsOn: oneYearLessOneDay(startsOn),
     internalNote: "",
     monthlyFeeAmount: "50000",
     paymentDay: "5",
+    projectId,
     startsOn,
     vatMode: "exclusive",
     vatRate: "20",
@@ -209,14 +264,25 @@ function monthForContract(contract: ContractDto): string {
   return contract.startsOn.slice(0, 7);
 }
 
-function nextContractDraft(contracts: readonly ContractDto[]): ContractDraft {
+function nextContractDraft(
+  contracts: readonly ContractDto[],
+  projects: readonly ProjectDto[],
+): ContractDraft {
   const latest = sortedContracts(contracts).at(-1);
-  if (!latest) return emptyContractDraft();
+  if (!latest) return emptyContractDraft(defaultProjectId(projects));
+  const activeProjectIds = new Set(
+    projects
+      .filter((project) => project.status === "active")
+      .map((project) => project.id),
+  );
   const startsOn = nextIsoDate(latest.endsOn);
   return {
     ...contractDraft(latest),
     endsOn: oneYearLessOneDay(startsOn),
     internalNote: "",
+    projectId: latest.projectId !== null && activeProjectIds.has(latest.projectId)
+      ? latest.projectId
+      : defaultProjectId(projects),
     startsOn,
   };
 }
@@ -260,6 +326,7 @@ function contractDraft(contract: ContractDto): ContractDraft {
     internalNote: contract.internalNote ?? "",
     monthlyFeeAmount: contract.monthlyFeeAmount.replace(/\.0+$/u, ""),
     paymentDay: String(contract.paymentDay),
+    projectId: contract.projectId ?? "",
     startsOn: contract.startsOn,
     vatMode: contract.vatMode,
     vatRate: contract.vatRate.replace(/\.0+$/u, ""),
@@ -273,6 +340,7 @@ function customerDraft(
     email?: string | null;
     name?: string;
     phone?: string | null;
+    projects?: readonly ProjectDto[];
   }>,
 ): CustomerDraft {
   return {
@@ -280,14 +348,35 @@ function customerDraft(
     displayName: customer.displayName ?? customer.name ?? "",
     email: customer.email ?? "",
     phone: customer.phone ?? "",
+    projectIds: customer.projects?.map((project) => project.id) ?? [],
   };
 }
 
-function contractPeriodLabel(contract: ContractDto): string {
+function contractPeriodLabel(
+  contract: ContractDto,
+  customerProjects: readonly ProjectDto[],
+  availableProjects: readonly ProjectDto[],
+): string {
   const amount = new Intl.NumberFormat("tr-TR", {
     maximumFractionDigits: 2,
   }).format(Number(contract.monthlyFeeAmount));
-  return `${contract.startsOn} – ${contract.endsOn} · ${amount} ₺`;
+  const project =
+    customerProjects.find((item) => item.id === contract.projectId) ??
+    availableProjects.find((item) => item.id === contract.projectId);
+  const prefix = contract.projectId === null
+    ? "Proje atanmamış"
+    : (project?.shortCode ?? "Proje kaydı bulunamadı");
+  return `${prefix} · ${contract.startsOn} – ${contract.endsOn} · ${amount} ₺`;
+}
+
+function sameProjectIds(
+  left: readonly string[],
+  right: readonly string[],
+): boolean {
+  if (left.length !== right.length) return false;
+  const orderedLeft = [...left].sort();
+  const orderedRight = [...right].sort();
+  return orderedLeft.every((id, index) => id === orderedRight[index]);
 }
 
 function formatMoney(value: number): string {
@@ -313,6 +402,7 @@ export function CustomerWorkspace(props: CustomerWorkspaceProps) {
 }
 
 function CustomerWorkspaceSession({
+  availableProjects = [],
   customer,
   live,
   onContractSaved,
@@ -327,7 +417,9 @@ function CustomerWorkspaceSession({
     null,
   );
   const [isCreatingContract, setIsCreatingContract] = useState(false);
-  const [draft, setDraft] = useState<ContractDraft>(emptyContractDraft);
+  const [draft, setDraft] = useState<ContractDraft>(() =>
+    emptyContractDraft(defaultProjectId(customer.projects ?? [])),
+  );
   const [contractSaveState, setContractSaveState] =
     useState<SaveState>("idle");
   const [contractError, setContractError] = useState<string | null>(null);
@@ -345,6 +437,7 @@ function CustomerWorkspaceSession({
     email: customer.email ?? null,
     id: customer.id,
     phone: customer.phone ?? null,
+    projects: customer.projects ?? [],
     shortCode: customer.shortCode ?? "",
     status: customer.status ?? "active",
   }));
@@ -358,6 +451,7 @@ function CustomerWorkspaceSession({
   const onContractSavedRef = useRef(onContractSaved);
   const onVisitsSavedRef = useRef(onVisitsSaved);
   const contractCustomerIdRef = useRef(customer.id);
+  const customerProjectsRef = useRef(customer.projects ?? []);
   const contractLoadGenerationRef = useRef(0);
   const contractInteractionRef = useRef<"creating" | "editing" | "idle">(
     "idle",
@@ -370,6 +464,10 @@ function CustomerWorkspaceSession({
   useEffect(() => {
     onVisitsSavedRef.current = onVisitsSaved;
   }, [onVisitsSaved]);
+
+  useEffect(() => {
+    customerProjectsRef.current = customerRecord.projects;
+  }, [customerRecord.projects]);
 
   const contract = useMemo(
     () =>
@@ -413,7 +511,9 @@ function CustomerWorkspaceSession({
           setSelectedMonth(monthForContract(selected));
           onContractSavedRef.current(selected);
         } else {
-          setDraft(emptyContractDraft());
+          setDraft(
+            emptyContractDraft(defaultProjectId(customerProjectsRef.current)),
+          );
           contractInteractionRef.current = "creating";
         }
         setLoadState("ready");
@@ -432,7 +532,8 @@ function CustomerWorkspaceSession({
       customer.displayName !== undefined &&
       customer.email !== undefined &&
       customer.phone !== undefined &&
-      customer.contactNote !== undefined;
+      customer.contactNote !== undefined &&
+      customer.projects !== undefined;
     if (!live || hasCompleteCustomer) return;
     const controller = new AbortController();
 
@@ -462,6 +563,7 @@ function CustomerWorkspaceSession({
     customer.email,
     customer.id,
     customer.phone,
+    customer.projects,
     live,
   ]);
 
@@ -520,6 +622,33 @@ function CustomerWorkspaceSession({
   );
   const planMutationPending =
     planSaveState === "saving" || visitSaveId !== null;
+  const contractProjectOptions = useMemo(() => {
+    const active = customerRecord.projects.filter(
+      (project) => project.status === "active",
+    );
+    if (
+      draft.projectId === "" ||
+      active.some((project) => project.id === draft.projectId)
+    ) {
+      return active;
+    }
+    const existing =
+      customerRecord.projects.find((project) => project.id === draft.projectId) ??
+      availableProjects.find((project) => project.id === draft.projectId);
+    return existing === undefined ? active : [...active, existing];
+  }, [availableProjects, customerRecord.projects, draft.projectId]);
+  const customerProjectOptions = useMemo(() => {
+    const selectedIds = new Set(customerEditDraft.projectIds);
+    const options = availableProjects.filter(
+      (project) =>
+        canAcceptNewCustomerLink(project.status) || selectedIds.has(project.id),
+    );
+    const optionIds = new Set(options.map((project) => project.id));
+    return [
+      ...options,
+      ...customerRecord.projects.filter((project) => !optionIds.has(project.id)),
+    ];
+  }, [availableProjects, customerEditDraft.projectIds, customerRecord.projects]);
 
   function selectContract(contractId: string) {
     if (planMutationPending) return;
@@ -547,7 +676,7 @@ function CustomerWorkspaceSession({
     contractInteractionRef.current = "creating";
     setIsCreatingContract(true);
     setIsEditingContract(false);
-    setDraft(nextContractDraft(contracts));
+    setDraft(nextContractDraft(contracts, customerRecord.projects));
     setVisits([]);
     setPlanLoadState("ready");
     setPlanSaveState("idle");
@@ -585,8 +714,14 @@ function CustomerWorkspaceSession({
       displayName: formText(formData, "customerDisplayName").trim(),
       email: formText(formData, "customerEmail").trim().toLowerCase(),
       phone: formText(formData, "customerPhone").trim(),
+      projectIds: customerEditDraft.projectIds,
     };
-    const body: Record<string, string | null> = {};
+    if (submitted.projectIds.length === 0) {
+      setCustomerSaveState("error");
+      setCustomerError("Müşteriyi en az bir projeye bağlayın.");
+      return;
+    }
+    const body: Record<string, string | null | readonly string[]> = {};
     if (submitted.displayName !== customerRecord.displayName) {
       body.displayName = submitted.displayName;
     }
@@ -598,6 +733,14 @@ function CustomerWorkspaceSession({
     }
     if ((submitted.contactNote || null) !== customerRecord.contactNote) {
       body.contactNote = submitted.contactNote || null;
+    }
+    if (
+      !sameProjectIds(
+        submitted.projectIds,
+        customerRecord.projects.map((project) => project.id),
+      )
+    ) {
+      body.projectIds = submitted.projectIds;
     }
     if (Object.keys(body).length === 0) {
       setIsEditingCustomer(false);
@@ -645,6 +788,7 @@ function CustomerWorkspaceSession({
       internalNote: formText(formData, "internalNote"),
       monthlyFeeAmount: formText(formData, "monthlyFeeAmount"),
       paymentDay: formText(formData, "paymentDay"),
+      projectId: formText(formData, "projectId"),
       startsOn: formText(formData, "startsOn"),
       vatMode: formText(formData, "vatMode") as VatMode,
       vatRate:
@@ -656,6 +800,7 @@ function CustomerWorkspaceSession({
     if (
       submittedDraft.startsOn === "" ||
       submittedDraft.endsOn === "" ||
+      submittedDraft.projectId === "" ||
       submittedDraft.endsOn < submittedDraft.startsOn
     ) {
       setContractSaveState("error");
@@ -677,6 +822,7 @@ function CustomerWorkspaceSession({
           internalNote: submittedDraft.internalNote,
           monthlyFeeAmount: submittedDraft.monthlyFeeAmount.replace(",", "."),
           paymentDay: Number(submittedDraft.paymentDay),
+          projectId: submittedDraft.projectId,
           startsOn: submittedDraft.startsOn,
           status: contract?.status ?? "active",
           vatMode: submittedDraft.vatMode,
@@ -919,6 +1065,38 @@ function CustomerWorkspaceSession({
                 }
               />
             </label>
+            <fieldset className="customer-project-picker customer-project-picker-profile">
+              <legend>Bağlı projeler</legend>
+              <p>Müşterinin ilişkili olduğu tüm iş hatlarını seçin.</p>
+              <div className="customer-project-options">
+                {customerProjectOptions.map((project) => (
+                  <label key={project.id}>
+                    <input
+                      checked={customerEditDraft.projectIds.includes(project.id)}
+                      disabled={customerSaveState === "saving"}
+                      name="customerProjectIds"
+                      type="checkbox"
+                      value={project.id}
+                      onChange={(event) =>
+                        setCustomerEditDraft((current) => ({
+                          ...current,
+                          projectIds: event.target.checked
+                            ? [...current.projectIds, project.id]
+                            : current.projectIds.filter((id) => id !== project.id),
+                        }))
+                      }
+                    />
+                    <span>
+                      <strong>{project.displayName}</strong>
+                      <small>
+                        {project.shortCode}
+                        {customerProjectStatusSuffix(project.status)}
+                      </small>
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </fieldset>
             <div className="customer-profile-actions">
               <button
                 className="text-action"
@@ -949,9 +1127,27 @@ function CustomerWorkspaceSession({
           </form>
         ) : (
           <div className="customer-profile-summary">
-            <dl>
+            <dl className="customer-project-summary-grid">
               <div><dt>E-posta</dt><dd>{customerRecord.email ?? "—"}</dd></div>
               <div><dt>Telefon</dt><dd>{customerRecord.phone ?? "—"}</dd></div>
+              <div className="customer-profile-projects">
+                <dt>Projeler</dt>
+                <dd>
+                  {customerRecord.projects.length > 0 ? (
+                    <span className="customer-project-badges">
+                      {customerRecord.projects.map((project) => (
+                        <span className="customer-project-badge" key={project.id}>
+                          {project.displayName}
+                        </span>
+                      ))}
+                    </span>
+                  ) : (
+                    <span className="customer-project-unassigned">
+                      Proje atanmamış
+                    </span>
+                  )}
+                </dd>
+              </div>
               <div>
                 <dt>İletişim notu</dt>
                 <dd>{customerRecord.contactNote ?? "—"}</dd>
@@ -1010,7 +1206,13 @@ function CustomerWorkspaceSession({
                     type="button"
                     onClick={() => selectContract(item.id)}
                   >
-                    <strong>{contractPeriodLabel(item)}</strong>
+                    <strong>
+                      {contractPeriodLabel(
+                        item,
+                        customerRecord.projects,
+                        availableProjects,
+                      )}
+                    </strong>
                     <small>
                       {item.status === "active"
                         ? "Aktif"
@@ -1043,6 +1245,41 @@ function CustomerWorkspaceSession({
             ) : null}
 
             <form className="contract-form" onSubmit={saveContract}>
+              <label className="contract-project-field">
+                <span>Proje</span>
+                <select
+                  aria-label="Proje"
+                  disabled={contract !== null && !isEditingContract}
+                  name="projectId"
+                  required
+                  value={draft.projectId}
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      projectId: event.target.value,
+                    }))
+                  }
+                >
+                  <option value="">Proje seçin</option>
+                  {contractProjectOptions.map((project) => (
+                    <option key={project.id} value={project.id}>
+                      {project.displayName} · {project.shortCode}
+                      {project.status === "active" ? "" : " (kapalı)"}
+                    </option>
+                  ))}
+                </select>
+                {contractProjectOptions.length === 0 ? (
+                  <small>
+                    Önce müşteri bilgilerinden aktif bir proje bağlantısı ekleyin.
+                  </small>
+                ) : null}
+                {contract?.projectId === null ? (
+                  <small className="customer-project-unassigned customer-project-unassigned-note">
+                    Bu çalışma döneminde proje atanmamış. Düzenleyerek aktif bir
+                    proje seçin.
+                  </small>
+                ) : null}
+              </label>
               <label>
                 <span>Başlangıç</span>
                 <input
@@ -1239,6 +1476,12 @@ function CustomerWorkspaceSession({
                         setPeriodTouched(true);
                         contractLoadGenerationRef.current += 1;
                         contractInteractionRef.current = "editing";
+                        if (contract.projectId === null) {
+                          setDraft((current) => ({
+                            ...current,
+                            projectId: defaultProjectId(customerRecord.projects),
+                          }));
+                        }
                         setIsEditingContract(true);
                       }}
                     >
