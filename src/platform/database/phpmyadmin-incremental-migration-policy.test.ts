@@ -69,7 +69,7 @@ async function temporaryOutputDirectory() {
 
 async function build(outputDirectory: string) {
   const summary = await buildPhpMyAdminIncrementalMigrationBundle({
-    migrationTag: "0006_receivables",
+    migrationTag: "0009_projects",
     outputDirectory,
     projectRoot,
     serverVersionSha256,
@@ -103,13 +103,13 @@ afterEach(async () => {
 });
 
 describe.sequential("phpMyAdmin incremental migration bundle policy", () => {
-  it("builds a deterministic, target-bound 0006 artifact", async () => {
+  it("builds a deterministic, target-bound 0009 artifact", async () => {
     const outputDirectory = await temporaryOutputDirectory();
     const first = await build(outputDirectory);
     const second = await build(outputDirectory);
 
     expect(second).toEqual(first);
-    expect(first.summary.statementCount).toBe(8);
+    expect(first.summary.statementCount).toBe(7);
     expect(first.summary.sqlBytes).toBe(Buffer.byteLength(first.sql));
     expect(first.summary.sqlSha256).toBe(
       createHash("sha256").update(first.sql).digest("hex"),
@@ -124,12 +124,12 @@ describe.sequential("phpMyAdmin incremental migration bundle policy", () => {
   it("requires the exact previous journal and records the selected hash", async () => {
     const { manifest, sql } = await build(await temporaryOutputDirectory());
 
-    expect(manifest.expectedJournalCount).toBe(6);
+    expect(manifest.expectedJournalCount).toBe(9);
     expect(manifest.expectedPreviousMigration.tag).toBe(
-      "0005_consulting_contract_visits",
+      "0008_work_tasks",
     );
-    expect(manifest.migration.tag).toBe("0006_receivables");
-    expect(manifest.migration.statementHashes).toHaveLength(8);
+    expect(manifest.migration.tag).toBe("0009_projects");
+    expect(manifest.migration.statementHashes).toHaveLength(7);
     expect(sql).toContain(manifest.expectedPreviousMigration.hash);
     expect(sql).toContain(manifest.migration.hash);
     expect(sql).toContain(String(manifest.migration.createdAt));
@@ -148,14 +148,14 @@ describe.sequential("phpMyAdmin incremental migration bundle policy", () => {
     const { manifest, sql } = await build(await temporaryOutputDirectory());
 
     expect(sql).not.toContain("--> statement-breakpoint");
-    expect(sql).not.toContain("CREATE TABLE `receivable`");
+    expect(sql).not.toContain("CREATE TABLE `project`");
     expect(sql).toContain("PREPARE pp_incremental_statement FROM @pp_sql");
     expect(sql).toContain("SHA2(@pp_candidate_sql, 256)");
-    expect(sql).toContain("TABLE_NAME = 'receivable') = 0");
-    expect(sql).toContain("TABLE_NAME = 'receivable_collection') = 0");
+    expect(sql).toContain("TABLE_NAME = 'project') = 0");
+    expect(sql).toContain("TABLE_NAME = 'work_task_project') = 0");
     expect(manifest.targetObjects).toContainEqual({
-      name: "receivable",
-      tableName: "receivable",
+      name: "project",
+      tableName: "project",
       type: "create-table",
     });
     expect(manifest.boundary).toContain("not transactional");
@@ -165,7 +165,7 @@ describe.sequential("phpMyAdmin incremental migration bundle policy", () => {
   it.each([
     "",
     "0000_platform_migration_verification",
-    "0007_missing",
+    "0010_missing",
     "../../0006_receivables",
   ])("rejects an invalid incremental selection: %s", async (migrationTag) => {
     await expect(

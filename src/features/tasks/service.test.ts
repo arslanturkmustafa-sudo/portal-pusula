@@ -8,11 +8,13 @@ vi.mock("server-only", () => ({}));
 const mocks = vi.hoisted(() => ({
   appendAuditEvent: vi.fn(),
   findCustomerForUpdate: vi.fn(),
+  findProjectForUpdate: vi.fn(),
   findTaskRecordById: vi.fn(),
   findTaskStateForUpdate: vi.fn(),
   findUserAccountById: vi.fn(),
   insertTaskRecord: vi.fn(),
   listTaskRecords: vi.fn(),
+  replaceTaskProjectRecord: vi.fn(),
   updateTaskRecord: vi.fn(),
 }));
 
@@ -22,11 +24,15 @@ vi.mock("@/features/account/repository", () => ({
 vi.mock("@/features/customers/repository", () => ({
   findCustomerForUpdate: mocks.findCustomerForUpdate,
 }));
+vi.mock("@/features/projects/repository", () => ({
+  findProjectForUpdate: mocks.findProjectForUpdate,
+}));
 vi.mock("@/features/tasks/repository", () => ({
   findTaskRecordById: mocks.findTaskRecordById,
   findTaskStateForUpdate: mocks.findTaskStateForUpdate,
   insertTaskRecord: mocks.insertTaskRecord,
   listTaskRecords: mocks.listTaskRecords,
+  replaceTaskProjectRecord: mocks.replaceTaskProjectRecord,
   updateTaskRecord: mocks.updateTaskRecord,
 }));
 vi.mock("@/platform/audit/repository", () => ({
@@ -65,6 +71,7 @@ const before = {
   dueOn: "2026-09-05",
   id: taskId,
   priority: "normal" as const,
+  projectId: null,
   status: "todo" as const,
   title: "Süreç haritasını tamamla",
   updatedAtUtc: "2026-09-02 09:00:00.000000",
@@ -85,6 +92,7 @@ describe("task service", () => {
       id: accountId,
       status: "active",
     });
+    mocks.findProjectForUpdate.mockResolvedValue({ id: "project-id" });
     mocks.findTaskRecordById.mockResolvedValue(projection);
     mocks.findTaskStateForUpdate.mockResolvedValue(before);
     mocks.updateTaskRecord.mockResolvedValue(true);
@@ -112,6 +120,12 @@ describe("task service", () => {
         customerId,
         version: 1,
       }),
+    );
+    expect(mocks.replaceTaskProjectRecord).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.any(String),
+      null,
+      nowSql,
     );
     expect(mocks.appendAuditEvent).toHaveBeenCalledWith(
       expect.anything(),

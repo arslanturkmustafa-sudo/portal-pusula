@@ -59,3 +59,11 @@ export {
   type NewWorkTaskRecord,
   type WorkTaskRecord,
 } from "./work-task";
+export {
+  project,
+  workTaskProject,
+  type NewProjectRecord,
+  type NewWorkTaskProjectRecord,
+  type ProjectRecord,
+  type WorkTaskProjectRecord,
+} from "./project";

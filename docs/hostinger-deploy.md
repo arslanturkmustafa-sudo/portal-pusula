@@ -1,10 +1,10 @@
-# Hostinger dağıtım, güvenli giriş ve müşteri dilimi
+# Hostinger dağıtım runbook'u — Projeler V1
 
-Bu runbook, Hostinger Business Node.js Web App hedefindeki güncel Portal Pusula dağıtımını kapsar. Kaynakta güvenli yönetici girişi, müşteri arayüzü/API'si ve `0004_customer.sql` hazırdır. Güncel ZIP henüz canlıya dağıtılmamış, `0004` mevcut Hostinger hedefinde uygulanmamış ve auth environment değerleri eklenmemiştir.
+Bu runbook, `portal.muhendiskafasi.com.tr` üzerindeki Hostinger Business Node.js Web App hedefini ve `0009_projects` ile gelen proje portföyü/görev-proje bağlantısını kapsar. Canlı veritabanı `0008_work_tasks` seviyesindeyken yeni uygulama dağıtılmadan önce `0009_projects` hedefe bağlı incremental paketle uygulanır. Mevcut auth, müşteri, sözleşme, ziyaret, finans, günlük plan ve görev verileri korunur.
 
 ## Kanıtlanan runtime ve dağıtım kararı
 
-- Geçici uygulama: `https://sandybrown-wolf-559614.hostingersite.com`
+- Üretim uygulaması: `https://portal.muhendiskafasi.com.tr`
 - Node.js: panelde 24.x, gerçek build runtime `v24.6.0`
 - Engines: Node `>=24 <25`, npm `>=12 <13`
 - Next.js: 16.3.3 App Router
@@ -13,7 +13,7 @@ Bu runbook, Hostinger Business Node.js Web App hedefindeki güncel Portal Pusula
 - Build çıktısı: `.next`
 - Build: `npm run build` → `next build --webpack`
 - Start: Hostinger Next.js başlangıcı (`next start`, platform port yönetimi)
-- Dağıtım: kökünde `package.json` bulunan ZIP; v3 başarıyla `Akım`
+- Dağıtım: `main` dalına bağlı Git akışı veya kökünde `package.json` bulunan deterministik ZIP
 - hCDN: otomatik etkin
 
 Hostinger'ın eski glibc sürümü native SWC yolunu çalıştırmadı. Bu nedenle `next.config.mjs` ve webpack build [ADR-0003](./adr/0003-node24-npm12-hostinger-webpack.md) ile bağlı Hostinger uyumluluk sınırıdır; `next.config.ts` veya varsayılan native SWC build yoluna ayrı spike olmadan geri dönülmez.
@@ -26,26 +26,29 @@ npm run lint
 npm run typecheck
 npm test
 npm run test:integration
+npm run test:mariadb
 npm run build
-npm run test:e2e
-npm run package:hostinger
+npm run test:e2e:run
+npm run package:verify
 ```
 
-Son komut `dist/portal-pusula-hostinger.zip` üretir. ZIP standardı Zip32/STORE, UTF-8 yollar, sabit tarih, sıralı girişler ve CRC32 kullanır; aynı kaynak iki çalıştırmada aynı SHA-256 değerini verir.
+Son komut `dist/portal-pusula-hostinger.zip` dosyasını iki kez üretip byte-identical olduğunu doğrular ve nihai SHA-256 değerini verir. ZIP standardı Zip32/STORE, UTF-8 yollar, sabit tarih, sıralı girişler ve CRC32 kullanır.
 
 Uygulama ZIP'i DB şeması uygulamaz. npm/SSH erişimi olmayan, yeni ve tamamen boş disposable staging DB'si için [phpMyAdmin clean-only migration runbook'u](./phpmyadmin-clean-migration.md); journal'ı bulunan mevcut DB'de yalnız sıradaki migration için [phpMyAdmin incremental migration runbook'u](./phpmyadmin-incremental-migration.md) izlenir. SQL artefaktları Hostinger ZIP'inin içine eklenmez.
 
-Arşiv kökünde doğrudan `package.json`, `package-lock.json`, `.nvmrc`, `next.config.mjs`, `next-env.d.ts`, `tsconfig.json` ve `postcss.config.mjs` bulunur. `drizzle/` içindeki immutable `0000`/`0001` ile ileri yönlü `0002`/`0003`, `public/`, production için gereken migration scriptleri ve testleri çıkarılmış `src/` sabit allowlist ile dahil edilir. `src/**/*.test.ts(x)`, `tests/`, disposable DB/E2E/paketleme scriptleri, herhangi bir alt dizindeki `.env*`, özel anahtar/credential dosyaları, `.next/`, `node_modules/`, `dist/`, `outputs/`, `work/`, log/coverage/Playwright/test çıktıları ve Git verisi hariçtir. Nested yasak yol bulunduğunda paket içerik üretmeden fail-closed olur. Production ZIP migration dosyalarını taşısa da bu yalnız dağıtılabilir artefakt içeriğidir; canlı migration veya deploy kanıtı değildir.
+Arşiv kökünde doğrudan `package.json`, `package-lock.json`, `.nvmrc`, `next.config.mjs`, `next-env.d.ts`, `tsconfig.json` ve `postcss.config.mjs` bulunur. `drizzle/` içindeki `0000`–`0009`, `public/`, production için gereken migration scriptleri ve testleri çıkarılmış `src/` sabit allowlist ile dahil edilir. `src/**/*.test.ts(x)`, `tests/`, disposable DB/E2E/paketleme scriptleri, herhangi bir alt dizindeki `.env*`, özel anahtar/credential dosyaları, `.next/`, `node_modules/`, `dist/`, `outputs/`, `work/`, log/coverage/Playwright/test çıktıları ve Git verisi hariçtir. Nested yasak yol bulunduğunda paket içerik üretmeden fail-closed olur. Production ZIP migration dosyalarını taşısa da Hostinger build/start akışı migration çalıştırmaz; canlı DB yalnız ayrı incremental paketle yükseltilir.
 
-## Hostinger yükleme akışı — bu turda uygulanmadı
+## DB-first Hostinger yükleme akışı
 
-1. Yerel kalite kapılarını ve ZIP içeriği doğrulamasını tamamla.
-2. hPanel Node.js Web App dağıtımında yeni ZIP'i seç.
-3. Node 24.x, kök `./` ve çıktı `.next` ayarlarını koru.
-4. Build komutunun `npm run build` üzerinden `next build --webpack` çalıştırdığını doğrula.
-5. Gerçek environment değerlerini yalnız kullanıcı hPanel'in güvenli alanına girer; eski token varsa yeni paket öncesi tam 16 ASCII alfanümerik rastgele değerle değiştirir. Cron değişkenlerini bu turda ekleme veya etkinleştirme.
-6. Dağıtım `Akım` olduktan sonra ana sayfa, liveness, yetkisiz readiness, yetkili readiness ve `/sw.js` başlıklarını HTTPS üzerinden doğrula.
-7. Runtime loglarında yalnız genel sonuç/correlation ID ara; raw DB hatası, parola, token veya Authorization değeri bulunmamalı.
+1. Proje dalının yerel kalite kapıları ve PR CI sonucu tamamlanır; Hostinger'ı tetikleyebilecek `main` birleştirmesi bekletilir.
+2. Canlı DB yedeği ve dokuz satırlı journal doğrulanır; `project` ile `work_task_project` tablolarının henüz bulunmadığı kontrol edilir.
+3. [Incremental migration runbook'u](./phpmyadmin-incremental-migration.md) ile yalnız `0009_projects` hedefe bağlı paketi üretilir, doğrulanır ve tek kez içe aktarılır.
+4. Exact başarı satırı, on journal satırı, iki yeni tablo ve iki `RESTRICT` foreign key doğrulanır.
+5. PR `main` dalına birleştirilir. Hostinger Git bağlantısı otomatik dağıtıyorsa yeni commitin tamamlanması beklenir; değilse aynı doğrulanmış kaynakla yeniden üretilen `dist/portal-pusula-hostinger.zip` hPanel'den yüklenir.
+6. Node 24.x, kök `./`, çıktı `.next` ve `npm run build` → `next build --webpack` ayarları korunur.
+7. Projeler V1 yeni environment değişkeni istemez. Mevcut secret/env değerleri değiştirilmez; cron değişkenleri eklenmez veya etkinleştirilmez.
+8. Dağıtım `Akım` olduktan sonra liveness/readiness, giriş, müşteri-sözleşme, proje ve görev-proje akışları doğrulanır.
+9. Runtime loglarında yalnız genel sonuç/correlation ID aranır; raw DB hatası, parola, token veya Authorization değeri bulunmamalıdır.
 
 ## MySQL readiness ayarları
 
@@ -62,15 +65,16 @@ Hostinger environment alanında gereken adlar:
 - `ADMIN_EMAIL`
 - `ADMIN_PASSWORD_HASH` — yeni değerlerde `auth:generate` çıktısındaki `$` içermeyen `scrypt:32768:8:1:<salt>:<key>` biçimi kullanılır; alana yalnız değer yazılır
 - `SESSION_SECRET`
+- `PORTAL_PUSULA_AUTH_STORAGE_MODE` — isteğe bağlı; varsayılan ve canlı kullanım `database`
 - `LOG_LEVEL` — isteğe bağlı, boşsa `info`
 
 Gerçek değerleri Codex okumaz, yazmaz veya sohbet/belgeye istemez. `DB_NAME`, `DB_USER`, `DB_PASSWORD` ve tam 16 karakterlik, yalnız ASCII `A-Z`/`a-z`/`0-9` içeren rastgele readiness token eksik veya biçim dışıysa sınır fail-closed çalışır. 15/17 karakter, boşluk, Türkçe/özel karakter ve semboller kabul edilmez.
 
 Hostinger'ın global `sql_mode` değeri paylaşımlı sağlayıcı ayarıdır. Portal Pusula bu değeri değiştirmez, `SET GLOBAL` yetkisi istemez ve global strict moda güvenmez. Uygulama havuzdan aldığı her bağlantıda, DB işi başlamadan önce exact canonical strict session modunu, UTC/InnoDB/integrity-check/`utf8mb4` sözleşmesini kurup geri okuyarak doğrular. Kurulum veya doğrulama başarısızsa bağlantı havuza dönmez; imha edilir ve ilgili endpoint genel fail-closed yanıt verir.
 
-Komut 3C kaynaklarında ayrıca `CRON_ENDPOINT_ENABLED` ve `CRON_BEARER_TOKEN` adları tanımlıdır; bunlar yalnız yerel, varsayılan kapalı aday içindir. Bu turda hPanel'e eklenmez. Aday ancak `CRON_ENDPOINT_ENABLED` exact `true`, cron token exact 43 base64url karakter ve readiness token'dan farklı olduğunda açılabilir. Exact secret doğrulaması, DB advisory lock, batch 10 ve 4 saniye deadline korunur. Hostinger cron'un exact `POST`, custom Authorization header ve güvenli secret saklama yeteneği; güvenli çağrı sıklığı; token rotasyon/iptal prosedürü canlı olarak kanıtlanmadan bu route etkinleştirilmez.
+Kaynakta ayrıca `CRON_ENDPOINT_ENABLED` ve `CRON_BEARER_TOKEN` adları tanımlıdır; bunlar varsayılan kapalı aday içindir. Bu sürümde hPanel'e eklenmez. Aday ancak `CRON_ENDPOINT_ENABLED` exact `true`, cron token exact 43 base64url karakter ve readiness token'dan farklı olduğunda açılabilir. Hostinger cron'un exact `POST`, custom Authorization header ve güvenli secret saklama yeteneği canlı olarak kanıtlanmadan bu route etkinleştirilmez.
 
-Komut 3C ile yalnız etkin adayda `CRON_MIN_INTERVAL_SECONDS` da zorunludur; leading zero/işaret/ondalık/exponent/whitespace/Unicode kabul etmeyen canonical `60..86400` saniye aralığı dışı fail-closed'dur. DB'deki `cron_dispatch_gate` process/restart'lar arasında son permit zamanını korur. Minimum aralık içinde kalan yetkili çağrı dispatch ve advisory lock çalıştırmadan, izin verilen çağrıyla aynı generic 202 yanıtını alır. Bu yerel sözleşme Hostinger cron yöntem/header/timezone/retry/overlap davranışını kanıtlamaz; üç cron değişkeni hPanel'e bu turda eklenmez.
+Yalnız etkin cron adayında `CRON_MIN_INTERVAL_SECONDS` da zorunludur; canonical `60..86400` saniye aralığı dışı fail-closed'dur. Bu sürümde üç cron değişkeni hPanel'e eklenmez.
 
 ## Readiness davranışı
 
@@ -87,7 +91,7 @@ Komut 3C ile yalnız etkin adayda `CRON_MIN_INTERVAL_SECONDS` da zorunludur; lea
 
 ## hCDN ve service worker
 
-Canlı v3'te hCDN, public `/sw.js` dosyasına Next `Cache-Control` ve `Service-Worker-Allowed` başlıklarını uygulamadı. Yeni paket public çakışmasını kaldırır ve aynı worker içeriğini Node Route Handler üzerinden sunar. Canlı kabulte şu başlıklar birlikte görülmelidir:
+Canlı kabulte `/sw.js` yanıtında şu başlıklar birlikte görülmelidir:
 
 - `Cache-Control: private, no-store, max-age=0, must-revalidate`
 - `Content-Type: application/javascript; charset=utf-8`
@@ -97,28 +101,17 @@ Canlı v3'te hCDN, public `/sw.js` dosyasına Next `Cache-Control` ve `Service-W
 
 ## Redeploy ve geri alma
 
-- Üç ZIP dağıtımından test dosyaları çıkarılmış v3 canlıda sağlam `Akım` sürümdür.
-- Güncel yerel paket artık `0001` platform tablolarını, bunlara forward-only CHECK constraint'leri ekleyen `0002` audit fix'ini, teknik `0003` cron gate tablosunu ve varsayılan kapalı cron route'unu taşır; bu nedenle önceki spike'ın basit redeploy'u olarak değerlendirilmez. Ayrı backup/restore kanıtı, migration onayı ve canlı değişiklik penceresi olmadan yüklenmez.
-- Ortak MariaDB session initializer ve fail-closed doğrulamasını içermeyen v3 ya da başka bir eski ZIP, güncel DB kullanan ortama rollback adayı değildir. Önceki kod ancak yeni şemayla uyumluluğu kanıtlanıp aynı session sözleşmesiyle yeniden paketlenerek tüm kalite ve canlı kabul kapılarından geçerse aday olabilir.
-- ZIP redeploy kanıtlandı, fakat secret-safe gerçek rollback/önceki sürüme dönüş yöntemi bulunmadığı için durum `BLOCKED`dır ve bu alt adımda PASS sayılmaz.
-- `/api/internal/cron/dispatch` kaynakta vardır fakat varsayılan kapalıdır; production job ve outbox registry'leri boştur. hPanel cron kaydı, cron secret'ı, gerçek handler veya dış adapter bu alt adımda yoktur.
-
-## Komut 3C canlı olmayan sınır
-
-Komut 3C kodlama turunda canlı Hostinger DB/migration, ZIP deploy, environment, cron, backup veya restore işlemi yapılmamıştır. Sonraki kullanıcı onaylı operasyon adımında plan-geneli manuel dosya + DB backup oluşturulmuş ve Portal Pusula readiness spike DB kapsamı panelde doğrulanmıştır. Bu boş kaynak ikinci disposable hedefe hatasız import edilerek 0 tablo/journal yok sonucu vermiş; şifreli yerel recovery kopyası ve ciphertext checksum'u doğrulanmıştır. Production write/restore başlatılmamıştır. Güncel Komut 3C şema/journal/veri restore'u yapılmamış ve `UNKNOWN` kalmıştır.
-
-- `0001_platform_job_outbox_audit.sql` yalnız `scheduled_job`, `job_run`, `outbox_event` ve `audit_event` tablolarını ekler; yalnız disposable MariaDB 11.4.8 üzerinde kanıtlanmıştır.
-- Immutable `0000`/`0001` değiştirilmemiştir. `0002_platform_state_constraints.sql` yeni tablo, kolon, domain/auth/finans nesnesi veya trigger eklemeden yalnız ileri yönlü named `CHECK` constraint'leri ekler: attempt sınırları, status/lease birlikteliği, `job_run` outcome/completion ilişkisi, audit actor allowlist'i, canonical lower-case UUID ve boşluksuz yazdırılabilir ASCII sözleşmesi.
-- `0002` yalnız disposable MariaDB'de clean migrate/no-op, gerçek constraint enforcement ve regresyon kapılarıyla kanıtlanır. Production ZIP içinde yer alır fakat Hostinger DB'ye uygulanmamış ve ZIP canlıya dağıtılmamıştır.
-- `0003_platform_cron_dispatch_gate.sql` yalnız `cron_dispatch_gate` teknik tablosunu ekler. Permit/suppression/concurrency/time invariant'ı disposable yerel MariaDB'de PASS'tir; canlı Hostinger migration veya scheduler PASS'i değildir.
-- Job/outbox claim, lease/fencing, retry/dead-letter, bounded catch-up, audit append ve transactional outbox davranışları yerel gerçek DB testlerinden geçmiştir. Bu, Hostinger DB migration PASS'i değildir.
-- Cron adayı yalnız exact `POST` + exact Bearer kabul eder; kapalı/yetkisiz durumda generic 404, DB/gate/dispatch hatasında generic 503, permit veya dayanıklı suppression durumunda aynı generic 202 verir. Batch 10, deadline 4 saniye, DB frekans kapısı ve DB adını açığa çıkarmayan nonblocking advisory lock kullanır. Yanıt semantiği [ADR-0002](./adr/0002-internal-endpoint-response-policy.md) ile bağlıdır.
-- Production registry ve adapter listeleri bilinçli olarak boştur; canlı iş veya dış etki yoktur.
-- [Ayrı hedefte readiness restore'u](./backup-restore.md) ve yerel şifreli recovery kopyası dar kapsamda `PASS`tir. Güncel toplam on iki tablolu (on bir uygulama + journal), yedi journal satırlı şema/veri restore'u; Hostinger migration; cron yöntem/header/secret ve gerçek scheduler davranışı; güvenli çağrı sıklığı; token rotasyonu; gerçek rollback ve manuel dead-letter/requeue prosedürü açık blocker olarak kalır. Plan-geneli manuel backup kapsamı `PANEL PASS`tir.
+- `0009_projects` additive'dir; DB-first aralığında eski uygulama çalışmayı sürdürür.
+- Migration başarıyla uygulandıktan sonra eski uygulamaya dönmek iki yeni tabloyu silmez; eski kod bu tabloları kullanmadığı için kısa süreli uygulama geri dönüşü şema açısından uyumludur.
+- MariaDB DDL transactional değildir. Exact başarı satırı alınmayan incremental paket yeniden çalıştırılmaz; hedef salt okunur incelenir ve gerekirse yeni forward-fix migration hazırlanır.
+- Önceki uygulama artefaktı yalnız secret-safe biçimde korunmuş, yeni şemayla uyumluluğu doğrulanmış ve aynı session güvenlik sözleşmesini taşıyorsa geri dönüş adayıdır.
+- `/api/internal/cron/dispatch` varsayılan kapalıdır; Projeler V1 dağıtımı cron kurulumu veya değişikliği yapmaz.
 
 ## Canlı kabul kontrolü
 
-- [ ] Yeni ZIP build'i `Akım` ve runtime hata sayısı 0.
+- [ ] `0009_projects` incremental importu exact başarı satırıyla tamamlandı.
+- [ ] Journal on satır; `project` ve `work_task_project` tabloları ile iki `RESTRICT` foreign key doğrulandı.
+- [ ] Git veya yeniden üretilmiş ZIP build'i `Akım` ve runtime hata sayısı 0.
 - [ ] Ana sayfa 200; public liveness minimal 200.
 - [ ] Readiness header olmadan ve yanlış header ile generic 404.
 - [ ] Doğru header + eksik/yanlış DB ayarında generic 503.
@@ -128,16 +121,13 @@ Komut 3C kodlama turunda canlı Hostinger DB/migration, ZIP deploy, environment,
 - [ ] PWA Cache Storage yalnız güvenli sürümlü allowlist'i içeriyor.
 - [ ] Güncel ZIP Node 24.x/npm 12 engines sözleşmesiyle build/start oluyor.
 - [ ] Güncel ZIP ortak MariaDB session initializer'ı içeriyor; global `sql_mode` değiştirilmeden her checkout'ta strict/UTC/InnoDB/integrity-check/`utf8mb4` doğrulanıyor.
-- [x] Backup boş Portal Pusula readiness DB'sini kapsıyor ve ayrı disposable hedefte 0 tablo/journal yok sonucu doğrulandı.
-- [ ] Backup güncel şemayı kapsıyor; toplam on iki tablo (on bir uygulama + journal), yedi journal satırı ve kontrollü veri ayrı hedefte doğrulandı.
-- [ ] `0001`/`0002`/`0003` migration journal/hash/şema kontrolleri onaylı pencerede geçiyor.
+- [ ] Migration öncesi güncel canlı DB yedeği ve hedef kimliği doğrulandı.
+- [ ] `/projeler` üzerinde proje oluşturma/düzenleme çalışıyor.
+- [ ] `/gorevler` üzerinde proje seçme, rozet ve filtreleme çalışıyor.
+- [ ] `/musteriler` sözleşme düzenleme modu kendiliğinden kapanmıyor ve kayıt tamamlanıyor.
 - [ ] Hostinger cron exact `POST` ve custom Authorization header'ı secret sızdırmadan destekliyor; timezone/retry/overlap ölçüldü.
 - [ ] Yetkili permit ile dayanıklı suppression aynı generic 202'yi veriyor; gerçek gate/DB arızası generic 503 kalıyor.
 - [ ] Secret-safe önceki uygulama sürümüne dönüş yolu tatbik edildi.
 - [ ] Rollback adayı initializer içermeyen eski artefakt değil; aynı session sözleşmesiyle yeniden üretilmiş ve şema uyumluluğu kanıtlanmış sürüm.
 
-Bu kontrol listesi güncel Komut 3C paketiyle canlı kanıtlanmadan maddeler Komut 3C PASS'i yapılamaz. Önceki spike'ın MySQL/hCDN PASS sonuçları tarihsel kanıt olarak korunur fakat güncel migration/ZIP/cron'a aktarılmaz. **DİLİM 0 GO: VERİLMEDİ.**
-
-Komut 3C sonrası durum özeti: Node engines ve yerel mimari/güvenlik/runbook kararları kayıtlıdır; güncel cron, migration ve deployment `UNKNOWN`; plan-geneli manuel backup kapsamı `PANEL PASS`; readiness-only boş kaynak restore'u `PASS`; Komut 3C şema/journal/veri restore'u `UNKNOWN`; rollback `BLOCKED` durumundadır.
-
-Komut 4 / auth için henüz HAZIR DEĞİL; Dilim 0 GO değildir.
+Kontrol listesi change window sırasında gerçek canlı sonuçlarla kapatılır. Bu belgenin güncellenmesi tek başına migration veya uygulama dağıtımı yapıldığı anlamına gelmez.

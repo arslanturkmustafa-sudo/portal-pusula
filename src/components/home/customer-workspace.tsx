@@ -3,6 +3,7 @@
 import {
   useEffect,
   useMemo,
+  useRef,
   useState,
   type FormEvent,
 } from "react";
@@ -354,6 +355,21 @@ function CustomerWorkspaceSession({
     useState<SaveState>("idle");
   const [customerError, setCustomerError] = useState<string | null>(null);
   const [isEditingCustomer, setIsEditingCustomer] = useState(false);
+  const onContractSavedRef = useRef(onContractSaved);
+  const onVisitsSavedRef = useRef(onVisitsSaved);
+  const contractCustomerIdRef = useRef(customer.id);
+  const contractLoadGenerationRef = useRef(0);
+  const contractInteractionRef = useRef<"creating" | "editing" | "idle">(
+    "idle",
+  );
+
+  useEffect(() => {
+    onContractSavedRef.current = onContractSaved;
+  }, [onContractSaved]);
+
+  useEffect(() => {
+    onVisitsSavedRef.current = onVisitsSaved;
+  }, [onVisitsSaved]);
 
   const contract = useMemo(
     () =>
@@ -364,7 +380,12 @@ function CustomerWorkspaceSession({
   );
 
   useEffect(() => {
-    if (!live) return;
+    if (contractCustomerIdRef.current !== customer.id) {
+      contractCustomerIdRef.current = customer.id;
+      contractInteractionRef.current = "idle";
+    }
+    const generation = ++contractLoadGenerationRef.current;
+    if (!live || contractInteractionRef.current !== "idle") return;
     const controller = new AbortController();
 
     void fetch(`/api/customers/${customer.id}/contracts`, {
@@ -379,6 +400,8 @@ function CustomerWorkspaceSession({
       .then((payload) => {
         const ordered = sortedContracts(payload.contracts ?? []);
         const selected = selectedContractFrom(ordered);
+        if (generation !== contractLoadGenerationRef.current) return;
+        if (contractInteractionRef.current !== "idle") return;
         if (selected) setPlanLoadState("loading");
         setContracts(ordered);
         setSelectedContractId(selected?.id ?? null);
@@ -388,19 +411,21 @@ function CustomerWorkspaceSession({
         if (selected) {
           setDraft(contractDraft(selected));
           setSelectedMonth(monthForContract(selected));
-          onContractSaved(selected);
+          onContractSavedRef.current(selected);
         } else {
           setDraft(emptyContractDraft());
+          contractInteractionRef.current = "creating";
         }
         setLoadState("ready");
       })
       .catch((error: unknown) => {
+        if (generation !== contractLoadGenerationRef.current) return;
         if (error instanceof DOMException && error.name === "AbortError") return;
         setLoadState("error");
       });
 
     return () => controller.abort();
-  }, [customer.id, live, onContractSaved]);
+  }, [customer.id, live]);
 
   useEffect(() => {
     const hasCompleteCustomer =
@@ -461,7 +486,7 @@ function CustomerWorkspaceSession({
       .then((payload) => {
         const loadedVisits = payload.monthPlan?.visits ?? [];
         setVisits(loadedVisits.map(visitDraft));
-        onVisitsSaved(loadedVisits);
+        onVisitsSavedRef.current(loadedVisits);
         setPlanError(null);
         setPlanLoadState("ready");
       })
@@ -471,7 +496,7 @@ function CustomerWorkspaceSession({
       });
 
     return () => controller.abort();
-  }, [contract, customer.id, live, onVisitsSaved, selectedMonth]);
+  }, [contract, customer.id, live, selectedMonth]);
 
   const financialPreview = useMemo(() => {
     const amount = Number(draft.monthlyFeeAmount.replace(",", "."));
@@ -500,6 +525,8 @@ function CustomerWorkspaceSession({
     if (planMutationPending) return;
     const selected = contracts.find((item) => item.id === contractId);
     if (!selected) return;
+    contractInteractionRef.current = "idle";
+    contractLoadGenerationRef.current += 1;
     setSelectedContractId(selected.id);
     setIsCreatingContract(false);
     setIsEditingContract(false);
@@ -516,6 +543,8 @@ function CustomerWorkspaceSession({
 
   function startNewContract() {
     if (planMutationPending) return;
+    contractLoadGenerationRef.current += 1;
+    contractInteractionRef.current = "creating";
     setIsCreatingContract(true);
     setIsEditingContract(false);
     setDraft(nextContractDraft(contracts));
@@ -529,6 +558,7 @@ function CustomerWorkspaceSession({
   }
 
   function cancelContractEdit() {
+    contractInteractionRef.current = "idle";
     if (isCreatingContract) {
       const selected = contracts.find((item) => item.id === selectedContractId);
       setIsCreatingContract(false);
@@ -680,6 +710,8 @@ function CustomerWorkspaceSession({
       setDraft(contractDraft(payload.contract));
       setContractSaveState("idle");
       setContractError(null);
+      contractLoadGenerationRef.current += 1;
+      contractInteractionRef.current = "idle";
       setIsEditingContract(false);
       setPeriodTouched(false);
       onContractSaved(selectedContractFrom(nextContracts) ?? payload.contract);
@@ -1185,6 +1217,7 @@ function CustomerWorkspaceSession({
                     <button
                       className="primary-action"
                       disabled={contractSaveState === "saving"}
+                      key="save-contract-changes"
                       type="submit"
                     >
                       {contractSaveState === "saving"
@@ -1197,11 +1230,15 @@ function CustomerWorkspaceSession({
                     <p className="saved-line">Sözleşme kaydı güncel.</p>
                     <button
                       className="text-action"
+                      key="start-contract-edit"
                       type="button"
-                      onClick={() => {
+                      onClick={(event) => {
+                        event.preventDefault();
                         setContractError(null);
                         setContractSaveState("idle");
                         setPeriodTouched(true);
+                        contractLoadGenerationRef.current += 1;
+                        contractInteractionRef.current = "editing";
                         setIsEditingContract(true);
                       }}
                     >

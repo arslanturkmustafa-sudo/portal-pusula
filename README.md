@@ -18,6 +18,10 @@ Kaynakta çalışan ilk dikey dilim şunları içerir:
 - sözleşme ve ziyaret yazmalarıyla aynı transaction içinde denetim kaydı;
 - sözleşme ayından sınır aylarda gün oranlı ve idempotent alacak üretme, geçmiş alacak açılışı ve kısmi tahsilat;
 - net/KDV/toplam tutar snapshot'ı, kalan bakiye ve vade durumunun finans ekranında hesaplanması;
+- günlük ziyaret ve toplantıların tek akışta görüldüğü günlük plan;
+- görev oluşturma, düzenleme, durum ve öncelik takibi yapılan Kanban çalışma alanı;
+- Mühendis Kafası, ByPusula, OptiPusula ve 7 Emlak Ajansı için proje portföyü oluşturma ve düzenleme;
+- görevleri projeye bağlama, proje rozetiyle gösterme ve projeye göre filtreleme;
 - PWA kabuğu, liveness/readiness ve mevcut güvenli platform altyapısı.
 
 Gider/kart, vergi tahmini ve otomatik aylık üretim sıradaki iş dilimleridir. Canlı ekranda henüz açılmayan alanlar veri varmış gibi gösterilmez.
@@ -75,8 +79,10 @@ Cron değişkenleri kaynakta varsayılan kapalı altyapı adayıdır; gerçek i�
 - `0005_consulting_contract_visits.sql`
 - `0006_receivables.sql`
 - `0007_user_account.sql`
+- `0008_work_tasks.sql`
+- `0009_projects.sql`
 
-Uygulanmış migration dosyası değiştirilmez; her düzeltme yeni ileri yönlü migration olur. `0004_customer.sql` müşteri tablosunu, `0005_consulting_contract_visits.sql` sözleşme ve aylık ziyaret tablolarını, `0006_receivables.sql` alacak ve tahsilat tablolarını, `0007_user_account.sql` ise uygulama içinden parola yönetilebilen yönetici hesabını ekler. Mevcut Hostinger veritabanına clean-only phpMyAdmin paketi tekrar yüklenmez; journal'ı bulunan ve SSH/npm erişimi olmayan hedefte [seçili incremental phpMyAdmin paketi](docs/phpmyadmin-incremental-migration.md) yalnız sıradaki migration'ı uygular.
+Uygulanmış migration dosyası değiştirilmez; her düzeltme yeni ileri yönlü migration olur. `0004_customer.sql` müşteri tablosunu, `0005_consulting_contract_visits.sql` sözleşme ve aylık ziyaret tablolarını, `0006_receivables.sql` alacak ve tahsilat tablolarını, `0007_user_account.sql` uygulama içinden parola yönetilebilen yönetici hesabını, `0008_work_tasks.sql` Kanban görevlerini, `0009_projects.sql` ise proje portföyü ile görev-proje bağını ekler. Mevcut Hostinger veritabanına clean-only phpMyAdmin paketi tekrar yüklenmez; journal'ı bulunan ve SSH/npm erişimi olmayan hedefte [seçili incremental phpMyAdmin paketi](docs/phpmyadmin-incremental-migration.md) yalnız sıradaki migration'ı uygular.
 
 ## Yerel geliştirme
 
@@ -106,11 +112,12 @@ npm run package:hostinger
 
 Canlı kabul sırası:
 
-1. Mevcut Hostinger hedefinde incremental phpMyAdmin paketiyle yalnız sıradaki migration'ı (`0006`) uygula ve exact başarı satırını doğrula.
-2. `ADMIN_EMAIL`, `ADMIN_PASSWORD_HASH` ve `SESSION_SECRET` değerlerini Hostinger environment alanına ekle.
-3. Güncel ZIP'i dağıt ve build'in `Akım` olmasını bekle.
-4. `/giris`, yetkisiz yönlendirme, yetkili giriş, müşteri, sözleşme, aylık ziyaret, alacak ve tahsilat akışını doğrula.
-5. Sorun çıkarsa yalnız ilgili sınırda hedefli test ve log incelemesi yap.
+1. Proje dalının kalite kapılarını ve PR CI sonucunu doğrula; otomatik Hostinger dağıtımını tetikleyebilecek `main` birleştirmesini henüz yapma.
+2. Canlı veritabanının güncel yedeğini doğrula; ardından yalnız `0009_projects` için üretilen hedefe bağlı incremental phpMyAdmin paketini bir kez uygula.
+3. Exact `PORTAL_PUSULA_INCREMENTAL_MIGRATION_OK` / `0009_projects` sonucunu, on journal satırını ve iki yeni tabloyu salt okunur doğrula.
+4. PR'ı `main` dalına birleştir; bağlı Git dağıtımını bekle veya aynı kaynakla yeniden üretilmiş güncel ZIP'i dağıt ve build'in `Akım` olmasını bekle.
+5. `/giris`, müşteri/sözleşme düzenleme, `/projeler` ve görev-proje seçme/filtreleme akışlarını doğrula.
+6. Sorun çıkarsa yalnız ilgili sınırda hedefli test ve log incelemesi yap; migration başarı satırı yoksa aynı paketi yeniden çalıştırma.
 
 ## Belgeler
 

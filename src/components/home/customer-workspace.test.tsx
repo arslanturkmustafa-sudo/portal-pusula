@@ -1,4 +1,5 @@
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -343,6 +344,13 @@ describe("CustomerWorkspace reliable date writes", () => {
     const startsOn = screen.getByLabelText("Başlangıç") as HTMLInputElement;
     const endsOn = screen.getByLabelText("Bitiş") as HTMLInputElement;
 
+    expect(requests).toHaveLength(0);
+    expect(startsOn).toBeEnabled();
+    expect(endsOn).toBeEnabled();
+    expect(
+      screen.getByRole("button", { name: "Değişiklikleri kaydet" }),
+    ).toBeInTheDocument();
+
     // This mirrors browser automation that changes the native control without
     // giving React state a chance to re-render before submit.
     setNativeInputValue(startsOn, "2026-03-01");
@@ -359,6 +367,389 @@ describe("CustomerWorkspace reliable date writes", () => {
       }),
       method: "PATCH",
       url: `/api/customers/${customerId}/contracts/${contractId}`,
+    });
+    expect(
+      await screen.findByRole("button", { name: "Sözleşmeyi düzenle" }),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps an existing contract editable when reporting callbacks change", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/contracts")) {
+        return jsonResponse({ contracts: [contract] });
+      }
+      if (url.includes("/month-plans/")) {
+        return jsonResponse({ monthPlan: { visits: [] } });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    const user = userEvent.setup();
+    vi.stubGlobal("fetch", fetchMock);
+    const { rerender } = render(
+      <CustomerWorkspace
+        customer={customer}
+        live
+        onContractSaved={vi.fn()}
+        onVisitsSaved={vi.fn()}
+      />,
+    );
+
+    await user.click(
+      await screen.findByRole("button", { name: "Sözleşmeyi düzenle" }),
+    );
+    expect(screen.getByLabelText("Başlangıç")).toBeEnabled();
+
+    rerender(
+      <CustomerWorkspace
+        customer={customer}
+        live
+        onContractSaved={vi.fn()}
+        onVisitsSaved={vi.fn()}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.filter(([input]) =>
+          String(input).endsWith("/contracts"),
+        ),
+      ).toHaveLength(1),
+    );
+    expect(screen.getByLabelText("Başlangıç")).toBeEnabled();
+    expect(
+      screen.getByRole("button", { name: "Değişiklikleri kaydet" }),
+    ).toBeInTheDocument();
+  });
+
+  it("does not let live mode changes close an active edit", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/contracts")) {
+        return jsonResponse({ contracts: [contract] });
+      }
+      if (url.includes("/month-plans/")) {
+        return jsonResponse({ monthPlan: { visits: [] } });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    const onContractSaved = vi.fn();
+    const onVisitsSaved = vi.fn();
+    const user = userEvent.setup();
+    vi.stubGlobal("fetch", fetchMock);
+    const { rerender } = render(
+      <CustomerWorkspace
+        customer={customer}
+        live
+        onContractSaved={onContractSaved}
+        onVisitsSaved={onVisitsSaved}
+      />,
+    );
+
+    await user.click(
+      await screen.findByRole("button", { name: "Sözleşmeyi düzenle" }),
+    );
+    rerender(
+      <CustomerWorkspace
+        customer={customer}
+        live={false}
+        onContractSaved={onContractSaved}
+        onVisitsSaved={onVisitsSaved}
+      />,
+    );
+    rerender(
+      <CustomerWorkspace
+        customer={customer}
+        live
+        onContractSaved={onContractSaved}
+        onVisitsSaved={onVisitsSaved}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.filter(([input]) =>
+          String(input).endsWith("/contracts"),
+        ),
+      ).toHaveLength(1),
+    );
+    expect(screen.getByLabelText("Başlangıç")).toBeEnabled();
+    expect(
+      screen.getByRole("button", { name: "Değişiklikleri kaydet" }),
+    ).toBeInTheDocument();
+  });
+
+  it("ignores a pre-edit contract response even after the edit is saved", async () => {
+    let contractRequestCount = 0;
+    let resolveLateResponse: ((response: Response) => void) | undefined;
+    const lateResponse = new Promise<Response>((resolve) => {
+      resolveLateResponse = resolve;
+    });
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const method = init?.method ?? "GET";
+        if (method === "GET" && url.endsWith("/contracts")) {
+          contractRequestCount += 1;
+          if (contractRequestCount === 2) return lateResponse;
+          return jsonResponse({ contracts: [contract] });
+        }
+        if (method === "GET" && url.includes("/month-plans/")) {
+          return jsonResponse({ monthPlan: { visits: [] } });
+        }
+        if (method === "PATCH" && url.endsWith(`/contracts/${contractId}`)) {
+          return jsonResponse({
+            contract: {
+              ...contract,
+              monthlyFeeAmount: "65000.0000",
+            },
+          });
+        }
+        throw new Error(`Unexpected request: ${method} ${url}`);
+      },
+    );
+    const onContractSaved = vi.fn();
+    const onVisitsSaved = vi.fn();
+    const user = userEvent.setup();
+    vi.stubGlobal("fetch", fetchMock);
+    const { rerender } = render(
+      <CustomerWorkspace
+        customer={customer}
+        live
+        onContractSaved={onContractSaved}
+        onVisitsSaved={onVisitsSaved}
+      />,
+    );
+
+    await screen.findByRole("button", { name: "Sözleşmeyi düzenle" });
+    rerender(
+      <CustomerWorkspace
+        customer={customer}
+        live={false}
+        onContractSaved={onContractSaved}
+        onVisitsSaved={onVisitsSaved}
+      />,
+    );
+    rerender(
+      <CustomerWorkspace
+        customer={customer}
+        live
+        onContractSaved={onContractSaved}
+        onVisitsSaved={onVisitsSaved}
+      />,
+    );
+    await waitFor(() => expect(contractRequestCount).toBe(2));
+
+    await user.click(
+      screen.getByRole("button", { name: "Sözleşmeyi düzenle" }),
+    );
+    const feeInput = screen.getByLabelText("Aylık ücret");
+    await user.clear(feeInput);
+    await user.type(feeInput, "65000");
+    await user.click(
+      screen.getByRole("button", { name: "Değişiklikleri kaydet" }),
+    );
+    await screen.findByRole("button", { name: "Sözleşmeyi düzenle" });
+
+    await act(async () => {
+      resolveLateResponse?.(jsonResponse({ contracts: [contract] }));
+      await lateResponse;
+      await Promise.resolve();
+    });
+    expect(feeInput).toHaveValue("65000");
+    expect(feeInput).toBeDisabled();
+  });
+
+  it("does not start a contract refresh while an edit is being saved", async () => {
+    let contractRequestCount = 0;
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const method = init?.method ?? "GET";
+        if (method === "GET" && url.endsWith("/contracts")) {
+          contractRequestCount += 1;
+          return jsonResponse({ contracts: [contract] });
+        }
+        if (method === "GET" && url.includes("/month-plans/")) {
+          return jsonResponse({ monthPlan: { visits: [] } });
+        }
+        if (method === "PATCH" && url.endsWith(`/contracts/${contractId}`)) {
+          return jsonResponse({
+            contract: {
+              ...contract,
+              monthlyFeeAmount: "65000.0000",
+            },
+          });
+        }
+        throw new Error(`Unexpected request: ${method} ${url}`);
+      },
+    );
+    const onContractSaved = vi.fn();
+    const onVisitsSaved = vi.fn();
+    const user = userEvent.setup();
+    vi.stubGlobal("fetch", fetchMock);
+    const { rerender } = render(
+      <CustomerWorkspace
+        customer={customer}
+        live
+        onContractSaved={onContractSaved}
+        onVisitsSaved={onVisitsSaved}
+      />,
+    );
+
+    await user.click(
+      await screen.findByRole("button", { name: "Sözleşmeyi düzenle" }),
+    );
+    const feeInput = screen.getByLabelText("Aylık ücret");
+    await user.clear(feeInput);
+    await user.type(feeInput, "65000");
+
+    rerender(
+      <CustomerWorkspace
+        customer={customer}
+        live={false}
+        onContractSaved={onContractSaved}
+        onVisitsSaved={onVisitsSaved}
+      />,
+    );
+    rerender(
+      <CustomerWorkspace
+        customer={customer}
+        live
+        onContractSaved={onContractSaved}
+        onVisitsSaved={onVisitsSaved}
+      />,
+    );
+
+    expect(contractRequestCount).toBe(1);
+    await user.click(
+      screen.getByRole("button", { name: "Değişiklikleri kaydet" }),
+    );
+    await screen.findByRole("button", { name: "Sözleşmeyi düzenle" });
+    expect(screen.getByLabelText("Aylık ücret")).toHaveValue("65000");
+    expect(contractRequestCount).toBe(1);
+  });
+
+  it("keeps a first-contract draft when live mode changes", async () => {
+    let contractRequestCount = 0;
+    const customerWithoutContract = {
+      ...otherCustomer,
+      contactNote: "İlk sözleşme hazırlanıyor.",
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/contracts")) {
+        contractRequestCount += 1;
+        return jsonResponse({ contracts: [] });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    const onContractSaved = vi.fn();
+    const onVisitsSaved = vi.fn();
+    const user = userEvent.setup();
+    vi.stubGlobal("fetch", fetchMock);
+    const { rerender } = render(
+      <CustomerWorkspace
+        customer={customerWithoutContract}
+        live
+        onContractSaved={onContractSaved}
+        onVisitsSaved={onVisitsSaved}
+      />,
+    );
+
+    await screen.findByRole("button", { name: "Sözleşmeyi kaydet" });
+    const feeInput = screen.getByLabelText("Aylık ücret");
+    await user.clear(feeInput);
+    await user.type(feeInput, "72500");
+
+    rerender(
+      <CustomerWorkspace
+        customer={customerWithoutContract}
+        live={false}
+        onContractSaved={onContractSaved}
+        onVisitsSaved={onVisitsSaved}
+      />,
+    );
+    rerender(
+      <CustomerWorkspace
+        customer={customerWithoutContract}
+        live
+        onContractSaved={onContractSaved}
+        onVisitsSaved={onVisitsSaved}
+      />,
+    );
+
+    expect(contractRequestCount).toBe(1);
+    expect(screen.getByLabelText("Aylık ücret")).toHaveValue("72500");
+    expect(
+      screen.getByRole("button", { name: "Sözleşmeyi kaydet" }),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps the current contract load pending when a stale response finishes", async () => {
+    let contractRequestCount = 0;
+    let resolveStaleResponse: ((response: Response) => void) | undefined;
+    let resolveCurrentResponse: ((response: Response) => void) | undefined;
+    const staleResponse = new Promise<Response>((resolve) => {
+      resolveStaleResponse = resolve;
+    });
+    const currentResponse = new Promise<Response>((resolve) => {
+      resolveCurrentResponse = resolve;
+    });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/contracts")) {
+        contractRequestCount += 1;
+        return contractRequestCount === 1 ? staleResponse : currentResponse;
+      }
+      if (url.includes("/month-plans/")) {
+        return jsonResponse({ monthPlan: { visits: [] } });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    const onContractSaved = vi.fn();
+    const onVisitsSaved = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const { rerender } = render(
+      <CustomerWorkspace
+        customer={customer}
+        live
+        onContractSaved={onContractSaved}
+        onVisitsSaved={onVisitsSaved}
+      />,
+    );
+
+    rerender(
+      <CustomerWorkspace
+        customer={customer}
+        live={false}
+        onContractSaved={onContractSaved}
+        onVisitsSaved={onVisitsSaved}
+      />,
+    );
+    rerender(
+      <CustomerWorkspace
+        customer={customer}
+        live
+        onContractSaved={onContractSaved}
+        onVisitsSaved={onVisitsSaved}
+      />,
+    );
+    await waitFor(() => expect(contractRequestCount).toBe(2));
+
+    await act(async () => {
+      resolveStaleResponse?.(jsonResponse({ contracts: [] }));
+      await staleResponse;
+      await Promise.resolve();
+    });
+    expect(
+      screen.getByText("Sözleşme bilgileri yükleniyor…"),
+    ).toBeInTheDocument();
+
+    await act(async () => {
+      resolveCurrentResponse?.(jsonResponse({ contracts: [contract] }));
+      await currentResponse;
+      await Promise.resolve();
     });
     expect(
       await screen.findByRole("button", { name: "Sözleşmeyi düzenle" }),

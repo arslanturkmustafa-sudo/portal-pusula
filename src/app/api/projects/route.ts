@@ -4,14 +4,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
 import {
-  TaskAssigneeNotFoundError,
-  TaskCustomerNotFoundError,
-  TaskNotFoundError,
-  TaskProjectNotFoundError,
-  TaskVersionConflictError,
-  updateTask,
-  updateTaskInputSchema,
-} from "@/features/tasks";
+  createProject,
+  createProjectInputSchema,
+  listProjects,
+  ProjectShortCodeConflictError,
+} from "@/features/projects";
 import {
   authenticateAdminRequest,
   type AuthenticatedAdmin,
@@ -21,16 +18,11 @@ import { getPlatformDatabasePool } from "@/platform/database/mysql-platform";
 import { correlationIdFromHeaders } from "@/platform/http/correlation-id";
 import { requestLogger } from "@/platform/logging/logger";
 import { safeMySqlErrorCode } from "@/platform/logging/mysql-error-code";
-import { PlatformInputError } from "@/platform/validation/canonical-identifiers";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-const MAX_BODY_BYTES = 16_384;
-
-type TaskRouteContext = Readonly<{
-  params: Promise<{ id: string }>;
-}>;
+const MAX_BODY_BYTES = 32_768;
 
 function json(body: unknown, status = 200): NextResponse {
   const response = NextResponse.json(body, { status });
@@ -41,18 +33,19 @@ function json(body: unknown, status = 200): NextResponse {
   return response;
 }
 
+function databasePool() {
+  return getPlatformDatabasePool(getDatabaseProbeEnvironment());
+}
+
 function sameOrigin(request: NextRequest): boolean {
   const originHeader = request.headers.get("origin");
   try {
     if (originHeader === null) return false;
-
     const origin = new URL(originHeader);
     const requestUrl = new URL(request.url);
     if (origin.origin === requestUrl.origin) return true;
-
     const host = request.headers.get("host")?.trim().toLowerCase();
     if (!host || origin.host !== host) return false;
-
     const forwardedProtocol = request.headers
       .get("x-forwarded-proto")
       ?.split(",", 1)[0]
@@ -94,10 +87,21 @@ function actorId(principal: AuthenticatedAdmin): string | undefined {
   return principal.kind === "account" ? principal.accountId : undefined;
 }
 
-export async function PATCH(
-  request: NextRequest,
-  context: TaskRouteContext,
-): Promise<NextResponse> {
+export async function GET(request: NextRequest): Promise<NextResponse> {
+  if (!(await authenticateAdminRequest(request))) {
+    return json({ status: "unauthorized" }, 401);
+  }
+  if ([...request.nextUrl.searchParams].length > 0) {
+    return json({ status: "validation_error" }, 400);
+  }
+  try {
+    return json({ projects: await listProjects(databasePool()) });
+  } catch {
+    return json({ status: "service_unavailable" }, 503);
+  }
+}
+
+export async function POST(request: NextRequest): Promise<NextResponse> {
   const principal = await authenticateAdminRequest(request);
   if (!principal) return json({ status: "unauthorized" }, 401);
   if (!sameOrigin(request)) return json({ status: "forbidden" }, 403);
@@ -107,47 +111,28 @@ export async function PATCH(
 
   const correlationId = correlationIdFromHeaders(request.headers);
   try {
-    const { id } = await context.params;
-    const input = updateTaskInputSchema.parse(await readBody(request));
-    const task = await updateTask(
-      getPlatformDatabasePool(getDatabaseProbeEnvironment()),
-      id,
-      input,
-      { actorId: actorId(principal), correlationId },
-    );
-    return json({ task });
+    const input = createProjectInputSchema.parse(await readBody(request));
+    const project = await createProject(databasePool(), input, {
+      actorId: actorId(principal),
+      correlationId,
+    });
+    return json({ project }, 201);
   } catch (error) {
-    if (
-      error instanceof z.ZodError ||
-      error instanceof SyntaxError ||
-      error instanceof PlatformInputError
-    ) {
+    if (error instanceof z.ZodError || error instanceof SyntaxError) {
       return json({ status: "validation_error" }, 400);
     }
-    if (error instanceof TaskNotFoundError) {
-      return json({ status: "task_not_found" }, 404);
-    }
-    if (error instanceof TaskCustomerNotFoundError) {
-      return json({ status: "customer_not_found" }, 404);
-    }
-    if (error instanceof TaskAssigneeNotFoundError) {
-      return json({ status: "assignee_not_found" }, 404);
-    }
-    if (error instanceof TaskProjectNotFoundError) {
-      return json({ status: "project_not_found" }, 404);
-    }
-    if (error instanceof TaskVersionConflictError) {
-      return json({ status: "version_conflict" }, 409);
+    if (error instanceof ProjectShortCodeConflictError) {
+      return json({ status: "short_code_conflict" }, 409);
     }
     const mysqlErrorCode = safeMySqlErrorCode(error);
     requestLogger(correlationId).error(
       {
-        event: "task.api.database_failed",
-        method: "PATCH",
+        event: "project.api.database_failed",
+        method: "POST",
         mysqlErrorCode,
-        pathname: "/api/tasks/[id]",
+        pathname: "/api/projects",
       },
-      `Task API database operation failed: ${mysqlErrorCode}`,
+      `Project API database operation failed: ${mysqlErrorCode}`,
     );
     return json({ status: "service_unavailable" }, 503);
   }
