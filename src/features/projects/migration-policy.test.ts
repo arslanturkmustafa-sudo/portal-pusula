@@ -39,10 +39,9 @@ describe("project migration policy", () => {
     const journal = JSON.parse(
       readFileSync(resolve(root, "drizzle/meta/_journal.json"), "utf8"),
     ) as { entries: Array<{ idx: number; tag: string }> };
-    expect(journal.entries.at(-1)).toMatchObject({
-      idx: 9,
-      tag: "0009_projects",
-    });
+    expect(
+      journal.entries.find((entry) => entry.tag === "0009_projects"),
+    ).toMatchObject({ idx: 9, tag: "0009_projects" });
 
     const snapshot = JSON.parse(
       readFileSync(resolve(root, "drizzle/meta/0009_snapshot.json"), "utf8"),

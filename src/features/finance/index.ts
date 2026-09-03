@@ -2,4 +2,8 @@ export * from "./money";
 export * from "./period";
 export * from "./repository";
 export * from "./service";
+export * from "./card-plan";
+export * from "./spending-repository";
+export * from "./spending-service";
+export * from "./spending-validation";
 export * from "./validation";

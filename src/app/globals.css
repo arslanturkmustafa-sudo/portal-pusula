@@ -2654,3 +2654,397 @@ button, a { color: inherit; }
   .project-form-actions button,
   .project-dossier-actions button { min-height: 44px; }
 }
+
+/* Finans alt sayfaları: gider ve kart defteri */
+.finance-subnav {
+  min-height: 58px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border-bottom: 1px solid var(--ink);
+}
+.finance-subnav a {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.75rem 0.9rem;
+  border-right: 1px solid var(--line-strong);
+  color: var(--ink-soft);
+  text-decoration: none;
+}
+.finance-subnav a:first-child { padding-left: 0; }
+.finance-subnav a:last-child { border-right: 0; }
+.finance-subnav a:hover { background: var(--sheet-soft); color: var(--ink); }
+.finance-subnav a.is-current {
+  box-shadow: inset 0 -4px 0 var(--terracotta);
+  color: var(--ink);
+}
+.finance-subnav a > span {
+  flex: 0 0 auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.58rem;
+}
+.finance-subnav a > strong {
+  overflow-wrap: anywhere;
+  font-size: 0.7rem;
+}
+
+.expense-workspace,
+.card-plan-workspace { min-width: 0; padding-bottom: 2.2rem; }
+.expense-command-bar {
+  min-height: 112px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1.5rem;
+  padding: 1.5rem 0 1rem;
+}
+.expense-command-bar h2,
+.card-register-heading h3,
+.card-plan-heading h3 {
+  margin: 0;
+  font-family: Georgia, "Times New Roman", serif;
+  font-weight: 500;
+}
+.expense-command-bar h2 { font-size: clamp(1.8rem, 3vw, 2.65rem); }
+.expense-command-bar > div > p:last-child {
+  max-width: 620px;
+  margin: 0.55rem 0 0;
+  color: var(--ink-soft);
+  font-size: 0.72rem;
+  line-height: 1.5;
+}
+.expense-summary { border-top: 1px solid var(--ink); }
+.expense-entry,
+.card-entry { border-top: 0; }
+.expense-form textarea,
+.card-form textarea {
+  width: 100%;
+  padding: 0.48rem 0.58rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 0;
+  background: var(--sheet);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.7rem;
+  line-height: 1.5;
+  resize: vertical;
+}
+.expense-live-total {
+  margin: 1rem 0 0;
+  padding-top: 0.7rem;
+  border-top: 1px solid var(--line-strong);
+}
+.expense-live-total dt {
+  color: var(--ink-soft);
+  font-size: 0.58rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.expense-live-total dd {
+  margin: 0.25rem 0 0;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.25rem;
+}
+.expense-toolbar {
+  display: grid;
+  grid-template-columns: minmax(138px, 0.6fr) minmax(170px, 0.9fr) minmax(150px, 0.7fr) minmax(210px, 1.4fr);
+  gap: 0.7rem;
+  padding: 1rem 0;
+  border-bottom: 1px solid var(--line-strong);
+}
+.expense-toolbar label,
+.card-plan-filters label { min-width: 0; }
+.expense-toolbar label > span,
+.card-plan-filters label > span {
+  display: block;
+  margin-bottom: 0.27rem;
+  color: var(--ink-soft);
+  font-size: 0.58rem;
+  font-weight: 700;
+}
+.expense-toolbar input,
+.expense-toolbar select,
+.card-plan-filters input,
+.card-plan-filters select {
+  width: 100%;
+  min-height: 38px;
+  padding: 0.42rem 0.55rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 0;
+  background: var(--sheet);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.68rem;
+}
+.expense-table-wrap { margin-top: 0; }
+.expense-table td:nth-child(2) strong,
+.expense-table td:nth-child(2) small,
+.expense-table td:nth-child(7) strong,
+.expense-table td:nth-child(7) small { display: block; }
+.expense-table td:nth-child(2) small,
+.expense-table td:nth-child(7) small {
+  max-width: 250px;
+  margin-top: 0.2rem;
+  overflow: hidden;
+  color: var(--ink-soft);
+  font-size: 0.58rem;
+  text-overflow: ellipsis;
+}
+.expense-table tr.is-voided { color: var(--ink-soft); text-decoration-color: var(--line-strong); }
+.expense-table tr.is-voided td:not(:last-child) { text-decoration: line-through; }
+.expense-row-actions,
+.card-register-actions { display: flex; gap: 0.4rem; }
+.expense-row-actions button,
+.card-register-actions button,
+.card-payment-toggle,
+.finance-workspace-message button {
+  min-height: 44px;
+  padding: 0 0.55rem;
+  border: 1px solid var(--line-strong);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.62rem;
+  font-weight: 700;
+}
+.expense-row-actions button:hover,
+.card-register-actions button:hover,
+.card-payment-toggle:hover,
+.finance-workspace-message button:hover { background: var(--sheet-soft); }
+.expense-row-actions button:disabled,
+.card-register-actions button:disabled,
+.card-payment-toggle:disabled { cursor: not-allowed; opacity: 0.5; }
+.finance-workspace-message {
+  min-height: 62px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+  margin: 0;
+  padding: 0.8rem 0;
+  border-bottom: 1px solid var(--line-strong);
+  color: var(--ink-soft);
+  font-size: 0.7rem;
+}
+.finance-workspace-message.is-error { color: #79351f; }
+
+.card-register { border-bottom: 1px solid var(--ink); }
+.card-register-heading,
+.card-plan-heading {
+  min-height: 76px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 0 0.8rem;
+  border-bottom: 1px solid var(--ink);
+}
+.card-register-heading h3,
+.card-plan-heading h3 { font-size: 1.35rem; }
+.card-register-heading > p {
+  max-width: 360px;
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 0.65rem;
+  line-height: 1.45;
+  text-align: right;
+}
+.card-register-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.card-register-list > li {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(170px, 0.85fr) minmax(260px, 1.4fr) auto;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 0.9rem;
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+.card-register-list > li:nth-child(even) { border-right: 0; }
+.card-register-identity {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 0.65rem;
+}
+.card-register-identity > span {
+  padding: 0.42rem 0.5rem;
+  border: 1px solid var(--forest);
+  background: var(--forest);
+  color: var(--sheet);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.56rem;
+  white-space: nowrap;
+}
+.card-register-identity strong,
+.card-register-identity small { display: block; overflow-wrap: anywhere; }
+.card-register-identity strong { font-size: 0.72rem; }
+.card-register-identity small { margin-top: 0.2rem; color: var(--ink-soft); font-size: 0.58rem; }
+.card-register-list dl {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0;
+}
+.card-register-list dl > div { min-width: 0; padding: 0 0.55rem; border-right: 1px solid var(--line); }
+.card-register-list dl > div:last-child { border-right: 0; }
+.card-register-list dt { color: var(--ink-soft); font-size: 0.55rem; font-weight: 700; }
+.card-register-list dd { overflow-wrap: anywhere; margin: 0.22rem 0 0; font-size: 0.65rem; }
+.card-register-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.62rem;
+  font-weight: 700;
+}
+.card-register-status::before {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--line-strong);
+  content: "";
+}
+.card-register-status.is-active::before { background: #47745f; }
+.card-register-actions { grid-column: 1 / -1; justify-content: flex-end; }
+.card-register-empty {
+  min-height: 112px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  color: var(--ink-soft);
+  font-size: 0.72rem;
+}
+.card-payment-plan { padding-top: 0.6rem; }
+.card-plan-filters { display: grid; grid-template-columns: repeat(2, minmax(150px, 1fr)); gap: 0.6rem; }
+.card-plan-summary { margin-top: 0.8rem; }
+.card-plan-table-wrap { margin-top: 1rem; }
+.card-installment-status.is-overdue { color: #9b3f25; }
+.card-installment-status.is-overdue::before { background: var(--terracotta); }
+.card-installment-status.is-paid::before { background: #47745f; }
+.card-installment-status.is-planned::before { background: #b58a38; }
+.card-payment-editor {
+  min-width: 188px;
+  display: grid;
+  gap: 0.45rem;
+}
+.card-payment-editor label > span {
+  display: block;
+  margin-bottom: 0.2rem;
+  color: var(--ink-soft);
+  font-size: 0.58rem;
+  font-weight: 700;
+}
+.card-payment-editor input {
+  width: 100%;
+  min-height: 44px;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 0;
+  background: var(--sheet);
+  color: var(--ink);
+  font: inherit;
+}
+.card-payment-editor > div { display: flex; gap: 0.35rem; }
+.card-payment-editor > div > button { flex: 1; }
+
+@media (max-width: 1100px) {
+  .card-register-list { grid-template-columns: 1fr; }
+  .card-register-list > li { border-right: 0; }
+}
+
+@media (max-width: 760px) {
+  .finance-subnav { grid-template-columns: 0.75fr 0.75fr 1.5fr; }
+  .finance-subnav a { padding-right: 0.5rem; padding-left: 0.5rem; }
+  .finance-subnav a:first-child { padding-left: 0.5rem; }
+  .expense-command-bar { align-items: stretch; flex-direction: column; gap: 0.9rem; }
+  .expense-command-bar .primary-action { width: 100%; }
+  .expense-toolbar { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .expense-search { grid-column: 1 / -1; }
+  .card-register-heading,
+  .card-plan-heading { align-items: stretch; flex-direction: column; }
+  .card-register-heading > p { max-width: none; text-align: left; }
+  .card-register-list > li { grid-template-columns: 1fr auto; }
+  .card-register-list dl { grid-column: 1 / -1; }
+  .card-plan-filters { width: 100%; }
+  .expense-table thead,
+  .card-plan-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .expense-table,
+  .expense-table tbody,
+  .expense-table tr,
+  .expense-table td,
+  .card-plan-table,
+  .card-plan-table tbody,
+  .card-plan-table tr,
+  .card-plan-table td { display: block; width: 100%; }
+  .expense-table tr,
+  .card-plan-table tr {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding: 0.7rem 0;
+    border-top: 1px solid var(--line-strong);
+  }
+  .expense-table td,
+  .card-plan-table td {
+    display: grid;
+    grid-template-columns: minmax(78px, 0.7fr) minmax(0, 1fr);
+    gap: 0.45rem;
+    padding: 0.38rem 0.45rem;
+    border: 0;
+    white-space: normal;
+  }
+  .expense-table td::before,
+  .card-plan-table td::before {
+    color: var(--ink-soft);
+    content: attr(data-label);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.55rem;
+    text-transform: uppercase;
+  }
+  .expense-table .empty-row,
+  .card-plan-table .empty-row { grid-column: 1 / -1; display: block; }
+}
+
+@media (max-width: 480px) {
+  .finance-subnav { display: flex; overflow-x: auto; overscroll-behavior-x: contain; }
+  .finance-subnav a { min-width: max-content; min-height: 52px; }
+  .expense-toolbar,
+  .card-plan-filters { grid-template-columns: 1fr; }
+  .expense-toolbar > *,
+  .expense-search { grid-column: 1; }
+  .expense-toolbar input,
+  .expense-toolbar select,
+  .card-plan-filters input,
+  .card-plan-filters select { min-height: 44px; }
+  .finance-form input,
+  .finance-form select,
+  .finance-form-actions button,
+  .expense-row-actions button,
+  .card-payment-toggle,
+  .finance-workspace-message button { min-height: 44px; }
+  .card-register-list > li { grid-template-columns: 1fr; padding-right: 0; padding-left: 0; }
+  .card-register-status { grid-column: 1; }
+  .card-register-list dl { grid-column: 1; grid-template-columns: 1fr; }
+  .card-register-list dl > div { padding: 0.55rem 0; border-right: 0; border-bottom: 1px solid var(--line); }
+  .card-register-actions { grid-column: 1; }
+  .card-register-actions button { min-height: 44px; flex: 1; }
+  .expense-table tr,
+  .card-plan-table tr { grid-template-columns: 1fr; }
+  .expense-table td,
+  .card-plan-table td { grid-column: 1; }
+}

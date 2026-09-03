@@ -30,6 +30,9 @@ const userAccountTable = "user_account";
 const workTaskTable = "work_task";
 const projectTable = "project";
 const workTaskProjectTable = "work_task_project";
+const creditCardTable = "credit_card";
+const expenseTable = "expense";
+const creditCardInstallmentTable = "credit_card_installment";
 const platformTables = [
   "audit_event",
   "job_run",
@@ -48,6 +51,9 @@ const allMigratedPlatformTables = [
   workTaskTable,
   projectTable,
   workTaskProjectTable,
+  creditCardTable,
+  expenseTable,
+  creditCardInstallmentTable,
 ] as const;
 const repositoryRoot = process.cwd();
 const migrationLockWaitTimeoutMs = 5_000;
@@ -319,6 +325,9 @@ async function waitForBlockedMigrationRunners(
 async function resetKnownMigrationArtifacts(pool: Pool): Promise<void> {
   // These identifiers are compile-time constants and this suite is enabled only
   // for the disposable MariaDB provisioned by scripts/test-mariadb.mjs.
+  await pool.query(`DROP TABLE IF EXISTS \`${creditCardInstallmentTable}\``);
+  await pool.query(`DROP TABLE IF EXISTS \`${expenseTable}\``);
+  await pool.query(`DROP TABLE IF EXISTS \`${creditCardTable}\``);
   await pool.query(`DROP TABLE IF EXISTS \`${workTaskProjectTable}\``);
   await pool.query(`DROP TABLE IF EXISTS \`${workTaskTable}\``);
   await pool.query(`DROP TABLE IF EXISTS \`${projectTable}\``);
@@ -540,7 +549,7 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
 
     it("creates the complete schema and preserves the core platform metadata contracts", async () => {
       const [tableRows] = await pool.query<RowDataPacket[]>("SHOW TABLES");
-      expect(tableRows).toHaveLength(16);
+      expect(tableRows).toHaveLength(19);
 
       const [statusRows] = await pool.execute<PlatformTableStatusRow[]>(
         `SELECT TABLE_NAME, ENGINE, TABLE_COLLATION
@@ -913,7 +922,7 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
       ]);
     });
 
-    it("records the immutable 0000 through 0009 migration hash chain", async () => {
+    it("records the immutable 0000 through 0010 migration hash chain", async () => {
       const [rows] = await pool.query<MigrationRow[]>(
         `SELECT id, hash, created_at FROM \`${migrationTable}\` ORDER BY id`,
       );
@@ -968,7 +977,117 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
           hash: "86e1b6730d77d1e5d70ed011a0073926a1704b14940fa22c12bce94ae9b3d8f2",
           id: 10,
         },
+        {
+          created_at: 1788428596372,
+          hash: "1a2d0d64e14138d940fa2d6f4e56561b16ad06c7a63b1be6e63d6073c0c0c629",
+          id: 11,
+        },
       ]);
+    });
+
+    it("enforces expense and materialized card-plan storage invariants", async () => {
+      const connection = await pool.getConnection();
+      const projectId = "10000000-0000-4000-8000-000000000001";
+      const cardId = "20000000-0000-4000-8000-000000000002";
+      const cardOperationKey = "30000000-0000-4000-8000-000000000003";
+      const expenseId = "40000000-0000-4000-8000-000000000004";
+      const expenseOperationKey = "50000000-0000-4000-8000-000000000005";
+
+      try {
+        await connection.beginTransaction();
+        await connection.execute(
+          `INSERT INTO project
+             (id, display_name, short_code, project_type, status)
+           VALUES (?, 'Finans migration testi', 'FINANCE_TEST', 'internal', 'active')`,
+          [projectId],
+        );
+        await connection.execute(
+          `INSERT INTO credit_card
+             (id, client_operation_key, display_name, bank_name, last_four,
+              statement_closing_day, payment_due_day, credit_limit_amount)
+           VALUES (?, ?, 'İş kartı', 'Test Bankası', '1234', 20, 5, ?)`,
+          [cardId, cardOperationKey, "123456.7890"],
+        );
+        await connection.execute(
+          `INSERT INTO expense
+             (id, client_operation_key, project_id, credit_card_id, incurred_on,
+              category, description, vendor_name, document_type,
+              document_number, payment_method, net_amount, vat_amount,
+              total_amount, currency, installment_count)
+           VALUES (?, ?, ?, ?, '2026-09-03', 'rent', 'Ofis gideri',
+                   'Örnek işletme', 'invoice', 'FAT-1', 'credit_card',
+                   ?, ?, ?, 'TRY', 2)`,
+          [
+            expenseId,
+            expenseOperationKey,
+            projectId,
+            cardId,
+            "100.1234",
+            "20.0246",
+            "120.1480",
+          ],
+        );
+        await connection.execute(
+          `INSERT INTO credit_card_installment
+             (id, expense_id, installment_number, installment_count,
+              statement_month, due_on, amount, status)
+           VALUES ('60000000-0000-4000-8000-000000000006', ?, 1, 2,
+                   '2026-09-01', '2026-10-05', ?, 'planned')`,
+          [expenseId, "60.0740"],
+        );
+
+        await expectDuplicateRejected(
+          connection.execute(
+            `INSERT INTO credit_card
+               (id, client_operation_key, display_name,
+                statement_closing_day, payment_due_day)
+             VALUES ('70000000-0000-4000-8000-000000000007', ?,
+                     'Tekrar kart', 20, 5)`,
+            [cardOperationKey],
+          ),
+        );
+        await expectDatabaseWriteRejected(
+          connection.execute(
+            `INSERT INTO credit_card_installment
+               (id, expense_id, installment_number, installment_count,
+                statement_month, due_on, amount, status)
+             VALUES ('80000000-0000-4000-8000-000000000008', ?, 3, 2,
+                     '2026-10-01', '2026-11-05', 60.0740, 'planned')`,
+            [expenseId],
+          ),
+        );
+        await expectDatabaseWriteRejected(
+          connection.execute(
+            `UPDATE expense
+                SET status = 'voided', void_reason = ' ',
+                    voided_at_utc = updated_at_utc
+              WHERE id = ?`,
+            [expenseId],
+          ),
+        );
+        await expectDatabaseWriteRejected(
+          connection.execute(
+            `UPDATE expense
+                SET document_type = NULL, document_number = 'ORPHAN-1'
+              WHERE id = ?`,
+            [expenseId],
+          ),
+        );
+        await expectDatabaseWriteRejected(
+          connection.execute("DELETE FROM credit_card WHERE id = ?", [cardId]),
+        );
+
+        const [moneyRows] = await connection.execute<RowDataPacket[]>(
+          `SELECT CAST(total_amount AS CHAR) AS total_amount
+             FROM expense
+            WHERE id = ?`,
+          [expenseId],
+        );
+        expect(moneyRows[0]?.total_amount).toBe("120.1480");
+      } finally {
+        await connection.rollback();
+        connection.release();
+      }
     });
 
     it("registers the complete enforced CHECK constraint set", async () => {
@@ -1266,7 +1385,7 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
       const [before] = await pool.query<MigrationRow[]>(
         `SELECT id, hash, created_at FROM \`${migrationTable}\` ORDER BY id`,
       );
-      expect(before).toHaveLength(10);
+      expect(before).toHaveLength(11);
 
       await runMigration();
 
@@ -1280,7 +1399,7 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
       const [migrationRows] = await pool.query<MigrationRow[]>(
         `SELECT id, hash, created_at FROM \`${migrationTable}\` ORDER BY id`,
       );
-      expect(migrationRows).toHaveLength(10);
+      expect(migrationRows).toHaveLength(11);
       const migration = migrationRows[3];
       if (migration === undefined) {
         throw new Error("Expected the fourth applied migration journal row.");
@@ -1399,7 +1518,7 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
           const [journalRows] = await lockConnection.query<MigrationRow[]>(
             `SELECT id, hash, created_at FROM \`${migrationTable}\` ORDER BY id`,
           );
-          expect(journalRows).toHaveLength(10);
+          expect(journalRows).toHaveLength(11);
           expect(await tableExists(lockConnection, verificationTable)).toBe(
             true,
           );
