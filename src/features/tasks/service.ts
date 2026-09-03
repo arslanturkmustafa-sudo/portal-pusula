@@ -6,11 +6,13 @@ import type { Pool, PoolConnection } from "mysql2/promise";
 
 import { findUserAccountById } from "@/features/account/repository";
 import { findCustomerForUpdate } from "@/features/customers/repository";
+import { findProjectForUpdate } from "@/features/projects/repository";
 import {
   findTaskRecordById,
   findTaskStateForUpdate,
   insertTaskRecord,
   listTaskRecords,
+  replaceTaskProjectRecord,
   type WorkTask,
   type WorkTaskState,
   updateTaskRecord,
@@ -47,6 +49,13 @@ export class TaskAssigneeNotFoundError extends Error {
   }
 }
 
+export class TaskProjectNotFoundError extends Error {
+  constructor() {
+    super("Task project was not found.");
+    this.name = "TaskProjectNotFoundError";
+  }
+}
+
 export class TaskVersionConflictError extends Error {
   constructor() {
     super("Task was changed by another request.");
@@ -66,6 +75,7 @@ function auditSummary(task: WorkTaskState) {
     customerId: task.customerId,
     dueOn: task.dueOn,
     priority: task.priority,
+    projectId: task.projectId,
     status: task.status,
     title: task.title,
     version: task.version,
@@ -76,6 +86,7 @@ async function assertTaskReferences(
   connection: PoolConnection,
   customerId: string | null,
   assigneeUserAccountId: string | null,
+  projectId: string | null,
 ): Promise<void> {
   if (customerId !== null) {
     const customer = await findCustomerForUpdate(connection, customerId);
@@ -90,6 +101,11 @@ async function assertTaskReferences(
     if (!assignee || assignee.status !== "active") {
       throw new TaskAssigneeNotFoundError();
     }
+  }
+
+  if (projectId !== null) {
+    const project = await findProjectForUpdate(connection, projectId);
+    if (!project) throw new TaskProjectNotFoundError();
   }
 }
 
@@ -127,6 +143,7 @@ export async function createTask(
     dueOn: input.dueOn,
     id: randomUUID(),
     priority: input.priority,
+    projectId: input.projectId,
     status: input.status,
     title: input.title,
     updatedAtUtc: now,
@@ -138,8 +155,10 @@ export async function createTask(
       connection,
       task.customerId,
       task.assigneeUserAccountId,
+      task.projectId,
     );
     await insertTaskRecord(connection, task);
+    await replaceTaskProjectRecord(connection, task.id, task.projectId, now);
     await appendAuditEvent(connection, {
       action: "task.created",
       actorId: context.actorId,
@@ -193,16 +212,21 @@ export async function updateTask(
 
     if (
       changes.customerId !== undefined ||
-      changes.assigneeUserAccountId !== undefined
+      changes.assigneeUserAccountId !== undefined ||
+      changes.projectId !== undefined
     ) {
       await assertTaskReferences(
         connection,
         after.customerId,
         after.assigneeUserAccountId,
+        after.projectId,
       );
     }
     if (!(await updateTaskRecord(connection, after, expectedVersion))) {
       throw new TaskVersionConflictError();
+    }
+    if (changes.projectId !== undefined) {
+      await replaceTaskProjectRecord(connection, after.id, after.projectId, now);
     }
     await appendAuditEvent(connection, {
       action: "task.updated",

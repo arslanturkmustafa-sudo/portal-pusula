@@ -1,6 +1,6 @@
-# Migration runbook'u — müşteri, sözleşme, ziyaret, alacak ve hesap dilimi
+# Migration runbook'u — operasyon, görev ve proje şeması
 
-Bu runbook Portal Pusula'nın migration mekanizmasını, platform temelini ve ilk operasyon domain tablolarını kapsar. Sürümlü sıra iki immutable migration ve bunları değiştirmeden eklenen altı ileri yönlü migration'dan oluşur:
+Bu runbook Portal Pusula'nın migration mekanizmasını, platform temelini ve operasyon domain tablolarını kapsar. Sürümlü sıra iki immutable migration ve bunları değiştirmeden eklenen sekiz ileri yönlü migration'dan oluşur:
 
 - `0000_platform_migration_verification.sql`: yalnız sentetik `DECIMAL(19,4)`, UTC, transaction ve DB-level idempotency doğrulamasına ayrılmış `_platform_migration_verification` tablosu;
 - `0001_platform_job_outbox_audit.sql`: yalnız `scheduled_job`, `job_run`, `outbox_event` ve `audit_event` platform tabloları;
@@ -10,10 +10,12 @@ Bu runbook Portal Pusula'nın migration mekanizmasını, platform temelini ve il
 - `0005_consulting_contract_visits.sql`: müşteri sözleşmesi ile tarih bazlı aylık ziyaret taahhütlerini, iç saat/süreyi ve gerçekleşme durumunu ekler;
 - `0006_receivables.sql`: sözleşme ayı ve açılış bakiyesi kaynaklı alacak snapshot'larını, kısmi tahsilatları; sözleşme/ay tekilliği ile açılış bakiyesi ve tahsilat istemci işlem anahtarlarına ait idempotency kısıtlarını ekler.
 - `0007_user_account.sql`: tek yönetici hesabının normalize e-posta, scrypt parola özeti, hesap durumu ve oturumları geçersiz kılan kimlik bilgisi sürümünü ekler.
+- `0008_work_tasks.sql`: müşteri ve sorumlu bağlantısı kurulabilen Kanban görevlerini, durum/öncelik/vade alanlarını ve optimistic version sözleşmesini ekler.
+- `0009_projects.sql`: proje portföyünü ve her görevi en fazla bir projeye bağlayan `work_task_project` ilişki tablosunu ekler.
 
-Bu şema henüz gider, kart, vergi tahmini, görev, çok kullanıcılı workspace/organization veya RBAC tablolarını içermez. İlk yönetici hesabı güvenli geçişte mevcut environment kimliğinden oluşturulur; sonraki giriş ve parola değişiklikleri `user_account` üzerinden yürür. Immutable `0000`/`0001` dosyaları değiştirilmemiştir; `0002`–`0007` ayrı ileri yönlü migration'lardır. Uygulanan her migration daha sonra değiştirilemez; sonraki düzeltme yine yeni migration olmalıdır.
+Bu şema müşteri, sözleşme, ziyaret, alacak/tahsilat, yönetici hesabı, görev ve proje portföyünü içerir; henüz gider, kart, vergi tahmini, çok kullanıcılı workspace/organization veya RBAC tablolarını içermez. İlk yönetici hesabı güvenli geçişte mevcut environment kimliğinden oluşturulur; sonraki giriş ve parola değişiklikleri `user_account` üzerinden yürür. Immutable `0000`/`0001` dosyaları değiştirilmemiştir; `0002`–`0009` ayrı ileri yönlü migration'lardır. Uygulanan her migration daha sonra değiştirilemez; sonraki düzeltme yine yeni migration olmalıdır.
 
-Bu adımlar canlı Hostinger veritabanına uygulanmaz. Gerçek veritabanı parolası veya başka bir sır CLI argümanına, komut geçmişine, loga, test çıktısına ya da sürümlü dosyaya yazılmaz.
+Canlı Hostinger veritabanında `0009_projects` yalnız kullanıcı onaylı DB-first değişiklik penceresinde ve hedefe bağlı incremental phpMyAdmin paketiyle uygulanır. Gerçek veritabanı parolası veya başka bir sır CLI argümanına, komut geçmişine, loga, test çıktısına ya da sürümlü dosyaya yazılmaz.
 
 SSH/npm erişimi olmayan Hostinger hedefindeki yalnız boş ve disposable staging kurulumu için ayrı [phpMyAdmin clean-only migration runbook'u](./phpmyadmin-clean-migration.md) kullanılır. Bu paket mevcut şemayı yükseltmez. Journal'ı bulunan mevcut hedefte yalnız sıradaki seçili migration için [phpMyAdmin incremental migration runbook'u](./phpmyadmin-incremental-migration.md) kullanılır.
 
@@ -44,7 +46,7 @@ Test hedefleri iki ayrı kanıt sınıfıdır:
 
 **Migration correctness**
 
-- boş veritabanında `0000` → `0001` → `0002` → `0003` sırasıyla clean migrate ve eksiksiz journal;
+- boş veritabanında `0000` → `0009` sırasıyla clean migrate ve eksiksiz journal;
 - ikinci runner çalışmasının no-op olması;
 - uyumsuz aynı adlı tablo varken migration'ın ve journal kaydının fail-closed kalması;
 - değiştirilmiş uygulanmış SQL/journal hash'inin şema veya veri değişmeden reddedilmesi;
@@ -108,23 +110,27 @@ Her migration uygulanmadan önce `drizzle/` altındaki yeni SQL sürüm kontrol�
 - kimlik ve lease token alanları canonical lower-case UUID biçiminde olmalı; job/event/idempotency/correlation/owner/hata kodu gibi ASCII sözleşme alanları boşluk içermeyen yazdırılabilir ASCII ile sınırlandırılmalı.
 - `0003` yalnız `cron_dispatch_gate` tablosunu oluşturmalı; `gate_key` binary-exact printable ASCII primary key, state yalnız `active`, `created_at_utc <= last_permitted_at_utc = updated_at_utc` ve tüm zamanlar `DATETIME(6)` olmalı;
 - `0003` içinde seed row, event/scheduler, trigger, domain/auth/finans nesnesi, destructive DDL veya kullanıcı girdisinden türeyen SQL bulunmamalı.
+- `0008` yalnız `work_task` tablosunu, müşteri ve yönetici hesabına iki `RESTRICT` foreign key'i ve Kanban sorgu indexlerini eklemeli; destructive DDL veya seed veri içermemeli;
+- `0009` yalnız `project` ve `work_task_project` tablolarını, iki `RESTRICT` foreign key'i ve üç sorgu indexini eklemeli; mevcut tablo/kolon değiştirmemeli, seed veri veya destructive DDL içermemeli;
+- `0009` proje kimliği/kodu/türü/durumu/para birimi ile görev-proje kimliklerinde `ascii_bin`, metin alanlarında `utf8mb4_unicode_ci`, para alanında `DECIMAL(19,4)` ve zaman alanlarında UTC `DATETIME(6)` sözleşmesini korumalı.
 
 Uygulanmış bir SQL dosyası sonradan düzenlenmez; düzeltme yeni ve ileri yönlü bir migration olarak eklenir.
 
-## Production öncesi güvenli sıra
+## `0009_projects` için DB-first canlı sıra
 
-Canlı migration için bu turda yetki yoktur. Ayrı kullanıcı onayı ve değişiklik penceresi alınmadan aşağıdaki sıra başlatılmaz:
+Canlı migration ayrı kullanıcı onayı ve değişiklik penceresi olmadan başlatılmaz. Hostinger Git bağlantısı `main` birleşmesini otomatik dağıtabileceği için sıra şöyledir:
 
-1. Hedef sürümün tam SQL farkını iki kişi veya eşdeğer bağımsız inceleme ile onayla; immutable `0000`/`0001` ve ileri yönlü `0002`/`0003` hash'lerini/migration kimliklerini kaydet.
-2. Hedef DB motor/sürüm uyumluluğunu, `CHECK` enforcement'ını, beklenen lock süresini ve uygulamanın eski/yeni şemayla geriye uyumunu doğrula. `0002` öncesi mevcut satırların tüm yeni constraint'lere uyduğunu read-only sorgularla kanıtla; uygunsuz canlı veriyi otomatik düzeltme. `0003` için DB zamanı, transaction/row-lock ve concurrent permit davranışını ayrı staging hedefinde ölç.
-3. Migration öncesi yedeğin zamanını ve kimliğini kaydet. Yedeğin güncel şemayı içerdiğini doğrula; ayrı bir disposable hedefe restore et ve toplam on iki tablonun (on bir uygulama tablosu + migration journal), yedi journal satırının ve kontrollü veri doğruluk sorgularının geçtiğine ilişkin kanıt üret. Boş readiness spike DB'sinin 0 tablo/journal yok restore `PASS` sonucu bu migration kapısını karşılamaz. Yalnız “backup alındı” görüntüsü yeterli değildir.
-4. Uygulama ve DB için bakım/geri dönüş penceresini, sorumluyu ve durdurma koşullarını belirle.
-5. DB değişkenlerini yalnız onaylı secret/env yönetimiyle sürece enjekte et. Parola, token veya connection string'i CLI argümanına, loga, sohbete ya da dosyaya koyma.
-6. Çalıştırılacak runner/uygulama artefaktının güncel ortak session initializer ve fail-closed doğrulamayı içerdiğini paket politikasıyla kanıtla. Bu initializer'ı taşımayan eski artefaktı çalıştırma veya geri dönüş adayı olarak kaydetme.
-7. Ayrı onaylı canlı çalıştırmada runner'ı tek kez çalıştır; migration journal, süre ve genel sonucu kaydet. Ham DB hatasını veya bağlantı ayrıntısını kanıta kopyalama.
-8. Migration sonrası şema/journal kontrolünü, uygulama liveness/readiness kontrollerini ve ilgili smoke testlerini çalıştır; hata bütçesini gözle.
+1. Proje dalındaki SQL farkını ve kalite kapılarını doğrula; PR CI tamamen yeşil olsun, ancak `main` birleşmesini henüz yapma.
+2. `0009_projects` migration kimliğini kaydet: `created_at = 1788423447345`, SQL SHA-256 `86e1b6730d77d1e5d70ed011a0073926a1704b14940fa22c12bce94ae9b3d8f2`, yedi statement.
+3. Migration öncesi güncel yedeğin zamanını ve kimliğini doğrula; bakım/geri dönüş penceresini ve durdurma koşullarını belirle.
+4. phpMyAdmin'de canlı DB'nin dokuz exact journal satırında ve son `0008_work_tasks` kaydında olduğunu, `project` ile `work_task_project` tablolarının bulunmadığını salt okunur doğrula.
+5. DB ve sunucu sürümü digest'lerini importtan hemen önce al; yalnız `0009_projects` için [incremental paketi](./phpmyadmin-incremental-migration.md) üretip manifest/hash kontrollerinden geçir.
+6. Hedefe bağlı paketi tek kez içe aktar. Yalnız exact `PORTAL_PUSULA_INCREMENTAL_MIGRATION_OK` / `0009_projects` sonucu başarıdır; sonuç yoksa paketi yeniden çalıştırma.
+7. On journal satırını, iki yeni tabloyu ve iki `RESTRICT` foreign key'i salt okunur doğrula.
+8. DB doğrulandıktan sonra PR'ı `main` dalına birleştir. Bağlı Git dağıtımını bekle veya aynı kaynakla yeniden üretilmiş güncel Hostinger ZIP'ini dağıt.
+9. Liveness/readiness ile giriş, proje oluşturma/düzenleme, görev-proje seçme/filtreleme ve müşteri sözleşmesi düzenleme smoke kontrollerini çalıştır.
 
-Hostinger plan-geneli manuel yedeği ve boş readiness kaynağının ayrı disposable hedef restore'u tamamlanmıştır; production write/restore başlatılmamıştır. Bu dar `PASS`, güncel Komut 3C migration şeması/journal/veri restore kanıtı değildir. Production öncesi [güncel şemayı kapsayan backup + ayrı hedef restore kanıtı](./backup-restore.md) gerekliliği sürer. Bu runbook kapsamında canlı migration, deploy veya environment değişikliği çalıştırılmamıştır.
+`0009` additive bir migration'dır: eski uygulama iki yeni tabloyu kullanmadığı için DB-first aralığında çalışmaya devam eder. Uygulama ZIP'i migration çalıştırmaz. Backup/restore ayrıntıları ve geri dönüş yetki sınırı [backup/restore runbook'unda](./backup-restore.md) korunur.
 
 ## Geri dönüş sınırları
 
@@ -136,4 +142,4 @@ Hostinger plan-geneli manuel yedeği ve boş readiness kaynağının ayrı dispo
 - Veri kaybı, uyumsuz şema veya geri döndürülemez DDL durumunda tek güvenilir dönüş, önceden restore edilerek kanıtlanmış yedeğin onaylı bakım penceresinde geri yüklenmesidir. Olası veri kaybı aralığı ayrıca kullanıcıya bildirilir.
 - `DROP`, kolon daraltma/yeniden adlandırma veya veri dönüşümü bu doğrulama diliminin dışında ayrı tasarım, yedek ve restore provası gerektirir.
 
-Komut 4 / auth için henüz HAZIR DEĞİL; Dilim 0 GO değildir.
+Bu runbook'un güncellenmesi canlı migration veya deploy yapıldığı anlamına gelmez; gerçek sonuç, change window sırasında ayrı olarak doğrulanır.

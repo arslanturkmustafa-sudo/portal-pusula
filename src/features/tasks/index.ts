@@ -9,6 +9,7 @@ export {
   TaskAssigneeNotFoundError,
   TaskCustomerNotFoundError,
   TaskNotFoundError,
+  TaskProjectNotFoundError,
   TaskVersionConflictError,
   updateTask,
 } from "./service";

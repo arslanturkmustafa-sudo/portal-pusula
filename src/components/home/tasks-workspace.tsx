@@ -29,6 +29,9 @@ type TaskDto = Readonly<{
   dueOn: string | null;
   id: string;
   priority: TaskPriority;
+  projectCode: string | null;
+  projectId: string | null;
+  projectName: string | null;
   status: TaskStatus;
   title: string;
   updatedAtUtc: string;
@@ -42,11 +45,19 @@ type CustomerDto = Readonly<{
   status: "active" | "inactive";
 }>;
 
+type ProjectDto = Readonly<{
+  displayName: string;
+  id: string;
+  shortCode: string;
+  status: "planned" | "active" | "on_hold" | "completed" | "cancelled";
+}>;
+
 type TaskDraft = {
   customerId: string;
   description: string;
   dueOn: string;
   priority: TaskPriority;
+  projectId: string;
   status: TaskStatus;
   title: string;
 };
@@ -93,6 +104,7 @@ function emptyDraft(): TaskDraft {
     description: "",
     dueOn: "",
     priority: "normal",
+    projectId: "",
     status: "backlog",
     title: "",
   };
@@ -104,6 +116,7 @@ function taskDraft(task: TaskDto): TaskDraft {
     description: task.description ?? "",
     dueOn: task.dueOn ?? "",
     priority: task.priority,
+    projectId: task.projectId ?? "",
     status: task.status,
     title: task.title,
   };
@@ -163,6 +176,7 @@ function taskBody(draft: TaskDraft) {
     description: description.length === 0 ? null : description,
     dueOn: draft.dueOn || null,
     priority: draft.priority,
+    projectId: draft.projectId || null,
     status: draft.status,
     title: draft.title.trim(),
   };
@@ -174,6 +188,7 @@ function taskBodyFromRecord(task: TaskDto, status: TaskStatus) {
     description: task.description,
     dueOn: task.dueOn,
     priority: task.priority,
+    projectId: task.projectId,
     status,
     title: task.title,
     version: task.version,
@@ -217,6 +232,13 @@ function TaskCard({
       <div className="task-card-heading">
         <div>
           <h4 id={titleId}>{task.title}</h4>
+          {task.projectName === null ? null : (
+            <p className="task-card-project">
+              <span className="sr-only">Proje: </span>
+              {task.projectName}
+              {task.projectCode === null ? null : ` · ${task.projectCode}`}
+            </p>
+          )}
           {task.customerName !== null ? (
             <p className="task-card-customer">
               {task.customerName}
@@ -290,10 +312,12 @@ function TaskCard({
 export function TasksWorkspace() {
   const [tasks, setTasks] = useState<readonly TaskDto[]>([]);
   const [customers, setCustomers] = useState<readonly CustomerDto[]>([]);
+  const [projects, setProjects] = useState<readonly ProjectDto[]>([]);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [requestRevision, setRequestRevision] = useState(0);
   const [query, setQuery] = useState("");
   const [dueFilter, setDueFilter] = useState<DueFilter>("all");
+  const [projectFilter, setProjectFilter] = useState("all");
   const [mobileStatus, setMobileStatus] = useState<TaskStatus>("todo");
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingTask, setEditingTask] = useState<TaskDto | null>(null);
@@ -313,38 +337,56 @@ export function TasksWorkspace() {
     const controller = new AbortController();
     let current = true;
 
-    void Promise.all([
-      fetch("/api/tasks", {
+    void (async () => {
+      const tasksResponse = await fetch("/api/tasks", {
         cache: "no-store",
         credentials: "same-origin",
         signal: controller.signal,
-      }),
-      fetch("/api/customers", {
+      });
+      const customersResponse = await fetch("/api/customers", {
         cache: "no-store",
         credentials: "same-origin",
         signal: controller.signal,
-      }),
-    ])
-      .then(async ([tasksResponse, customersResponse]) => {
-        if (tasksResponse.status === 401 || customersResponse.status === 401) {
+      });
+      const projectsResponse = await fetch("/api/projects", {
+        cache: "no-store",
+        credentials: "same-origin",
+        signal: controller.signal,
+      });
+
+      return [tasksResponse, customersResponse, projectsResponse] as const;
+    })()
+      .then(async ([tasksResponse, customersResponse, projectsResponse]) => {
+        if (
+          tasksResponse.status === 401 ||
+          customersResponse.status === 401 ||
+          projectsResponse.status === 401
+        ) {
           redirectToLogin();
           return null;
         }
-        if (!tasksResponse.ok || !customersResponse.ok) {
+        if (!tasksResponse.ok || !customersResponse.ok || !projectsResponse.ok) {
           throw new Error("Task workspace is unavailable.");
         }
-        const [taskPayload, customerPayload] = (await Promise.all([
+        const [taskPayload, customerPayload, projectPayload] = (await Promise.all([
           tasksResponse.json(),
           customersResponse.json(),
-        ])) as [{ tasks?: TaskDto[] }, { customers?: CustomerDto[] }];
+          projectsResponse.json(),
+        ])) as [
+          { tasks?: TaskDto[] },
+          { customers?: CustomerDto[] },
+          { projects?: ProjectDto[] },
+        ];
         if (
           !Array.isArray(taskPayload.tasks) ||
-          !Array.isArray(customerPayload.customers)
+          !Array.isArray(customerPayload.customers) ||
+          !Array.isArray(projectPayload.projects)
         ) {
           throw new Error("Task workspace response is invalid.");
         }
         return {
           customers: customerPayload.customers,
+          projects: projectPayload.projects,
           tasks: taskPayload.tasks,
         };
       })
@@ -352,6 +394,7 @@ export function TasksWorkspace() {
         if (!current || payload === null) return;
         setTasks(payload.tasks);
         setCustomers(payload.customers);
+        setProjects(payload.projects);
         if (
           payload.tasks.length > 0 &&
           !payload.tasks.some((task) => task.status === "todo")
@@ -393,14 +436,21 @@ export function TasksWorkspace() {
         canonicalSearch(task.title).includes(search) ||
         canonicalSearch(task.description ?? "").includes(search) ||
         canonicalSearch(task.customerName ?? "").includes(search) ||
-        canonicalSearch(task.customerCode ?? "").includes(search);
+        canonicalSearch(task.customerCode ?? "").includes(search) ||
+        canonicalSearch(task.projectName ?? "").includes(search) ||
+        canonicalSearch(task.projectCode ?? "").includes(search);
       const matchesDue =
         dueFilter === "all" ||
         (dueFilter === "today" && task.dueOn === today) ||
         (dueFilter === "overdue" && isOverdue(task, today));
-      return matchesQuery && matchesDue;
+      const matchesProject =
+        projectFilter === "all" ||
+        (projectFilter === "unassigned"
+          ? task.projectId === null
+          : task.projectId === projectFilter);
+      return matchesQuery && matchesDue && matchesProject;
     });
-  }, [dueFilter, query, tasks, today]);
+  }, [dueFilter, projectFilter, query, tasks, today]);
 
   const tasksByStatus = useMemo(
     () =>
@@ -504,6 +554,15 @@ export function TasksWorkspace() {
       if (existing === null) {
         setQuery("");
         setDueFilter("all");
+        setProjectFilter("all");
+      }
+      if (
+        projectFilter !== "all" &&
+        (projectFilter === "unassigned"
+          ? savedTask.projectId !== null
+          : savedTask.projectId !== projectFilter)
+      ) {
+        setProjectFilter("all");
       }
       setMobileStatus(savedTask.status);
       setAnnouncement(
@@ -586,7 +645,7 @@ export function TasksWorkspace() {
           </button>
         )}
         context="İş takibi"
-        note="İşleri öncelik, müşteri ve vade bilgisiyle beş aşamada takip edin."
+        note="İşleri proje, müşteri, öncelik ve vade bilgisiyle beş aşamada takip edin."
         title="Görevler"
       />
 
@@ -604,7 +663,7 @@ export function TasksWorkspace() {
               {editingTask === null ? "Görev ekle" : "Görevi güncelle"}
             </h2>
             <p>
-              İlk akış başlık, müşteri, vade, öncelik ve durum bilgisine odaklanır.
+              Görevi ilgili proje dosyasına bağlayın; gerekiyorsa müşteri ve vade ekleyin.
             </p>
           </div>
           <form onSubmit={submitTask}>
@@ -617,6 +676,33 @@ export function TasksWorkspace() {
                 value={draft.title}
                 onChange={(event) => updateDraft({ title: event.target.value })}
               />
+            </label>
+            <label>
+              <span>Proje</span>
+              <select
+                value={draft.projectId}
+                onChange={(event) =>
+                  updateDraft({ projectId: event.target.value })
+                }
+              >
+                <option value="">Proje bağlantısı yok</option>
+                {draft.projectId !== "" &&
+                !projects.some((project) => project.id === draft.projectId) ? (
+                  <option value={draft.projectId}>
+                    {editingTask?.projectName ?? "Mevcut proje"}
+                  </option>
+                ) : null}
+                {projects.map((project) => (
+                  <option key={project.id} value={project.id}>
+                    {project.displayName} · {project.shortCode}
+                    {project.status === "completed" || project.status === "cancelled"
+                      ? " (kapalı)"
+                      : project.status === "on_hold"
+                        ? " (beklemede)"
+                        : ""}
+                  </option>
+                ))}
+              </select>
             </label>
             <label>
               <span>Müşteri</span>
@@ -734,11 +820,27 @@ export function TasksWorkspace() {
             <label className="task-search-field">
               <span className="sr-only">Görev ara</span>
               <input
-                placeholder="Görev veya müşteri ara"
+                placeholder="Görev, proje veya müşteri ara"
                 type="search"
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
               />
+            </label>
+            <label className="task-project-filter">
+              <span className="sr-only">Proje filtresi</span>
+              <select
+                aria-label="Proje filtresi"
+                value={projectFilter}
+                onChange={(event) => setProjectFilter(event.target.value)}
+              >
+                <option value="all">Tüm projeler</option>
+                <option value="unassigned">Projesiz görevler</option>
+                {projects.map((project) => (
+                  <option key={project.id} value={project.id}>
+                    {project.displayName}
+                  </option>
+                ))}
+              </select>
             </label>
             <div className="task-filter-set" aria-label="Vade filtresi">
               {([
@@ -782,7 +884,7 @@ export function TasksWorkspace() {
 
         {loadState === "loading" ? (
           <p className="task-board-message" role="status">
-            Görevler ve müşteriler yükleniyor…
+            Görev panosu hazırlanıyor…
           </p>
         ) : null}
 
@@ -819,13 +921,14 @@ export function TasksWorkspace() {
             <span aria-hidden="true">00</span>
             <div>
               <strong>Filtrelerle eşleşen görev yok.</strong>
-              <p>Aramayı veya vade filtresini temizleyerek tüm kayıtları açın.</p>
+              <p>Arama, proje veya vade filtresini temizleyerek tüm kayıtları açın.</p>
               <button
                 className="text-action"
                 type="button"
                 onClick={() => {
                   setQuery("");
                   setDueFilter("all");
+                  setProjectFilter("all");
                 }}
               >
                 Filtreleri temizle

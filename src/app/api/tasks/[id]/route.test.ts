@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => {
   class TaskAssigneeNotFoundError extends Error {}
   class TaskCustomerNotFoundError extends Error {}
   class TaskNotFoundError extends Error {}
+  class TaskProjectNotFoundError extends Error {}
   class TaskVersionConflictError extends Error {}
   return {
     authenticateAdminRequest: vi.fn(),
@@ -17,6 +18,7 @@ const mocks = vi.hoisted(() => {
     TaskAssigneeNotFoundError,
     TaskCustomerNotFoundError,
     TaskNotFoundError,
+    TaskProjectNotFoundError,
     TaskVersionConflictError,
     updateTask: vi.fn(),
   };
@@ -26,6 +28,7 @@ vi.mock("@/features/tasks", () => ({
   TaskAssigneeNotFoundError: mocks.TaskAssigneeNotFoundError,
   TaskCustomerNotFoundError: mocks.TaskCustomerNotFoundError,
   TaskNotFoundError: mocks.TaskNotFoundError,
+  TaskProjectNotFoundError: mocks.TaskProjectNotFoundError,
   TaskVersionConflictError: mocks.TaskVersionConflictError,
   updateTask: mocks.updateTask,
   updateTaskInputSchema: { parse: mocks.parseUpdate },
@@ -66,6 +69,9 @@ const task = {
   dueOn: null,
   id: taskId,
   priority: "high",
+  projectCode: null,
+  projectId: null,
+  projectName: null,
   status: "todo",
   title: "Güncellenen görev",
   updatedAtUtc: "2026-09-02 10:10:00.000000",

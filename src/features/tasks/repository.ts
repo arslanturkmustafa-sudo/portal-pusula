@@ -23,6 +23,7 @@ export type WorkTaskState = Readonly<{
   dueOn: string | null;
   id: string;
   priority: TaskPriority;
+  projectId: string | null;
   status: TaskStatus;
   title: string;
   updatedAtUtc: string;
@@ -34,6 +35,8 @@ export type WorkTask = WorkTaskState &
     assigneeEmail: string | null;
     customerCode: string | null;
     customerName: string | null;
+    projectCode: string | null;
+    projectName: string | null;
   }>;
 
 type WorkTaskStateRow = RowDataPacket & {
@@ -45,6 +48,7 @@ type WorkTaskStateRow = RowDataPacket & {
   due_on: string | Date | null;
   id: string;
   priority: string;
+  project_id: string | null;
   status: string;
   title: string;
   updated_at_utc: string | Date;
@@ -55,6 +59,8 @@ type WorkTaskRow = WorkTaskStateRow & {
   assignee_email: string | null;
   customer_code: string | null;
   customer_name: string | null;
+  project_code: string | null;
+  project_name: string | null;
 };
 
 function canonicalDate(value: string | Date): string {
@@ -111,6 +117,7 @@ function mapTaskState(row: WorkTaskStateRow): WorkTaskState {
     dueOn: row.due_on === null ? null : canonicalDate(row.due_on),
     id: row.id,
     priority: taskPriority(row.priority),
+    projectId: row.project_id,
     status: taskStatus(row.status),
     title: row.title,
     updatedAtUtc: canonicalDateTime(row.updated_at_utc),
@@ -130,17 +137,28 @@ function mapWorkTask(row: WorkTaskRow): WorkTask {
   if ((row.assignee_user_account_id === null) !== (row.assignee_email === null)) {
     throw new Error("Task assignee projection is invalid.");
   }
+  if (
+    (row.project_id === null &&
+      (row.project_code !== null || row.project_name !== null)) ||
+    (row.project_id !== null &&
+      (row.project_code === null || row.project_name === null))
+  ) {
+    throw new Error("Task project projection is invalid.");
+  }
 
   return {
     ...mapTaskState(row),
     assigneeEmail: row.assignee_email,
     customerCode: row.customer_code,
     customerName: row.customer_name,
+    projectCode: row.project_code,
+    projectName: row.project_name,
   };
 }
 
 const TASK_STATE_COLUMNS = `
   task.id, task.customer_id, task.assignee_user_account_id,
+  task_link.project_id,
   task.title, task.description, task.status, task.priority, task.due_on,
   task.completed_at_utc, task.version, task.created_at_utc,
   task.updated_at_utc`;
@@ -148,10 +166,14 @@ const TASK_STATE_COLUMNS = `
 const TASK_PROJECTION_COLUMNS = `${TASK_STATE_COLUMNS},
   customer.display_name AS customer_name,
   customer.short_code AS customer_code,
+  project.display_name AS project_name,
+  project.short_code AS project_code,
   assignee.email AS assignee_email`;
 
 const TASK_PROJECTION_JOIN = `
   FROM work_task AS task
+  LEFT JOIN work_task_project AS task_link ON task_link.task_id = task.id
+  LEFT JOIN project ON project.id = task_link.project_id
   LEFT JOIN customer ON customer.id = task.customer_id
   LEFT JOIN user_account AS assignee
          ON assignee.id = task.assignee_user_account_id`;
@@ -193,6 +215,7 @@ export async function findTaskStateForUpdate(
   const [rows] = await connection.execute<WorkTaskStateRow[]>(
     `SELECT ${TASK_STATE_COLUMNS}
        FROM work_task AS task
+       LEFT JOIN work_task_project AS task_link ON task_link.task_id = task.id
       WHERE task.id = ?
       FOR UPDATE`,
     [id],
@@ -255,4 +278,27 @@ export async function updateTaskRecord(
     ],
   );
   return result.affectedRows === 1;
+}
+
+export async function replaceTaskProjectRecord(
+  connection: PoolConnection,
+  taskId: string,
+  projectId: string | null,
+  now: string,
+): Promise<void> {
+  if (projectId === null) {
+    await connection.execute<ResultSetHeader>(
+      `DELETE FROM work_task_project WHERE task_id = ?`,
+      [taskId],
+    );
+    return;
+  }
+
+  await connection.execute<ResultSetHeader>(
+    `INSERT INTO work_task_project
+       (task_id, project_id, created_at_utc, updated_at_utc)
+     VALUES (?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE project_id = ?, updated_at_utc = ?`,
+    [taskId, projectId, now, now, projectId, now],
+  );
 }

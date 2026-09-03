@@ -51,6 +51,7 @@ export const createTaskInputSchema = z
     description: taskDescriptionSchema.default(null),
     dueOn: optionalDateSchema.default(null),
     priority: taskPrioritySchema.default("normal"),
+    projectId: optionalUuidSchema.default(null),
     status: taskStatusSchema.default("backlog"),
     title: taskTitleSchema,
   })
@@ -63,6 +64,7 @@ export const updateTaskInputSchema = z
     description: taskDescriptionSchema.optional(),
     dueOn: optionalDateSchema.optional(),
     priority: taskPrioritySchema.optional(),
+    projectId: optionalUuidSchema.optional(),
     status: taskStatusSchema.optional(),
     title: taskTitleSchema.optional(),
     version: z.number().int().min(1).max(4_294_967_294),
@@ -70,5 +72,5 @@ export const updateTaskInputSchema = z
   .strict()
   .refine((value) => Object.keys(value).some((key) => key !== "version"));
 
-export type CreateTaskInput = z.infer<typeof createTaskInputSchema>;
-export type UpdateTaskInput = z.infer<typeof updateTaskInputSchema>;
+export type CreateTaskInput = z.input<typeof createTaskInputSchema>;
+export type UpdateTaskInput = z.input<typeof updateTaskInputSchema>;

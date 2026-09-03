@@ -4,14 +4,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
 import {
-  TaskAssigneeNotFoundError,
-  TaskCustomerNotFoundError,
-  TaskNotFoundError,
-  TaskProjectNotFoundError,
-  TaskVersionConflictError,
-  updateTask,
-  updateTaskInputSchema,
-} from "@/features/tasks";
+  ProjectNotFoundError,
+  ProjectShortCodeConflictError,
+  ProjectVersionConflictError,
+  updateProject,
+  updateProjectInputSchema,
+} from "@/features/projects";
 import {
   authenticateAdminRequest,
   type AuthenticatedAdmin,
@@ -26,9 +24,9 @@ import { PlatformInputError } from "@/platform/validation/canonical-identifiers"
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-const MAX_BODY_BYTES = 16_384;
+const MAX_BODY_BYTES = 32_768;
 
-type TaskRouteContext = Readonly<{
+type ProjectRouteContext = Readonly<{
   params: Promise<{ id: string }>;
 }>;
 
@@ -45,14 +43,11 @@ function sameOrigin(request: NextRequest): boolean {
   const originHeader = request.headers.get("origin");
   try {
     if (originHeader === null) return false;
-
     const origin = new URL(originHeader);
     const requestUrl = new URL(request.url);
     if (origin.origin === requestUrl.origin) return true;
-
     const host = request.headers.get("host")?.trim().toLowerCase();
     if (!host || origin.host !== host) return false;
-
     const forwardedProtocol = request.headers
       .get("x-forwarded-proto")
       ?.split(",", 1)[0]
@@ -96,7 +91,7 @@ function actorId(principal: AuthenticatedAdmin): string | undefined {
 
 export async function PATCH(
   request: NextRequest,
-  context: TaskRouteContext,
+  context: ProjectRouteContext,
 ): Promise<NextResponse> {
   const principal = await authenticateAdminRequest(request);
   if (!principal) return json({ status: "unauthorized" }, 401);
@@ -108,14 +103,14 @@ export async function PATCH(
   const correlationId = correlationIdFromHeaders(request.headers);
   try {
     const { id } = await context.params;
-    const input = updateTaskInputSchema.parse(await readBody(request));
-    const task = await updateTask(
+    const input = updateProjectInputSchema.parse(await readBody(request));
+    const project = await updateProject(
       getPlatformDatabasePool(getDatabaseProbeEnvironment()),
       id,
       input,
       { actorId: actorId(principal), correlationId },
     );
-    return json({ task });
+    return json({ project });
   } catch (error) {
     if (
       error instanceof z.ZodError ||
@@ -124,30 +119,24 @@ export async function PATCH(
     ) {
       return json({ status: "validation_error" }, 400);
     }
-    if (error instanceof TaskNotFoundError) {
-      return json({ status: "task_not_found" }, 404);
-    }
-    if (error instanceof TaskCustomerNotFoundError) {
-      return json({ status: "customer_not_found" }, 404);
-    }
-    if (error instanceof TaskAssigneeNotFoundError) {
-      return json({ status: "assignee_not_found" }, 404);
-    }
-    if (error instanceof TaskProjectNotFoundError) {
+    if (error instanceof ProjectNotFoundError) {
       return json({ status: "project_not_found" }, 404);
     }
-    if (error instanceof TaskVersionConflictError) {
+    if (error instanceof ProjectShortCodeConflictError) {
+      return json({ status: "short_code_conflict" }, 409);
+    }
+    if (error instanceof ProjectVersionConflictError) {
       return json({ status: "version_conflict" }, 409);
     }
     const mysqlErrorCode = safeMySqlErrorCode(error);
     requestLogger(correlationId).error(
       {
-        event: "task.api.database_failed",
+        event: "project.api.database_failed",
         method: "PATCH",
         mysqlErrorCode,
-        pathname: "/api/tasks/[id]",
+        pathname: "/api/projects/[id]",
       },
-      `Task API database operation failed: ${mysqlErrorCode}`,
+      `Project API database operation failed: ${mysqlErrorCode}`,
     );
     return json({ status: "service_unavailable" }, 503);
   }

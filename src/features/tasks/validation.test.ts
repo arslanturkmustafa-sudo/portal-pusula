@@ -19,6 +19,7 @@ describe("task input", () => {
       description: "Teklif öncesi hazırlık",
       dueOn: null,
       priority: "normal",
+      projectId: null,
       status: "backlog",
       title: "Süreç haritasını tamamla",
     });

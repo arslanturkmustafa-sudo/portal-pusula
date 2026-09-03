@@ -22,6 +22,9 @@ const taskRow = {
   due_on: "2026-09-05",
   id: "30000000-0000-4000-8000-000000000001",
   priority: "high",
+  project_code: "BYPUSULA",
+  project_id: "40000000-0000-4000-8000-000000000001",
+  project_name: "ByPusula",
   status: "todo",
   title: "Süreç haritasını tamamla",
   updated_at_utc: "2026-09-02 09:00:00.000000",
@@ -40,11 +43,13 @@ describe("task repository", () => {
         customerCode: "ONCU",
         customerName: "Öncü Üretim",
         dueOn: "2026-09-05",
+        projectCode: "BYPUSULA",
+        projectName: "ByPusula",
         status: "todo",
       }),
     ]);
     expect(execute).toHaveBeenCalledWith(
-      expect.stringMatching(/LEFT JOIN customer[\s\S]*LEFT JOIN user_account/iu),
+      expect.stringMatching(/LEFT JOIN project[\s\S]*LEFT JOIN customer[\s\S]*LEFT JOIN user_account/iu),
     );
     expect(execute).toHaveBeenCalledWith(expect.stringContaining("FIELD(task.status"));
   });
@@ -60,6 +65,7 @@ describe("task repository", () => {
       dueOn: taskRow.due_on,
       id: taskRow.id,
       priority: "high" as const,
+      projectId: taskRow.project_id,
       status: "in_progress" as const,
       title: taskRow.title,
       updatedAtUtc: "2026-09-02 10:00:00.000000",

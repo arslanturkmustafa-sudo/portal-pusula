@@ -9,6 +9,7 @@ import {
   listTasks,
   TaskAssigneeNotFoundError,
   TaskCustomerNotFoundError,
+  TaskProjectNotFoundError,
 } from "@/features/tasks";
 import {
   authenticateAdminRequest,
@@ -131,6 +132,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
     if (error instanceof TaskAssigneeNotFoundError) {
       return json({ status: "assignee_not_found" }, 404);
+    }
+    if (error instanceof TaskProjectNotFoundError) {
+      return json({ status: "project_not_found" }, 404);
     }
     const mysqlErrorCode = safeMySqlErrorCode(error);
     requestLogger(correlationId).error(
