@@ -23,6 +23,7 @@ export type ConsultingContract = Readonly<{
   internalNote: string | null;
   monthlyFeeAmount: string;
   paymentDay: number;
+  projectId: string | null;
   startsOn: string;
   status: ContractStatus;
   updatedAtUtc: string;
@@ -52,6 +53,7 @@ type ContractRow = RowDataPacket & {
   internal_note: string | null;
   monthly_fee_amount: string;
   payment_day: number;
+  project_id: string | null;
   starts_on: string | Date;
   status: string;
   updated_at_utc: string | Date;
@@ -110,6 +112,7 @@ function mapContract(row: ContractRow): ConsultingContract {
     internalNote: row.internal_note,
     monthlyFeeAmount: row.monthly_fee_amount,
     paymentDay: row.payment_day,
+    projectId: row.project_id,
     startsOn: canonicalDate(row.starts_on),
     status: row.status,
     updatedAtUtc: canonicalDateTime(row.updated_at_utc),
@@ -147,7 +150,7 @@ function mapVisit(row: VisitRow): MonthlyVisit {
 }
 
 const CONTRACT_COLUMNS = `
-  id, customer_id, status, starts_on, ends_on, monthly_fee_amount,
+  id, customer_id, project_id, status, starts_on, ends_on, monthly_fee_amount,
   currency, vat_mode, vat_rate, payment_day, internal_note,
   created_at_utc, updated_at_utc`;
 
@@ -188,6 +191,7 @@ export async function findOwnedContractForUpdate(
 export async function findOverlappingContract(
   connection: PoolConnection,
   customerId: string,
+  projectId: string,
   startsOn: string,
   endsOn: string,
   excludedContractId?: string,
@@ -195,12 +199,13 @@ export async function findOverlappingContract(
   const exclusion = excludedContractId === undefined ? "" : "\n        AND id <> ?";
   const parameters =
     excludedContractId === undefined
-      ? [customerId, endsOn, startsOn]
-      : [customerId, endsOn, startsOn, excludedContractId];
+      ? [customerId, projectId, endsOn, startsOn]
+      : [customerId, projectId, endsOn, startsOn, excludedContractId];
   const [rows] = await connection.execute<ContractRow[]>(
     `SELECT ${CONTRACT_COLUMNS}
-       FROM consulting_contract
+      FROM consulting_contract
       WHERE customer_id = ?
+        AND project_id = ?
         AND status IN ('draft', 'active')
         AND starts_on <= ?
         AND ends_on >= ?${exclusion}
@@ -210,6 +215,21 @@ export async function findOverlappingContract(
     parameters,
   );
   return rows[0] ? mapContract(rows[0]) : null;
+}
+
+export async function contractHasReceivable(
+  connection: PoolConnection,
+  contractId: string,
+): Promise<boolean> {
+  const [rows] = await connection.execute<RowDataPacket[]>(
+    `SELECT id
+       FROM receivable
+      WHERE contract_id = ?
+      LIMIT 1
+      FOR UPDATE`,
+    [contractId],
+  );
+  return rows.length > 0;
 }
 
 export async function contractHasVisitOutsideRange(
@@ -236,13 +256,14 @@ export async function insertContractRecord(
 ): Promise<void> {
   const [result] = await connection.execute<ResultSetHeader>(
     `INSERT INTO consulting_contract
-       (id, customer_id, status, starts_on, ends_on, monthly_fee_amount,
+       (id, customer_id, project_id, status, starts_on, ends_on, monthly_fee_amount,
         currency, vat_mode, vat_rate, payment_day, internal_note,
         created_at_utc, updated_at_utc)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       contract.id,
       contract.customerId,
+      contract.projectId,
       contract.status,
       contract.startsOn,
       contract.endsOn,
@@ -265,11 +286,12 @@ export async function updateContractRecord(
 ): Promise<void> {
   const [result] = await connection.execute<ResultSetHeader>(
     `UPDATE consulting_contract
-        SET status = ?, starts_on = ?, ends_on = ?, monthly_fee_amount = ?,
+        SET project_id = ?, status = ?, starts_on = ?, ends_on = ?, monthly_fee_amount = ?,
             vat_mode = ?, vat_rate = ?, payment_day = ?, internal_note = ?,
             updated_at_utc = ?
       WHERE id = ? AND customer_id = ?`,
     [
+      contract.projectId,
       contract.status,
       contract.startsOn,
       contract.endsOn,

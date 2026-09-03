@@ -24,6 +24,9 @@ describe("finance repository snapshot", () => {
           id: "30000000-0000-4000-8000-000000000001",
           net_amount: "100.0000",
           period_month: null,
+          project_id: "70000000-0000-4000-8000-000000000001",
+          project_name: "Mühendis Kafası",
+          project_short_code: "MUHENDIS_KAFASI",
           source_type: "opening_balance",
           total_amount: "100.0000",
           updated_at_utc: "2026-09-01 09:00:00.000000",
@@ -46,7 +49,31 @@ describe("finance repository snapshot", () => {
     );
     expect(result).toMatchObject({
       collectedAmountInRange: "25.0000",
-      receivables: [{ collectedAmount: "25.0000" }],
+      receivables: [
+        {
+          collectedAmount: "25.0000",
+          projectName: "Mühendis Kafası",
+        },
+      ],
     });
+  });
+
+  it("applies the project filter to both ledger rows and in-range collections", async () => {
+    const execute = vi.fn().mockResolvedValue([[], []]);
+    const projectId = "70000000-0000-4000-8000-000000000001";
+
+    await listReceivableRecords(
+      { execute } as unknown as PoolConnection,
+      "2026-09-01",
+      "2026-10-01",
+      projectId,
+    );
+
+    expect(execute).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /collected_r\.project_id = \?[\s\S]*WHERE r\.project_id = \?/u,
+      ),
+      ["2026-09-01", "2026-10-01", projectId, projectId],
+    );
   });
 });

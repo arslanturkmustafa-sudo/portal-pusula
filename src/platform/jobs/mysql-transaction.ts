@@ -43,3 +43,38 @@ export async function withUtcTransaction<T>(
     throw error;
   }
 }
+
+export async function withUtcConsistentRead<T>(
+  pool: Pool,
+  operation: (connection: PoolConnection) => Promise<T>,
+): Promise<T> {
+  const expectedDatabaseName = registeredMySqlPoolDatabase(pool);
+  const connection = await pool.getConnection();
+  let transactionStarted = false;
+
+  try {
+    await configureAndVerifyMySqlSession(connection, expectedDatabaseName);
+    await connection.query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ");
+    await connection.query("START TRANSACTION READ ONLY");
+    transactionStarted = true;
+    const result = await operation(connection);
+    await connection.commit();
+    transactionStarted = false;
+    connection.release();
+    return result;
+  } catch (error) {
+    if (transactionStarted) {
+      try {
+        await connection.rollback();
+      } catch {
+        // The original error remains authoritative and is never logged.
+      }
+    }
+    try {
+      connection.destroy();
+    } catch {
+      // The connection remains excluded from the reusable release path.
+    }
+    throw error;
+  }
+}

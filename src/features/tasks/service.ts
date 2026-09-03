@@ -5,7 +5,10 @@ import { randomUUID } from "node:crypto";
 import type { Pool, PoolConnection } from "mysql2/promise";
 
 import { findUserAccountById } from "@/features/account/repository";
-import { findCustomerForUpdate } from "@/features/customers/repository";
+import {
+  findActiveCustomerProjectForUpdate,
+  findCustomerForUpdate,
+} from "@/features/customers/repository";
 import { findProjectForUpdate } from "@/features/projects/repository";
 import {
   findTaskRecordById,
@@ -53,6 +56,13 @@ export class TaskProjectNotFoundError extends Error {
   constructor() {
     super("Task project was not found.");
     this.name = "TaskProjectNotFoundError";
+  }
+}
+
+export class TaskCustomerProjectMismatchError extends Error {
+  constructor() {
+    super("Task customer is not actively linked to the selected project.");
+    this.name = "TaskCustomerProjectMismatchError";
   }
 }
 
@@ -106,6 +116,14 @@ async function assertTaskReferences(
   if (projectId !== null) {
     const project = await findProjectForUpdate(connection, projectId);
     if (!project) throw new TaskProjectNotFoundError();
+  }
+
+  if (
+    customerId !== null &&
+    projectId !== null &&
+    !(await findActiveCustomerProjectForUpdate(connection, customerId, projectId))
+  ) {
+    throw new TaskCustomerProjectMismatchError();
   }
 }
 
@@ -221,6 +239,17 @@ export async function updateTask(
         after.assigneeUserAccountId,
         after.projectId,
       );
+    } else if (
+      after.status !== "done" &&
+      after.customerId !== null &&
+      after.projectId !== null &&
+      !(await findActiveCustomerProjectForUpdate(
+        connection,
+        after.customerId,
+        after.projectId,
+      ))
+    ) {
+      throw new TaskCustomerProjectMismatchError();
     }
     if (!(await updateTaskRecord(connection, after, expectedVersion))) {
       throw new TaskVersionConflictError();

@@ -21,9 +21,24 @@ type CustomerView = Readonly<{
   name: string;
   payment: string;
   phone?: string | null;
+  projects: readonly ProjectSummary[];
   status: string;
   tone: "active" | "inactive" | "late" | "paid" | "waiting";
   visit: string;
+}>;
+
+type ProjectStatus =
+  | "planned"
+  | "active"
+  | "on_hold"
+  | "completed"
+  | "cancelled";
+
+type ProjectSummary = Readonly<{
+  displayName: string;
+  id: string;
+  shortCode: string;
+  status: ProjectStatus;
 }>;
 
 type StoredCustomer = Readonly<{
@@ -32,9 +47,27 @@ type StoredCustomer = Readonly<{
   email: string | null;
   id: string;
   phone: string | null;
+  projects: readonly ProjectSummary[];
   shortCode: string;
   status: "active" | "inactive";
 }>;
+
+function canAcceptNewCustomerLink(status: ProjectStatus): boolean {
+  return status === "active" || status === "planned" || status === "on_hold";
+}
+
+function customerProjectStatusSuffix(status: ProjectStatus): string {
+  if (status === "active") return "";
+  if (status === "planned") return " · planlandı";
+  return " · beklemede";
+}
+
+const sampleProject: ProjectSummary = {
+  displayName: "Mühendis Kafası",
+  id: "sample-project-1",
+  shortCode: "MUHENDIS_KAFASI",
+  status: "active",
+};
 
 const sampleCustomers: readonly CustomerView[] = [
   {
@@ -45,6 +78,7 @@ const sampleCustomers: readonly CustomerView[] = [
     visit: "3 Eylül",
     fee: "120.000 ₺",
     payment: "Ayın 5'i",
+    projects: [sampleProject],
     status: "Tahsil edildi",
     tone: "paid",
   },
@@ -56,6 +90,7 @@ const sampleCustomers: readonly CustomerView[] = [
     visit: "10 Eylül",
     fee: "50.000 ₺ + KDV",
     payment: "Ayın 10'u",
+    projects: [sampleProject],
     status: "Gecikti",
     tone: "late",
   },
@@ -67,6 +102,7 @@ const sampleCustomers: readonly CustomerView[] = [
     visit: "Planlanmadı",
     fee: "75.000 ₺",
     payment: "Ayın 15'i",
+    projects: [sampleProject],
     status: "Bekliyor",
     tone: "waiting",
   },
@@ -78,6 +114,7 @@ const sampleCustomers: readonly CustomerView[] = [
     visit: "17 Eylül",
     fee: "50.000 ₺ + KDV",
     payment: "Ayın 20'si",
+    projects: [sampleProject],
     status: "Bekliyor",
     tone: "waiting",
   },
@@ -89,6 +126,7 @@ const sampleCustomers: readonly CustomerView[] = [
     visit: "Planlanmadı",
     fee: "50.000 ₺",
     payment: "Ayın 25'i",
+    projects: [sampleProject],
     status: "Gecikti",
     tone: "late",
   },
@@ -119,6 +157,7 @@ function storedCustomerView(customer: StoredCustomer): CustomerView {
     name: customer.displayName,
     payment: "—",
     phone: customer.phone,
+    projects: customer.projects,
     status: customer.status === "active" ? "Aktif" : "Pasif",
     tone: customer.status,
     visit: "Planlanmadı",
@@ -153,30 +192,72 @@ type HomeScreenProps = Readonly<{
 export function HomeScreen({ live = false }: HomeScreenProps) {
   const [customerRows, setCustomerRows] =
     useState<readonly CustomerView[]>(() => (live ? [] : sampleCustomers));
+  const [projects, setProjects] = useState<readonly ProjectSummary[]>(() =>
+    live ? [] : [sampleProject],
+  );
   const [dataState, setDataState] = useState<
     "error" | "live" | "loading" | "sample"
   >(live ? "loading" : "sample");
   const [filter, setFilter] = useState<"all" | "late">("all");
+  const [projectFilter, setProjectFilter] = useState("all");
   const [query, setQuery] = useState("");
   const [formOpen, setFormOpen] = useState(false);
   const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<"error" | "idle" | "saving">("idle");
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [newCustomerProjectIds, setNewCustomerProjectIds] = useState<readonly string[]>([]);
 
   useEffect(() => {
     if (!live) return;
     const controller = new AbortController();
 
-    void fetch("/api/customers", {
-      cache: "no-store",
-      credentials: "same-origin",
-      signal: controller.signal,
-    })
-      .then(async (response) => {
-        if (!response.ok) throw new Error("Customer list is unavailable.");
-        return (await response.json()) as { customers?: StoredCustomer[] };
+    void Promise.all([
+      fetch("/api/customers", {
+        cache: "no-store",
+        credentials: "same-origin",
+        signal: controller.signal,
+      }),
+      fetch("/api/projects", {
+        cache: "no-store",
+        credentials: "same-origin",
+        signal: controller.signal,
+      }),
+    ])
+      .then(async ([customersResponse, projectsResponse]) => {
+        if (!customersResponse.ok || !projectsResponse.ok) {
+          throw new Error("Customer workspace is unavailable.");
+        }
+        const [customerPayload, projectPayload] = (await Promise.all([
+          customersResponse.json(),
+          projectsResponse.json(),
+        ])) as [
+          { customers?: StoredCustomer[] },
+          { projects?: ProjectSummary[] },
+        ];
+        if (
+          !Array.isArray(customerPayload.customers) ||
+          !Array.isArray(projectPayload.projects)
+        ) {
+          throw new Error("Customer workspace response is invalid.");
+        }
+        return {
+          customers: customerPayload.customers,
+          projects: projectPayload.projects,
+        };
       })
       .then((payload) => {
-        setCustomerRows((payload.customers ?? []).map(storedCustomerView));
+        setCustomerRows(payload.customers.map(storedCustomerView));
+        setProjects(payload.projects);
+        const requestedProjectId = new URLSearchParams(window.location.search).get(
+          "projectId",
+        );
+        if (
+          requestedProjectId !== null &&
+          (requestedProjectId === "unassigned" ||
+            payload.projects.some((project) => project.id === requestedProjectId))
+        ) {
+          setProjectFilter(requestedProjectId);
+        }
         setDataState("live");
       })
       .catch((error: unknown) => {
@@ -193,11 +274,25 @@ export function HomeScreen({ live = false }: HomeScreenProps) {
       const queryMatches =
         canonicalQuery.length === 0 ||
         customer.name.toLocaleLowerCase("tr-TR").includes(canonicalQuery) ||
-        customer.code.toLocaleLowerCase("tr-TR").includes(canonicalQuery);
+        customer.code.toLocaleLowerCase("tr-TR").includes(canonicalQuery) ||
+        customer.projects.some(
+          (project) =>
+            project.displayName
+              .toLocaleLowerCase("tr-TR")
+              .includes(canonicalQuery) ||
+            project.shortCode
+              .toLocaleLowerCase("tr-TR")
+              .includes(canonicalQuery),
+        );
       const filterMatches = filter === "all" || customer.tone === "late";
-      return queryMatches && filterMatches;
+      const projectMatches =
+        projectFilter === "all" ||
+        (projectFilter === "unassigned"
+          ? customer.projects.length === 0
+          : customer.projects.some((project) => project.id === projectFilter));
+      return queryMatches && filterMatches && projectMatches;
     });
-  }, [customerRows, filter, query]);
+  }, [customerRows, filter, projectFilter, query]);
 
   const selectedCustomer = useMemo(
     () => customerRows.find((customer) => customer.id === selectedCustomerId) ?? null,
@@ -233,6 +328,7 @@ export function HomeScreen({ live = false }: HomeScreenProps) {
       email: string | null;
       id: string;
       phone: string | null;
+      projects: readonly ProjectSummary[];
     }) => {
       setCustomerRows((current) =>
         current.map((row) =>
@@ -244,6 +340,7 @@ export function HomeScreen({ live = false }: HomeScreenProps) {
                 email: customer.email,
                 name: customer.displayName,
                 phone: customer.phone,
+                projects: customer.projects,
               }
             : row,
         ),
@@ -293,7 +390,14 @@ export function HomeScreen({ live = false }: HomeScreenProps) {
     event.preventDefault();
     const form = event.currentTarget;
     const fields = new FormData(form);
+    const projectIds = newCustomerProjectIds;
+    if (projectIds.length === 0) {
+      setSaveState("error");
+      setSaveError("Müşteriyi en az bir projeye bağlayın.");
+      return;
+    }
     setSaveState("saving");
+    setSaveError(null);
 
     try {
       const response = await fetch("/api/customers", {
@@ -302,6 +406,7 @@ export function HomeScreen({ live = false }: HomeScreenProps) {
           displayName: fields.get("displayName"),
           email: fields.get("email"),
           phone: fields.get("phone"),
+          projectIds,
           shortCode: generatedCustomerCode(fields.get("displayName")),
           status: "active",
         }),
@@ -318,10 +423,13 @@ export function HomeScreen({ live = false }: HomeScreenProps) {
       setSelectedCustomerId(payload.customer.id);
       setDataState("live");
       setSaveState("idle");
+      setSaveError(null);
+      setNewCustomerProjectIds([]);
       setFormOpen(false);
       form.reset();
     } catch {
       setSaveState("error");
+      setSaveError("Kayıt tamamlanamadı. Bağlantıyı ve alanları kontrol edip yeniden deneyin.");
     }
   }
 
@@ -346,6 +454,7 @@ export function HomeScreen({ live = false }: HomeScreenProps) {
             onClick={() => {
               setFormOpen((current) => !current);
               setSaveState("idle");
+              setSaveError(null);
             }}
           >
             + Müşteri ekle
@@ -380,21 +489,75 @@ export function HomeScreen({ live = false }: HomeScreenProps) {
                   <span>İletişim notu</span>
                   <textarea maxLength={2000} name="contactNote" rows={2} />
                 </label>
+                <fieldset className="customer-project-picker">
+                  <legend>Bağlı projeler</legend>
+                  <p>Müşterinin hizmet aldığı bir veya daha fazla iş hattını seçin.</p>
+                  <div className="customer-project-options">
+                    {projects
+                      .filter((project) =>
+                        canAcceptNewCustomerLink(project.status),
+                      )
+                      .map((project) => (
+                        <label key={project.id}>
+                          <input
+                            checked={newCustomerProjectIds.includes(project.id)}
+                            name="projectIds"
+                            type="checkbox"
+                            value={project.id}
+                            onChange={(event) =>
+                              setNewCustomerProjectIds((current) =>
+                                event.target.checked
+                                  ? [...current, project.id]
+                                  : current.filter((id) => id !== project.id),
+                              )
+                            }
+                          />
+                          <span>
+                            <strong>{project.displayName}</strong>
+                            <small>
+                              {project.shortCode}
+                              {customerProjectStatusSuffix(project.status)}
+                            </small>
+                          </span>
+                        </label>
+                      ))}
+                    {projects.every(
+                      (project) => !canAcceptNewCustomerLink(project.status),
+                    ) ? (
+                      <p className="customer-project-empty">
+                        Müşteri bağlanabilecek proje bulunmuyor.
+                      </p>
+                    ) : null}
+                  </div>
+                </fieldset>
                 <div className="entry-actions">
                   <button
                     className="text-action"
                     type="button"
-                    onClick={() => setFormOpen(false)}
+                    onClick={() => {
+                      setFormOpen(false);
+                      setNewCustomerProjectIds([]);
+                      setSaveError(null);
+                    }}
                   >
                     Vazgeç
                   </button>
-                  <button className="primary-action" disabled={saveState === "saving"} type="submit">
+                  <button
+                    className="primary-action"
+                    disabled={
+                      saveState === "saving" ||
+                      projects.every(
+                        (project) => !canAcceptNewCustomerLink(project.status),
+                      )
+                    }
+                    type="submit"
+                  >
                     {saveState === "saving" ? "Kaydediliyor…" : "Müşteriyi kaydet"}
                   </button>
                 </div>
-                {saveState === "error" ? (
+                {saveState === "error" && saveError !== null ? (
                   <p className="entry-error" role="alert">
-                    Kayıt tamamlanamadı. Bağlantıyı ve alanları kontrol edip yeniden deneyin.
+                    {saveError}
                   </p>
                 ) : null}
               </form>
@@ -449,6 +612,22 @@ export function HomeScreen({ live = false }: HomeScreenProps) {
                       onChange={(event) => setQuery(event.target.value)}
                     />
                   </label>
+                  <label className="customer-project-filter">
+                    <span className="sr-only">Projeye göre filtrele</span>
+                    <select
+                      aria-label="Projeye göre filtrele"
+                      value={projectFilter}
+                      onChange={(event) => setProjectFilter(event.target.value)}
+                    >
+                      <option value="all">Tüm projeler</option>
+                      {projects.map((project) => (
+                        <option key={project.id} value={project.id}>
+                          {project.displayName}
+                        </option>
+                      ))}
+                      <option value="unassigned">Proje atanmamış</option>
+                    </select>
+                  </label>
                   <div className="filter-set" aria-label="Kayıt filtresi">
                     <button
                       className={filter === "all" ? "is-selected" : undefined}
@@ -473,6 +652,7 @@ export function HomeScreen({ live = false }: HomeScreenProps) {
                   <thead>
                     <tr>
                       <th scope="col">Müşteri</th>
+                      <th scope="col">Projeler</th>
                       <th scope="col">Sonraki ziyaret</th>
                       <th scope="col">Aylık ücret</th>
                       <th scope="col">Ödeme</th>
@@ -497,6 +677,21 @@ export function HomeScreen({ live = false }: HomeScreenProps) {
                             <small>{customer.code}</small>
                           </button>
                         </td>
+                        <td className="customer-project-cell" data-label="Projeler">
+                          {customer.projects.length > 0 ? (
+                            <span className="customer-project-badges">
+                              {customer.projects.map((project) => (
+                                <span className="customer-project-badge" key={project.id}>
+                                  {project.displayName}
+                                </span>
+                              ))}
+                            </span>
+                          ) : (
+                            <span className="customer-project-unassigned">
+                              Proje atanmamış
+                            </span>
+                          )}
+                        </td>
                         <td data-label="Sonraki ziyaret">{customer.visit}</td>
                         <td data-label="Aylık ücret">{customer.fee}</td>
                         <td data-label="Ödeme">{customer.payment}</td>
@@ -509,7 +704,7 @@ export function HomeScreen({ live = false }: HomeScreenProps) {
                     ))}
                     {visibleCustomers.length === 0 ? (
                       <tr>
-                        <td className="empty-row" colSpan={5}>
+                        <td className="empty-row" colSpan={6}>
                           {customerRows.length === 0
                             ? "Henüz müşteri kaydı yok. İlk müşteriyi ekleyerek başlayın."
                             : "Arama veya filtreyle eşleşen kayıt bulunamadı."}
@@ -533,7 +728,9 @@ export function HomeScreen({ live = false }: HomeScreenProps) {
                 id: selectedCustomer.id,
                 name: selectedCustomer.name,
                 phone: selectedCustomer.phone ?? null,
+                projects: selectedCustomer.projects,
               }}
+              availableProjects={projects}
               live={live}
               onContractSaved={handleContractSaved}
               onCustomerSaved={handleCustomerSaved}

@@ -12,6 +12,7 @@ import {
   listCustomers,
   updateCustomer,
 } from "../../src/features/customers/service";
+import { createProject } from "../../src/features/projects/service";
 import { registerMySqlPoolDatabase } from "../../src/platform/database/mysql-session-contract";
 
 const enabled = process.env.PORTAL_PUSULA_DISPOSABLE_MARIADB === "1";
@@ -55,6 +56,21 @@ describe.skipIf(!enabled)("MariaDB customer persistence", () => {
 
   it("creates, reads, updates and audits a Turkish customer record", async () => {
     const correlationId = randomUUID();
+    const project = await createProject(
+      pool,
+      {
+        budgetAmount: null,
+        displayName: "Müşteri Kalıcılık Projesi",
+        internalNote: null,
+        objective: null,
+        projectType: "consulting",
+        shortCode: `MCP_${randomUUID().replaceAll("-", "").slice(0, 8).toUpperCase()}`,
+        startsOn: null,
+        status: "active",
+        targetEndsOn: null,
+      },
+      { correlationId: randomUUID(), now: new Date("2026-09-01T08:00:00.000Z") },
+    );
     const created = await createCustomer(
       pool,
       {
@@ -62,6 +78,7 @@ describe.skipIf(!enabled)("MariaDB customer persistence", () => {
         displayName: "Öncü Üretim Çözümleri",
         email: "yonetim@oncu.example",
         phone: "+90 532 000 00 00",
+        projectIds: [project.id],
         shortCode: "oncu_uretim",
         status: "active",
       },
@@ -70,6 +87,14 @@ describe.skipIf(!enabled)("MariaDB customer persistence", () => {
 
     expect(created.shortCode).toBe("ONCU_URETIM");
     expect(created.displayName).toBe("Öncü Üretim Çözümleri");
+    expect(created.projects).toEqual([
+      {
+        displayName: project.displayName,
+        id: project.id,
+        shortCode: project.shortCode,
+        status: project.status,
+      },
+    ]);
 
     const listedAfterCreate = await listCustomers(pool);
     expect(listedAfterCreate).toContainEqual(created);

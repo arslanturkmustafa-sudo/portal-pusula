@@ -5,7 +5,10 @@ import { randomUUID } from "node:crypto";
 import Decimal from "decimal.js";
 import type { Pool } from "mysql2/promise";
 
-import { findCustomerForUpdate } from "@/features/customers/repository";
+import {
+  findActiveCustomerProjectForUpdate,
+  findCustomerForUpdate,
+} from "@/features/customers/repository";
 import {
   addMoney,
   contractMoneySnapshot,
@@ -37,6 +40,8 @@ import {
 import {
   type CreateCollectionInput,
   createCollectionInputSchema,
+  type FinanceReceivableListFilter,
+  financeReceivableListFilterSchema,
   type GenerateReceivableInput,
   generateReceivableInputSchema,
   type OpeningBalanceInput,
@@ -53,10 +58,24 @@ export class FinanceResourceNotFoundError extends Error {
   }
 }
 
+export class FinanceCustomerProjectUnavailableError extends Error {
+  constructor() {
+    super("The project is not an active project for this customer.");
+    this.name = "FinanceCustomerProjectUnavailableError";
+  }
+}
+
 export class ContractNotBillableError extends Error {
   constructor() {
     super("The contract cannot generate a receivable.");
     this.name = "ContractNotBillableError";
+  }
+}
+
+export class FinanceContractProjectMissingError extends Error {
+  constructor() {
+    super("The contract must be assigned to a project before billing.");
+    this.name = "FinanceContractProjectMissingError";
   }
 }
 
@@ -139,6 +158,7 @@ function receivableAuditSummary(receivable: ReceivableRecord) {
     dueOn: receivable.dueOn,
     netAmount: receivable.netAmount,
     periodMonth: receivable.periodMonth,
+    projectId: receivable.projectId,
     sourceType: receivable.sourceType,
     totalAmount: receivable.totalAmount,
     vatAmount: receivable.vatAmount,
@@ -157,6 +177,7 @@ function openingBalanceMatches(
     persisted.dueOn === pending.dueOn &&
     persisted.netAmount === pending.netAmount &&
     persisted.periodMonth === null &&
+    persisted.projectId === pending.projectId &&
     persisted.sourceType === "opening_balance" &&
     persisted.totalAmount === pending.totalAmount &&
     persisted.vatAmount === pending.vatAmount
@@ -176,10 +197,25 @@ function collectionMatches(
   );
 }
 
+export function listFinanceReceivables(
+  pool: Pool,
+  now?: Date,
+): Promise<FinanceReceivables>;
+export function listFinanceReceivables(
+  pool: Pool,
+  rawFilters?: FinanceReceivableListFilter,
+  now?: Date,
+): Promise<FinanceReceivables>;
 export async function listFinanceReceivables(
   pool: Pool,
-  now = new Date(),
+  rawFiltersOrNow: FinanceReceivableListFilter | Date = {},
+  requestedNow = new Date(),
 ): Promise<FinanceReceivables> {
+  const filters = financeReceivableListFilterSchema.parse(
+    rawFiltersOrNow instanceof Date ? {} : rawFiltersOrNow,
+  );
+  const now =
+    rawFiltersOrNow instanceof Date ? rawFiltersOrNow : requestedNow;
   const today = istanbulDate(now);
   const month = today.slice(0, 7);
   const { monthStart, nextMonthStart } = monthBounds(month);
@@ -189,6 +225,7 @@ export async function listFinanceReceivables(
       connection,
       monthStart,
       nextMonthStart,
+      filters.projectId,
     );
     const receivables = snapshot.receivables.map((record) =>
       receivableView(record, today),
@@ -247,6 +284,9 @@ export async function generateContractMonthReceivable(
     );
     if (!contract) throw new FinanceResourceNotFoundError();
     if (contract.status !== "active") throw new ContractNotBillableError();
+    if (contract.projectId === null) {
+      throw new FinanceContractProjectMissingError();
+    }
     if (!monthIntersectsPeriod(input.month, contract.startsOn, contract.endsOn)) {
       throw new FinanceMonthOutsideContractError();
     }
@@ -282,6 +322,7 @@ export async function generateContractMonthReceivable(
       dueOn: dueDateForMonth(input.month, contract.paymentDay),
       id: randomUUID(),
       periodMonth: input.month,
+      projectId: contract.projectId,
       sourceType: "contract_month",
       updatedAtUtc: now,
     };
@@ -318,6 +359,15 @@ export async function createOpeningBalance(
   return withUtcTransaction(pool, async (connection) => {
     const customer = await findCustomerForUpdate(connection, input.customerId);
     if (!customer) throw new FinanceResourceNotFoundError();
+    if (
+      !(await findActiveCustomerProjectForUpdate(
+        connection,
+        input.customerId,
+        input.projectId,
+      ))
+    ) {
+      throw new FinanceCustomerProjectUnavailableError();
+    }
     const snapshot = openingBalanceMoneySnapshot(
       input.netAmount,
       input.vatAmount,
@@ -333,6 +383,7 @@ export async function createOpeningBalance(
       dueOn: input.dueOn,
       id: randomUUID(),
       periodMonth: null,
+      projectId: input.projectId,
       sourceType: "opening_balance",
       updatedAtUtc: now,
     };

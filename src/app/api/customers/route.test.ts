@@ -14,6 +14,8 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/features/customers", () => ({
   createCustomer: mocks.createCustomer,
   createCustomerInputSchema: { parse: mocks.parseCustomer },
+  CustomerProjectNotFoundError: class CustomerProjectNotFoundError extends Error {},
+  CustomerProjectUnavailableError: class CustomerProjectUnavailableError extends Error {},
   CustomerShortCodeConflictError: class CustomerShortCodeConflictError extends Error {},
   listCustomers: vi.fn(),
 }));
@@ -42,6 +44,7 @@ const input = {
   displayName: "Staging Customer",
   email: null,
   phone: null,
+  projectIds: ["10000000-0000-4000-8000-000000000001"],
   shortCode: "STAGING",
   status: "active",
 };
@@ -51,6 +54,7 @@ function customerRequest(): NextRequest {
     body: JSON.stringify(input),
     headers: {
       "content-type": "application/json",
+      origin: "https://portal.example.test",
       "x-correlation-id": correlationId,
     },
     method: "POST",

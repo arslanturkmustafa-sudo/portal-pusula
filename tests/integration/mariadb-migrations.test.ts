@@ -33,6 +33,11 @@ const workTaskProjectTable = "work_task_project";
 const creditCardTable = "credit_card";
 const expenseTable = "expense";
 const creditCardInstallmentTable = "credit_card_installment";
+const customerProjectTable = "customer_project";
+const partnershipCommissionTable = "partnership_commission";
+const partnershipContributionTable = "partnership_contribution";
+const partnershipContributionReceiptTable =
+  "partnership_contribution_receipt";
 const platformTables = [
   "audit_event",
   "job_run",
@@ -54,6 +59,10 @@ const allMigratedPlatformTables = [
   creditCardTable,
   expenseTable,
   creditCardInstallmentTable,
+  customerProjectTable,
+  partnershipCommissionTable,
+  partnershipContributionTable,
+  partnershipContributionReceiptTable,
 ] as const;
 const repositoryRoot = process.cwd();
 const migrationLockWaitTimeoutMs = 5_000;
@@ -325,17 +334,23 @@ async function waitForBlockedMigrationRunners(
 async function resetKnownMigrationArtifacts(pool: Pool): Promise<void> {
   // These identifiers are compile-time constants and this suite is enabled only
   // for the disposable MariaDB provisioned by scripts/test-mariadb.mjs.
+  await pool.query(
+    `DROP TABLE IF EXISTS \`${partnershipContributionReceiptTable}\``,
+  );
+  await pool.query(`DROP TABLE IF EXISTS \`${partnershipContributionTable}\``);
+  await pool.query(`DROP TABLE IF EXISTS \`${partnershipCommissionTable}\``);
   await pool.query(`DROP TABLE IF EXISTS \`${creditCardInstallmentTable}\``);
   await pool.query(`DROP TABLE IF EXISTS \`${expenseTable}\``);
   await pool.query(`DROP TABLE IF EXISTS \`${creditCardTable}\``);
   await pool.query(`DROP TABLE IF EXISTS \`${workTaskProjectTable}\``);
   await pool.query(`DROP TABLE IF EXISTS \`${workTaskTable}\``);
-  await pool.query(`DROP TABLE IF EXISTS \`${projectTable}\``);
   await pool.query(`DROP TABLE IF EXISTS \`${userAccountTable}\``);
   await pool.query("DROP TABLE IF EXISTS `receivable_collection`");
   await pool.query("DROP TABLE IF EXISTS `receivable`");
   await pool.query("DROP TABLE IF EXISTS `monthly_visit_commitment`");
   await pool.query("DROP TABLE IF EXISTS `consulting_contract`");
+  await pool.query(`DROP TABLE IF EXISTS \`${customerProjectTable}\``);
+  await pool.query(`DROP TABLE IF EXISTS \`${projectTable}\``);
   await pool.query("DROP TABLE IF EXISTS `customer`");
   await pool.query("DROP TABLE IF EXISTS `cron_dispatch_gate`");
   await pool.query("DROP TABLE IF EXISTS `job_run`");
@@ -549,7 +564,7 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
 
     it("creates the complete schema and preserves the core platform metadata contracts", async () => {
       const [tableRows] = await pool.query<RowDataPacket[]>("SHOW TABLES");
-      expect(tableRows).toHaveLength(19);
+      expect(tableRows).toHaveLength(23);
 
       const [statusRows] = await pool.execute<PlatformTableStatusRow[]>(
         `SELECT TABLE_NAME, ENGINE, TABLE_COLLATION
@@ -922,7 +937,7 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
       ]);
     });
 
-    it("records the immutable 0000 through 0010 migration hash chain", async () => {
+    it("records the immutable 0000 through 0011 migration hash chain", async () => {
       const [rows] = await pool.query<MigrationRow[]>(
         `SELECT id, hash, created_at FROM \`${migrationTable}\` ORDER BY id`,
       );
@@ -981,6 +996,11 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
           created_at: 1788428596372,
           hash: "1a2d0d64e14138d940fa2d6f4e56561b16ad06c7a63b1be6e63d6073c0c0c629",
           id: 11,
+        },
+        {
+          created_at: 1788435178955,
+          hash: "b3abd1340be3a5f4c96c1a63348d44c134bdc907fc5a24e1b978093ad6708c81",
+          id: 12,
         },
       ]);
     });
@@ -1385,7 +1405,7 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
       const [before] = await pool.query<MigrationRow[]>(
         `SELECT id, hash, created_at FROM \`${migrationTable}\` ORDER BY id`,
       );
-      expect(before).toHaveLength(11);
+      expect(before).toHaveLength(12);
 
       await runMigration();
 
@@ -1399,7 +1419,7 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
       const [migrationRows] = await pool.query<MigrationRow[]>(
         `SELECT id, hash, created_at FROM \`${migrationTable}\` ORDER BY id`,
       );
-      expect(migrationRows).toHaveLength(11);
+      expect(migrationRows).toHaveLength(12);
       const migration = migrationRows[3];
       if (migration === undefined) {
         throw new Error("Expected the fourth applied migration journal row.");
@@ -1518,7 +1538,7 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
           const [journalRows] = await lockConnection.query<MigrationRow[]>(
             `SELECT id, hash, created_at FROM \`${migrationTable}\` ORDER BY id`,
           );
-          expect(journalRows).toHaveLength(11);
+          expect(journalRows).toHaveLength(12);
           expect(await tableExists(lockConnection, verificationTable)).toBe(
             true,
           );

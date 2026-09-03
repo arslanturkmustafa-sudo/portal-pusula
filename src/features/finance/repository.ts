@@ -22,6 +22,9 @@ export type ReceivableRecord = Readonly<{
   id: string;
   netAmount: string;
   periodMonth: string | null;
+  projectId: string | null;
+  projectName: string | null;
+  projectShortCode: string | null;
   sourceType: ReceivableSourceType;
   totalAmount: string;
   updatedAtUtc: string;
@@ -30,9 +33,13 @@ export type ReceivableRecord = Readonly<{
 
 export type NewReceivableRecord = Omit<
   ReceivableRecord,
-  "collectedAmount" | "customerName"
+  | "collectedAmount"
+  | "customerName"
+  | "projectId"
+  | "projectName"
+  | "projectShortCode"
 > &
-  Readonly<{ clientOperationKey: string | null }>;
+  Readonly<{ clientOperationKey: string | null; projectId: string }>;
 
 export type ReceivableCollection = Readonly<{
   amount: string;
@@ -55,6 +62,7 @@ export type FinanceContractTerms = Readonly<{
   id: string;
   monthlyFeeAmount: string;
   paymentDay: number;
+  projectId: string | null;
   startsOn: string;
   status: ContractStatus;
   vatMode: VatMode;
@@ -73,6 +81,9 @@ type ReceivableRow = RowDataPacket & {
   id: string;
   net_amount: string;
   period_month: string | Date | null;
+  project_id: string | null;
+  project_name: string | null;
+  project_short_code: string | null;
   source_type: string;
   total_amount: string;
   updated_at_utc: string | Date;
@@ -99,6 +110,7 @@ type ContractTermsRow = RowDataPacket & {
   id: string;
   monthly_fee_amount: string;
   payment_day: number;
+  project_id: string | null;
   starts_on: string | Date;
   status: string;
   vat_mode: string;
@@ -141,6 +153,9 @@ function mapReceivable(row: ReceivableRow): ReceivableRecord {
       row.period_month === null
         ? null
         : canonicalDate(row.period_month).slice(0, 7),
+    projectId: row.project_id,
+    projectName: row.project_name,
+    projectShortCode: row.project_short_code,
     sourceType: row.source_type,
     totalAmount: row.total_amount,
     updatedAtUtc: canonicalDateTime(row.updated_at_utc),
@@ -161,7 +176,8 @@ function mapCollection(row: CollectionRow): ReceivableCollection {
 }
 
 const RECEIVABLE_COLUMNS = `
-  r.id, r.customer_id, c.display_name AS customer_name, r.contract_id,
+  r.id, r.customer_id, c.display_name AS customer_name, r.project_id,
+  p.display_name AS project_name, p.short_code AS project_short_code, r.contract_id,
   r.source_type, r.period_month, r.due_on, r.description,
   r.net_amount, r.vat_amount, r.total_amount, r.currency,
   r.created_at_utc, r.updated_at_utc,
@@ -175,19 +191,31 @@ export async function listReceivableRecords(
   connection: PoolConnection,
   startOn: string,
   nextStartOn: string,
+  projectId?: string,
 ): Promise<FinanceReceivableSnapshot> {
+  const collectionProjectFilter =
+    projectId === undefined ? "" : "\n            AND collected_r.project_id = ?";
+  const receivableProjectFilter =
+    projectId === undefined ? "" : "\n      WHERE r.project_id = ?";
+  const parameters =
+    projectId === undefined
+      ? [startOn, nextStartOn]
+      : [startOn, nextStartOn, projectId, projectId];
   const [rows] = await connection.execute<ReceivableSnapshotRow[]>(
     `SELECT ${RECEIVABLE_COLUMNS},
             month_collection.collected_in_range_amount
        FROM receivable r
        JOIN customer c ON c.id = r.customer_id
+       LEFT JOIN project p ON p.id = r.project_id
        CROSS JOIN (
-         SELECT COALESCE(SUM(amount), 0.0000) AS collected_in_range_amount
-           FROM receivable_collection
-          WHERE collected_on >= ? AND collected_on < ?
+         SELECT COALESCE(SUM(rc.amount), 0.0000) AS collected_in_range_amount
+           FROM receivable_collection rc
+           JOIN receivable collected_r ON collected_r.id = rc.receivable_id
+          WHERE rc.collected_on >= ? AND rc.collected_on < ?${collectionProjectFilter}
        ) month_collection
+       ${receivableProjectFilter}
       ORDER BY r.due_on ASC, c.display_name ASC, r.id ASC`,
-    [startOn, nextStartOn],
+    parameters,
   );
   return {
     collectedAmountInRange:
@@ -204,6 +232,7 @@ export async function findReceivableForUpdate(
     `SELECT ${RECEIVABLE_COLUMNS}
        FROM receivable r
        JOIN customer c ON c.id = r.customer_id
+       LEFT JOIN project p ON p.id = r.project_id
       WHERE r.id = ?
       FOR UPDATE`,
     [receivableId],
@@ -220,6 +249,7 @@ export async function findGeneratedReceivableForUpdate(
     `SELECT ${RECEIVABLE_COLUMNS}
        FROM receivable r
        JOIN customer c ON c.id = r.customer_id
+       LEFT JOIN project p ON p.id = r.project_id
       WHERE r.contract_id = ?
         AND r.source_type = 'contract_month'
         AND r.period_month = ?
@@ -237,6 +267,7 @@ export async function findOpeningBalanceByClientOperationKeyForUpdate(
     `SELECT ${RECEIVABLE_COLUMNS}
        FROM receivable r
        JOIN customer c ON c.id = r.customer_id
+       LEFT JOIN project p ON p.id = r.project_id
       WHERE r.source_type = 'opening_balance'
         AND r.client_operation_key = ?
       FOR UPDATE`,
@@ -265,7 +296,7 @@ export async function findFinanceContractForUpdate(
   contractId: string,
 ): Promise<FinanceContractTerms | null> {
   const [rows] = await connection.execute<ContractTermsRow[]>(
-    `SELECT id, customer_id, status, starts_on, ends_on,
+    `SELECT id, customer_id, project_id, status, starts_on, ends_on,
             monthly_fee_amount, vat_mode, vat_rate, payment_day
        FROM consulting_contract
       WHERE id = ?
@@ -294,6 +325,7 @@ export async function findFinanceContractForUpdate(
     id: row.id,
     monthlyFeeAmount: row.monthly_fee_amount,
     paymentDay: row.payment_day,
+    projectId: row.project_id,
     startsOn: canonicalDate(row.starts_on),
     status: row.status,
     vatMode: row.vat_mode,
@@ -307,15 +339,16 @@ export async function insertReceivableRecord(
 ): Promise<void> {
   const [result] = await connection.execute<ResultSetHeader>(
     `INSERT INTO receivable
-       (id, client_operation_key, customer_id, contract_id, source_type,
+       (id, client_operation_key, customer_id, project_id, contract_id, source_type,
         period_month, due_on,
         description, net_amount, vat_amount, total_amount, currency,
         created_at_utc, updated_at_utc)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       receivable.id,
       receivable.clientOperationKey,
       receivable.customerId,
+      receivable.projectId,
       receivable.contractId,
       receivable.sourceType,
       receivable.periodMonth === null
@@ -343,15 +376,16 @@ export async function insertOpeningBalanceRecordIdempotently(
   }
   await connection.execute<ResultSetHeader>(
     `INSERT INTO receivable
-       (id, client_operation_key, customer_id, contract_id, source_type,
+       (id, client_operation_key, customer_id, project_id, contract_id, source_type,
         period_month, due_on, description, net_amount, vat_amount,
         total_amount, currency, created_at_utc, updated_at_utc)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON DUPLICATE KEY UPDATE id = id`,
     [
       receivable.id,
       receivable.clientOperationKey,
       receivable.customerId,
+      receivable.projectId,
       receivable.contractId,
       receivable.sourceType,
       receivable.periodMonth === null

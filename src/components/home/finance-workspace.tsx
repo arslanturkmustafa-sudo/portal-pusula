@@ -17,12 +17,21 @@ type ReceivableStatus = "open" | "overdue" | "paid" | "partial";
 type FinanceCustomer = Readonly<{
   id: string;
   name: string;
+  projects?: readonly FinanceProject[];
+}>;
+
+type FinanceProject = Readonly<{
+  displayName: string;
+  id: string;
+  shortCode: string;
+  status: "planned" | "active" | "on_hold" | "completed" | "cancelled";
 }>;
 
 type ContractOption = Readonly<{
   endsOn: string;
   id: string;
   monthlyFeeAmount: string;
+  projectId: string | null;
   startsOn: string;
   status: "active" | "closed" | "draft";
 }>;
@@ -39,6 +48,9 @@ type Receivable = Readonly<{
   netAmount: string;
   outstandingAmount: string;
   periodMonth: string | null;
+  projectId: string | null;
+  projectName: string | null;
+  projectShortCode: string | null;
   sourceType: "contract_month" | "opening_balance";
   status: ReceivableStatus;
   totalAmount: string;
@@ -62,6 +74,7 @@ type ReceivablePayload = Readonly<{
 type FinanceWorkspaceProps = Readonly<{
   customers: readonly FinanceCustomer[];
   live: boolean;
+  projects?: readonly FinanceProject[];
 }>;
 
 const emptySummary: FinanceSummary = {
@@ -85,6 +98,9 @@ const samplePayload: ReceivablePayload = {
       netAmount: "120000.0000",
       outstandingAmount: "0.0000",
       periodMonth: "2026-09",
+      projectId: "sample-project-1",
+      projectName: "Mühendis Kafası",
+      projectShortCode: "MUHENDIS_KAFASI",
       sourceType: "contract_month",
       status: "paid",
       totalAmount: "120000.0000",
@@ -102,6 +118,9 @@ const samplePayload: ReceivablePayload = {
       netAmount: "50000.0000",
       outstandingAmount: "35000.0000",
       periodMonth: "2026-09",
+      projectId: "sample-project-1",
+      projectName: "Mühendis Kafası",
+      projectShortCode: "MUHENDIS_KAFASI",
       sourceType: "contract_month",
       status: "partial",
       totalAmount: "60000.0000",
@@ -119,6 +138,9 @@ const samplePayload: ReceivablePayload = {
       netAmount: "75000.0000",
       outstandingAmount: "75000.0000",
       periodMonth: null,
+      projectId: "sample-project-1",
+      projectName: "Mühendis Kafası",
+      projectShortCode: "MUHENDIS_KAFASI",
       sourceType: "opening_balance",
       status: "overdue",
       totalAmount: "75000.0000",
@@ -140,6 +162,7 @@ const sampleContractOptions: readonly ContractOption[] = [
     endsOn: "2027-08-31",
     id: "sample-contract",
     monthlyFeeAmount: "50000.0000",
+    projectId: "sample-project-1",
     startsOn: "2026-09-01",
     status: "active",
   },
@@ -207,7 +230,50 @@ function formValue(fields: FormData, name: string): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
-export function FinanceWorkspace({ customers, live }: FinanceWorkspaceProps) {
+function financeWriteErrorMessage(status: string | undefined): string {
+  const messages: Readonly<Record<string, string>> = {
+    collection_date_in_future: "Tahsilat tarihi bugünden ileri olamaz.",
+    collection_exceeds_outstanding: "Tahsilat, alacağın kalan tutarını aşamaz.",
+    contract_not_billable: "Seçilen sözleşme bu ay için tahakkuk oluşturmaya uygun değil.",
+    contract_project_missing: "Sözleşmenin proje bağlantısı eksik; önce sözleşmeyi güncelleyin.",
+    idempotency_conflict: "Aynı işlem anahtarı farklı bilgilerle kullanılmış. Formu kapatıp yeniden açın.",
+    month_outside_contract: "Seçilen ay sözleşmenin çalışma dönemi dışında.",
+    project_unavailable: "Müşteri seçilen projeye artık aktif olarak bağlı değil.",
+    resource_not_found: "Seçilen kayıt artık bulunamıyor. Sayfayı yenileyip tekrar deneyin.",
+    validation_error: "Alanları ve tutarları kontrol edin.",
+  };
+  return messages[status ?? ""] ?? "İşlem tamamlanamadı. Bağlantıyı kontrol edip yeniden deneyin.";
+}
+
+function redirectToLogin(): void {
+  window.location.assign(new URL("/giris", window.location.origin).toString());
+}
+
+async function fetchReceivablePayload(
+  projectFilter: string,
+  signal?: AbortSignal,
+): Promise<ReceivablePayload | null> {
+  const query = projectFilter === "all"
+    ? ""
+    : `?projectId=${encodeURIComponent(projectFilter)}`;
+  const response = await fetch(`/api/finance/receivables${query}`, {
+    cache: "no-store",
+    credentials: "same-origin",
+    signal,
+  });
+  if (response.status === 401) {
+    redirectToLogin();
+    return null;
+  }
+  if (!response.ok) throw new Error("Receivable list is unavailable.");
+  return (await response.json()) as ReceivablePayload;
+}
+
+export function FinanceWorkspace({
+  customers,
+  live,
+  projects = [],
+}: FinanceWorkspaceProps) {
   const [payload, setPayload] = useState<ReceivablePayload>(() =>
     live ? { receivables: [], summary: emptySummary } : samplePayload,
   );
@@ -218,42 +284,34 @@ export function FinanceWorkspace({ customers, live }: FinanceWorkspaceProps) {
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [saveMessage, setSaveMessage] = useState("");
   const [generateCustomerId, setGenerateCustomerId] = useState("");
+  const [openingCustomerId, setOpeningCustomerId] = useState("");
+  const [openingProjectId, setOpeningProjectId] = useState("");
   const [contractOptions, setContractOptions] = useState<readonly ContractOption[]>([]);
   const [contractLoadState, setContractLoadState] =
     useState<LoadState>("ready");
+  const [projectFilter, setProjectFilter] = useState("all");
   const pendingWrite = useRef<Readonly<{
     fingerprint: string;
     key: string;
   }> | null>(null);
 
-  const loadReceivables = useCallback(async (signal?: AbortSignal) => {
-    const response = await fetch("/api/finance/receivables", {
-      cache: "no-store",
-      credentials: "same-origin",
-      signal,
-    });
-    if (!response.ok) throw new Error("Receivable list is unavailable.");
-    const nextPayload = (await response.json()) as ReceivablePayload;
-    setPayload({
-      receivables: nextPayload.receivables ?? [],
-      summary: { ...emptySummary, ...nextPayload.summary },
-    });
-    setLoadState("ready");
-  }, []);
+  const financeProjects = useMemo(() => {
+    const byId = new Map<string, FinanceProject>();
+    for (const project of projects) byId.set(project.id, project);
+    for (const customer of customers) {
+      for (const project of customer.projects ?? []) byId.set(project.id, project);
+    }
+    return [...byId.values()].sort((left, right) =>
+      left.displayName.localeCompare(right.displayName, "tr"),
+    );
+  }, [customers, projects]);
 
   useEffect(() => {
     if (!live) return;
     const controller = new AbortController();
-    void fetch("/api/finance/receivables", {
-      cache: "no-store",
-      credentials: "same-origin",
-      signal: controller.signal,
-    })
-      .then(async (response) => {
-        if (!response.ok) throw new Error("Receivable list is unavailable.");
-        return (await response.json()) as ReceivablePayload;
-      })
+    void fetchReceivablePayload(projectFilter, controller.signal)
       .then((nextPayload) => {
+        if (nextPayload === null) return;
         setPayload({
           receivables: nextPayload.receivables ?? [],
           summary: { ...emptySummary, ...nextPayload.summary },
@@ -265,7 +323,7 @@ export function FinanceWorkspace({ customers, live }: FinanceWorkspaceProps) {
         setLoadState("error");
       });
     return () => controller.abort();
-  }, [live]);
+  }, [live, projectFilter]);
 
   useEffect(() => {
     if (!live || activeAction !== "generate" || generateCustomerId === "") return;
@@ -301,6 +359,26 @@ export function FinanceWorkspace({ customers, live }: FinanceWorkspaceProps) {
     live ? contractOptions : sampleContractOptions
   ).filter((contract) => contract.status === "active");
 
+  const openingProjects = useMemo(() => {
+    const customer = customers.find((item) => item.id === openingCustomerId);
+    return (customer?.projects ?? []).filter(
+      (project) =>
+        project.status === "active" ||
+        project.status === "planned" ||
+        project.status === "on_hold",
+    );
+  }, [customers, openingCustomerId]);
+
+  const customerProjectName = useCallback(
+    (customerId: string, projectId: string | null): string | null => {
+      if (projectId === null) return null;
+      const customer = customers.find((item) => item.id === customerId);
+      const project = customer?.projects?.find((item) => item.id === projectId);
+      return project?.displayName ?? null;
+    },
+    [customers],
+  );
+
   function openAction(action: FinanceAction) {
     setActiveAction((current) => (current === action ? null : action));
     setSaveState("idle");
@@ -311,6 +389,18 @@ export function FinanceWorkspace({ customers, live }: FinanceWorkspaceProps) {
     setGenerateCustomerId(customerId);
     setContractOptions([]);
     setContractLoadState(live && customerId !== "" ? "loading" : "ready");
+  }
+
+  function selectOpeningCustomer(customerId: string) {
+    const customer = customers.find((item) => item.id === customerId);
+    const eligible = (customer?.projects ?? []).filter(
+      (project) =>
+        project.status === "active" ||
+        project.status === "planned" ||
+        project.status === "on_hold",
+    );
+    setOpeningCustomerId(customerId);
+    setOpeningProjectId(eligible.length === 1 ? (eligible[0]?.id ?? "") : "");
   }
 
   async function postFinance(
@@ -342,15 +432,32 @@ export function FinanceWorkspace({ customers, live }: FinanceWorkspaceProps) {
         headers: { "Content-Type": "application/json" },
         method: "POST",
       });
-      if (!response.ok) throw new Error("Finance entry could not be saved.");
-      await loadReceivables();
+      if (response.status === 401) {
+        redirectToLogin();
+        return;
+      }
+      if (!response.ok) {
+        const failure = (await response.json().catch(() => ({}))) as {
+          status?: string;
+        };
+        setSaveState("error");
+        setSaveMessage(financeWriteErrorMessage(failure.status));
+        return;
+      }
+      const nextPayload = await fetchReceivablePayload(projectFilter);
+      if (nextPayload === null) return;
+      setPayload({
+        receivables: nextPayload.receivables ?? [],
+        summary: { ...emptySummary, ...nextPayload.summary },
+      });
+      setLoadState("ready");
       if (idempotent) pendingWrite.current = null;
       setSaveState("success");
       setSaveMessage("Kayıt tamamlandı; alacak tablosu güncellendi.");
       setActiveAction(null);
     } catch {
       setSaveState("error");
-      setSaveMessage("İşlem tamamlanamadı. Alanları ve bağlantıyı kontrol edin.");
+      setSaveMessage("İşlem tamamlanamadı. Bağlantıyı kontrol edip yeniden deneyin.");
     }
   }
 
@@ -371,6 +478,7 @@ export function FinanceWorkspace({ customers, live }: FinanceWorkspaceProps) {
       description: formValue(fields, "description"),
       dueOn: formValue(fields, "dueOn"),
       netAmount: formValue(fields, "netAmount"),
+      projectId: formValue(fields, "projectId"),
       vatAmount: formValue(fields, "vatAmount"),
     }, true);
   }
@@ -503,7 +611,7 @@ export function FinanceWorkspace({ customers, live }: FinanceWorkspaceProps) {
                   </option>
                   {visibleContractOptions.map((contract) => (
                     <option key={contract.id} value={contract.id}>
-                      {formatMoney(contract.monthlyFeeAmount)} · {formatDate(contract.startsOn)}–{formatDate(contract.endsOn)}
+                      {customerProjectName(generateCustomerId, contract.projectId) ?? "Proje atanmamış"} · {formatMoney(contract.monthlyFeeAmount)} · {formatDate(contract.startsOn)}–{formatDate(contract.endsOn)}
                     </option>
                   ))}
                 </select>
@@ -534,10 +642,39 @@ export function FinanceWorkspace({ customers, live }: FinanceWorkspaceProps) {
             <form className="finance-form" onSubmit={submitOpening}>
               <label>
                 <span>Müşteri</span>
-                <select name="customerId" required>
+                <select
+                  name="customerId"
+                  required
+                  value={openingCustomerId}
+                  onChange={(event) => selectOpeningCustomer(event.target.value)}
+                >
                   <option value="">Müşteri seçin</option>
                   {customers.map((customer) => (
                     <option key={customer.id} value={customer.id}>{customer.name}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>Proje</span>
+                <select
+                  aria-label="Geçmiş alacak projesi"
+                  disabled={openingCustomerId === "" || openingProjects.length === 0}
+                  name="projectId"
+                  required
+                  value={openingProjectId}
+                  onChange={(event) => setOpeningProjectId(event.target.value)}
+                >
+                  <option value="">
+                    {openingCustomerId === ""
+                      ? "Önce müşteri seçin"
+                      : openingProjects.length === 0
+                        ? "Müşteriye bağlı proje yok"
+                        : "Proje seçin"}
+                  </option>
+                  {openingProjects.map((project) => (
+                    <option key={project.id} value={project.id}>
+                      {project.displayName} · {project.shortCode}
+                    </option>
                   ))}
                 </select>
               </label>
@@ -581,7 +718,7 @@ export function FinanceWorkspace({ customers, live }: FinanceWorkspaceProps) {
                   <option value="">Alacak seçin</option>
                   {collectableReceivables.map((receivable) => (
                     <option key={receivable.id} value={receivable.id}>
-                      {receivable.customerName} · {formatPeriod(receivable.periodMonth)} · kalan {formatMoney(receivable.outstandingAmount)}
+                      {receivable.customerName} · {receivable.projectName ?? "Proje atanmamış"} · {formatPeriod(receivable.periodMonth)} · kalan {formatMoney(receivable.outstandingAmount)}
                     </option>
                   ))}
                 </select>
@@ -629,11 +766,36 @@ export function FinanceWorkspace({ customers, live }: FinanceWorkspaceProps) {
         </p>
       ) : null}
 
+      {financeProjects.length > 0 ? (
+        <div className="finance-receivable-toolbar">
+          <label>
+            <span>Tablodaki proje</span>
+            <select
+              aria-label="Alacak proje filtresi"
+              value={projectFilter}
+              onChange={(event) => {
+                setLoadState("loading");
+                setProjectFilter(event.target.value);
+              }}
+            >
+              <option value="all">Tüm projeler</option>
+              {financeProjects.map((project) => (
+                <option key={project.id} value={project.id}>
+                  {project.displayName} · {project.shortCode}
+                </option>
+              ))}
+            </select>
+          </label>
+          <span>Özet ve kayıtlar seçilen projeye göre birlikte güncellenir.</span>
+        </div>
+      ) : null}
+
       <div className="finance-table-wrap">
         <table className="finance-table" aria-label="Alacak ve tahsilat kayıtları">
           <thead>
             <tr>
               <th scope="col">Müşteri</th>
+              <th scope="col">Proje</th>
               <th scope="col">Dönem</th>
               <th scope="col">Vade</th>
               <th scope="col">Toplam</th>
@@ -649,6 +811,12 @@ export function FinanceWorkspace({ customers, live }: FinanceWorkspaceProps) {
                   <strong>{receivable.customerName}</strong>
                   <small>{receivable.description}</small>
                 </td>
+                <td data-label="Proje">
+                  <strong>{receivable.projectName ?? "Proje atanmamış"}</strong>
+                  {receivable.projectShortCode === null ? null : (
+                    <small>{receivable.projectShortCode}</small>
+                  )}
+                </td>
                 <td data-label="Dönem">{formatPeriod(receivable.periodMonth)}</td>
                 <td data-label="Vade">{formatDate(receivable.dueOn)}</td>
                 <td data-label="Toplam">{formatMoney(receivable.totalAmount)}</td>
@@ -663,7 +831,7 @@ export function FinanceWorkspace({ customers, live }: FinanceWorkspaceProps) {
             ))}
             {payload.receivables.length === 0 ? (
               <tr>
-                <td className="empty-row" colSpan={7}>
+                <td className="empty-row" colSpan={8}>
                   {loadState === "loading"
                     ? "Alacak kayıtları yükleniyor…"
                     : "Henüz alacak kaydı yok. Ayı oluşturarak veya geçmiş alacak ekleyerek başlayın."}

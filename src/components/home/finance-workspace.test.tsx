@@ -90,7 +90,7 @@ describe("FinanceWorkspace", () => {
 
     await user.click(submit);
     await screen.findByText(
-      "İşlem tamamlanamadı. Alanları ve bağlantıyı kontrol edin.",
+      "İşlem tamamlanamadı. Bağlantıyı kontrol edip yeniden deneyin.",
     );
     await user.click(submit);
     await screen.findByText("Kayıt tamamlandı; alacak tablosu güncellendi.");

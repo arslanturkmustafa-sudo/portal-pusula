@@ -14,6 +14,20 @@ import { CustomerWorkspace } from "@/components/home/customer-workspace";
 const customerId = "10000000-0000-4000-8000-000000000001";
 const otherCustomerId = "10000000-0000-4000-8000-000000000002";
 const contractId = "20000000-0000-4000-8000-000000000001";
+const projectId = "40000000-0000-4000-8000-000000000001";
+const otherProjectId = "40000000-0000-4000-8000-000000000002";
+const project = {
+  displayName: "Mühendis Kafası",
+  id: projectId,
+  shortCode: "MUHENDIS_KAFASI",
+  status: "active" as const,
+};
+const otherProject = {
+  displayName: "ByPusula",
+  id: otherProjectId,
+  shortCode: "BYPUSULA",
+  status: "planned" as const,
+};
 const customer = {
   contactNote: "Satın alma ekibiyle görüşülüyor.",
   displayName: "Zevahir Home",
@@ -21,6 +35,7 @@ const customer = {
   id: customerId,
   name: "Zevahir Home",
   phone: "+90 555 000 00 00",
+  projects: [project],
 };
 const otherCustomer = {
   contactNote: null,
@@ -29,6 +44,7 @@ const otherCustomer = {
   id: otherCustomerId,
   name: "Kardeşler Grup",
   phone: null,
+  projects: [project],
 };
 const contract = {
   currency: "TRY" as const,
@@ -38,6 +54,7 @@ const contract = {
   internalNote: null,
   monthlyFeeAmount: "60000.0000",
   paymentDay: 15,
+  projectId,
   startsOn: "2026-02-01",
   status: "active" as const,
   vatMode: "exempt" as const,
@@ -138,6 +155,199 @@ describe("CustomerWorkspace reliable date writes", () => {
     );
     expect(
       await screen.findByRole("heading", { name: "Zevahir Home Mobilya" }),
+    ).toBeInTheDocument();
+  });
+
+  it("updates project links from customer details and reports the enriched customer", async () => {
+    const requests: unknown[] = [];
+    const onCustomerSaved = vi.fn();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (method === "GET" && url.endsWith("/contracts")) {
+        return jsonResponse({ contracts: [contract] });
+      }
+      if (method === "GET" && url.includes("/month-plans/")) {
+        return jsonResponse({ monthPlan: { visits: [] } });
+      }
+      if (method === "PATCH" && url === `/api/customers/${customerId}`) {
+        const body = JSON.parse(String(init?.body)) as { projectIds: string[] };
+        requests.push(body);
+        return jsonResponse({
+          customer: {
+            ...customer,
+            projects: [project, otherProject].filter((item) =>
+              body.projectIds.includes(item.id),
+            ),
+          },
+        });
+      }
+      throw new Error(`Unexpected request: ${method} ${url}`);
+    });
+    const user = userEvent.setup();
+    vi.stubGlobal("fetch", fetchMock);
+    render(
+      <CustomerWorkspace
+        availableProjects={[project, otherProject]}
+        customer={customer}
+        live
+        onContractSaved={vi.fn()}
+        onCustomerSaved={onCustomerSaved}
+        onVisitsSaved={vi.fn()}
+      />,
+    );
+
+    await user.click(
+      await screen.findByRole("button", { name: "Müşteri bilgilerini düzenle" }),
+    );
+    expect(screen.getByText("BYPUSULA · planlandı")).toBeInTheDocument();
+    await user.click(screen.getByRole("checkbox", { name: /ByPusula/u }));
+    await user.click(
+      screen.getByRole("button", { name: "Müşteri bilgilerini kaydet" }),
+    );
+
+    await waitFor(() =>
+      expect(requests).toEqual([{ projectIds: [projectId, otherProjectId] }]),
+    );
+    expect(onCustomerSaved).toHaveBeenCalledWith(
+      expect.objectContaining({ projects: [project, otherProject] }),
+    );
+    expect(screen.getByText("ByPusula")).toBeInTheDocument();
+  });
+
+  it("explains why a project with active work cannot be removed", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (method === "GET" && url.endsWith("/contracts")) {
+        return jsonResponse({ contracts: [contract] });
+      }
+      if (method === "GET" && url.includes("/month-plans/")) {
+        return jsonResponse({ monthPlan: { visits: [] } });
+      }
+      if (method === "PATCH" && url === `/api/customers/${customerId}`) {
+        return jsonResponse({ status: "project_link_in_use" }, 409);
+      }
+      throw new Error(`Unexpected request: ${method} ${url}`);
+    });
+    const user = userEvent.setup();
+    vi.stubGlobal("fetch", fetchMock);
+    render(
+      <CustomerWorkspace
+        availableProjects={[project, otherProject]}
+        customer={{ ...customer, projects: [project, otherProject] }}
+        live
+        onContractSaved={vi.fn()}
+        onCustomerSaved={vi.fn()}
+        onVisitsSaved={vi.fn()}
+      />,
+    );
+
+    await user.click(
+      await screen.findByRole("button", { name: "Müşteri bilgilerini düzenle" }),
+    );
+    await user.click(screen.getByRole("checkbox", { name: /Mühendis Kafası/u }));
+    await user.click(
+      screen.getByRole("button", { name: "Müşteri bilgilerini kaydet" }),
+    );
+
+    expect(
+      await screen.findByText(
+        "Aktif sözleşmesi veya tamamlanmamış görevi bulunan proje bağlantısı kaldırılamaz.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps contract editing active when customer project props change", async () => {
+    let contractRequestCount = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/contracts")) {
+        contractRequestCount += 1;
+        return jsonResponse({ contracts: [contract] });
+      }
+      if (url.includes("/month-plans/")) {
+        return jsonResponse({ monthPlan: { visits: [] } });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    const onContractSaved = vi.fn();
+    const onVisitsSaved = vi.fn();
+    const user = userEvent.setup();
+    vi.stubGlobal("fetch", fetchMock);
+    const { rerender } = render(
+      <CustomerWorkspace
+        availableProjects={[project, otherProject]}
+        customer={customer}
+        live
+        onContractSaved={onContractSaved}
+        onVisitsSaved={onVisitsSaved}
+      />,
+    );
+
+    await user.click(
+      await screen.findByRole("button", { name: "Sözleşmeyi düzenle" }),
+    );
+    expect(screen.getByLabelText("Proje")).toBeEnabled();
+    expect(screen.getByLabelText("Aylık ücret")).toBeEnabled();
+
+    rerender(
+      <CustomerWorkspace
+        availableProjects={[project, otherProject]}
+        customer={{ ...customer, projects: [project, otherProject] }}
+        live
+        onContractSaved={onContractSaved}
+        onVisitsSaved={onVisitsSaved}
+      />,
+    );
+
+    await waitFor(() => expect(contractRequestCount).toBe(1));
+    expect(screen.getByLabelText("Proje")).toBeEnabled();
+    expect(screen.getByLabelText("Aylık ücret")).toBeEnabled();
+    expect(
+      screen.getByRole("button", { name: "Değişiklikleri kaydet" }),
+    ).toBeInTheDocument();
+  });
+
+  it("shows an unassigned legacy contract and suggests its sole active project while editing", async () => {
+    const legacyContract = { ...contract, projectId: null };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/contracts")) {
+        return jsonResponse({ contracts: [legacyContract] });
+      }
+      if (url.includes("/month-plans/")) {
+        return jsonResponse({ monthPlan: { visits: [] } });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    const user = userEvent.setup();
+    vi.stubGlobal("fetch", fetchMock);
+    render(
+      <CustomerWorkspace
+        availableProjects={[project]}
+        customer={customer}
+        live
+        onContractSaved={vi.fn()}
+        onVisitsSaved={vi.fn()}
+      />,
+    );
+
+    expect(
+      await screen.findByText(/Proje atanmamış · 2026-02-01/u),
+    ).toBeInTheDocument();
+    const projectSelect = screen.getByLabelText("Proje");
+    expect(projectSelect).toBeDisabled();
+    expect(projectSelect).toHaveValue("");
+
+    await user.click(
+      screen.getByRole("button", { name: "Sözleşmeyi düzenle" }),
+    );
+
+    expect(projectSelect).toBeEnabled();
+    expect(projectSelect).toHaveValue(projectId);
+    expect(
+      screen.getByText(/Bu çalışma döneminde proje atanmamış/u),
     ).toBeInTheDocument();
   });
 

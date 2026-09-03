@@ -117,8 +117,8 @@ describe.sequential("clean-only phpMyAdmin migration bundle policy", () => {
     expect(second.summary).toEqual(first.summary);
     expect(second.sql).toBe(first.sql);
     expect(second.manifestText).toBe(first.manifestText);
-    expect(first.summary.migrationCount).toBe(11);
-    expect(first.summary.statementCount).toBe(69);
+    expect(first.summary.migrationCount).toBe(12);
+    expect(first.summary.statementCount).toBe(94);
     expect(first.summary.sqlBytes).toBe(Buffer.byteLength(first.sql));
     expect(first.summary.sqlSha256).toBe(
       createHash("sha256").update(first.sql).digest("hex"),
@@ -173,10 +173,14 @@ describe.sequential("clean-only phpMyAdmin migration bundle policy", () => {
       "credit_card_installment",
       "cron_dispatch_gate",
       "customer",
+      "customer_project",
       "expense",
       "job_run",
       "monthly_visit_commitment",
       "outbox_event",
+      "partnership_commission",
+      "partnership_contribution",
+      "partnership_contribution_receipt",
       "project",
       "receivable",
       "receivable_collection",
@@ -186,6 +190,8 @@ describe.sequential("clean-only phpMyAdmin migration bundle policy", () => {
       "work_task_project",
     ]);
     expect(manifest.schema.tables.scheduled_job).toContain("lease_token");
+    expect(manifest.schema.tables.consulting_contract).toContain("project_id");
+    expect(manifest.schema.tables.receivable).toContain("project_id");
     expect(manifest.schema.checks).toContainEqual({
       name: "chk_scheduled_job_lease_shape",
       tableName: "scheduled_job",
@@ -196,8 +202,20 @@ describe.sequential("clean-only phpMyAdmin migration bundle policy", () => {
         tableName: "consulting_contract",
       },
       {
+        name: "fk_consulting_contract_customer_project",
+        tableName: "consulting_contract",
+      },
+      {
         name: "fk_credit_card_installment_expense",
         tableName: "credit_card_installment",
+      },
+      {
+        name: "fk_customer_project_customer",
+        tableName: "customer_project",
+      },
+      {
+        name: "fk_customer_project_project",
+        tableName: "customer_project",
       },
       {
         name: "fk_expense_credit_card",
@@ -216,6 +234,18 @@ describe.sequential("clean-only phpMyAdmin migration bundle policy", () => {
         tableName: "monthly_visit_commitment",
       },
       {
+        name: "fk_partnership_commission_project",
+        tableName: "partnership_commission",
+      },
+      {
+        name: "fk_partnership_contribution_receipt_contribution",
+        tableName: "partnership_contribution_receipt",
+      },
+      {
+        name: "fk_partnership_contribution_project",
+        tableName: "partnership_contribution",
+      },
+      {
         name: "fk_receivable_collection_receivable",
         tableName: "receivable_collection",
       },
@@ -225,6 +255,10 @@ describe.sequential("clean-only phpMyAdmin migration bundle policy", () => {
       },
       {
         name: "fk_receivable_customer",
+        tableName: "receivable",
+      },
+      {
+        name: "fk_receivable_customer_project",
         tableName: "receivable",
       },
       {
@@ -247,6 +281,18 @@ describe.sequential("clean-only phpMyAdmin migration bundle policy", () => {
     expect(manifest.schema.indexes).toContainEqual({
       name: "uq_platform_migration_verification_idempotency",
       tableName: "_platform_migration_verification",
+    });
+    expect(manifest.schema.indexes).toContainEqual({
+      name: "uq_consulting_contract_customer_project_start",
+      tableName: "consulting_contract",
+    });
+    expect(manifest.schema.indexes).not.toContainEqual({
+      name: "uq_consulting_contract_customer_start",
+      tableName: "consulting_contract",
+    });
+    expect(manifest.schema.indexes).toContainEqual({
+      name: "uq_partnership_contribution_receipt_operation",
+      tableName: "partnership_contribution_receipt",
     });
     expect(manifest.schema.jsonChecks).toEqual([
       { columnName: "after_summary", tableName: "audit_event" },
@@ -328,10 +374,16 @@ describe.sequential("clean-only phpMyAdmin migration bundle policy", () => {
         sqlFileName: "0010_expenses_cards.sql",
         statementCount: 12,
       },
+      {
+        createdAt: 1788435178955,
+        hash: "b3abd1340be3a5f4c96c1a63348d44c134bdc907fc5a24e1b978093ad6708c81",
+        sqlFileName: "0011_customer_projects_partnership.sql",
+        statementCount: 25,
+      },
     ]);
     expect(
       manifest.migrations.flatMap((migration) => migration.statementHashes),
-    ).toHaveLength(69);
+    ).toHaveLength(94);
     expect(
       manifest.migrations
         .flatMap((migration) => migration.statementHashes)

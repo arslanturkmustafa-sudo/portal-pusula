@@ -299,8 +299,6 @@ describe("TasksWorkspace", () => {
         dueOn: null,
         priority: "urgent",
         projectId: null,
-        status: "in_progress",
-        title: "Teklifi ara",
         version: 4,
       },
     ]);
@@ -358,17 +356,64 @@ describe("TasksWorkspace", () => {
 
     await waitFor(() => expect(patchBodies).toHaveLength(2));
     expect(patchBodies[1]).toMatchObject({
-      projectId: project.id,
-      status: "todo",
       title: "Müşteriyi tekrar ara",
       version: 3,
     });
+    expect(patchBodies[1]).not.toHaveProperty("projectId");
+    expect(patchBodies[1]).not.toHaveProperty("status");
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Görev başka bir işlemde değişti. Sayfayı yenileyip yeniden deneyin.",
     );
     expect(
       screen.getByRole("heading", { name: "Görevi güncelle" }),
     ).toBeInTheDocument();
+  });
+
+  it("offers only customer and project combinations linked in the portfolio", async () => {
+    const otherProject = {
+      displayName: "OptiPusula",
+      id: "project-2",
+      shortCode: "OPTIPUSULA",
+      status: "active",
+    };
+    const linkedCustomer = {
+      ...customer,
+      projects: [{ id: project.id, status: "active" }],
+    };
+    const otherCustomer = {
+      displayName: "Vega Lojistik",
+      id: "customer-2",
+      projects: [{ id: otherProject.id, status: "active" }],
+      shortCode: "VEGA",
+      status: "active",
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async (input) => {
+        if (String(input) === "/api/tasks") return jsonResponse({ tasks: [] });
+        if (String(input) === "/api/customers") {
+          return jsonResponse({ customers: [linkedCustomer, otherCustomer] });
+        }
+        if (String(input) === "/api/projects") {
+          return jsonResponse({ projects: [project, otherProject] });
+        }
+        throw new Error(`Unexpected request: ${String(input)}`);
+      }),
+    );
+    const user = userEvent.setup();
+
+    render(<TasksWorkspace />);
+    await user.click(await screen.findByRole("button", { name: "+ Görev ekle" }));
+    await user.selectOptions(screen.getByLabelText("Müşteri"), linkedCustomer.id);
+    const projectSelect = screen.getByLabelText("Proje");
+    expect(within(projectSelect).getByRole("option", { name: /ByPusula/ })).toBeInTheDocument();
+    expect(within(projectSelect).queryByRole("option", { name: /OptiPusula/ })).not.toBeInTheDocument();
+
+    await user.selectOptions(screen.getByLabelText("Müşteri"), "");
+    await user.selectOptions(screen.getByLabelText("Proje"), otherProject.id);
+    const customerSelect = screen.getByLabelText("Müşteri");
+    expect(within(customerSelect).getByRole("option", { name: /Vega Lojistik/ })).toBeInTheDocument();
+    expect(within(customerSelect).queryByRole("option", { name: /Atlas Makina/ })).not.toBeInTheDocument();
   });
 
   it("shows loading and a recoverable board error", async () => {

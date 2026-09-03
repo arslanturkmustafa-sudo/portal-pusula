@@ -3,6 +3,10 @@ import { z } from "zod";
 
 import {
   CustomerNotFoundError,
+  CustomerProjectInUseError,
+  CustomerProjectNotFoundError,
+  CustomerProjectUnavailableError,
+  CustomerProjectVersionConflictError,
   CustomerShortCodeConflictError,
   updateCustomer,
   updateCustomerInputSchema,
@@ -11,6 +15,11 @@ import { isAdminAuthenticated } from "@/platform/auth/server-auth";
 import { getDatabaseProbeEnvironment } from "@/platform/config/readiness-env";
 import { getPlatformDatabasePool } from "@/platform/database/mysql-platform";
 import { correlationIdFromHeaders } from "@/platform/http/correlation-id";
+import {
+  isJsonWriteRequest,
+  isSameOriginWriteRequest,
+  readJsonWriteBody,
+} from "@/platform/http/write-request";
 import { PlatformInputError } from "@/platform/validation/canonical-identifiers";
 
 export const dynamic = "force-dynamic";
@@ -37,14 +46,16 @@ export async function PATCH(
     return json({ status: "unauthorized" }, 401);
   }
 
-  const declaredLength = Number(request.headers.get("content-length") ?? "0");
-  if (!Number.isFinite(declaredLength) || declaredLength > 16_384) {
-    return json({ status: "validation_error" }, 400);
+  if (!isSameOriginWriteRequest(request)) return json({ status: "forbidden" }, 403);
+  if (!isJsonWriteRequest(request)) {
+    return json({ status: "unsupported_media_type" }, 415);
   }
 
   try {
     const { id } = await context.params;
-    const input = updateCustomerInputSchema.parse(await request.json());
+    const input = updateCustomerInputSchema.parse(
+      await readJsonWriteBody(request, 16_384),
+    );
     const customer = await updateCustomer(
       getPlatformDatabasePool(getDatabaseProbeEnvironment()),
       id,
@@ -65,6 +76,18 @@ export async function PATCH(
     }
     if (error instanceof CustomerShortCodeConflictError) {
       return json({ status: "short_code_conflict" }, 409);
+    }
+    if (error instanceof CustomerProjectNotFoundError) {
+      return json({ status: "project_not_found" }, 404);
+    }
+    if (error instanceof CustomerProjectUnavailableError) {
+      return json({ status: "project_unavailable" }, 409);
+    }
+    if (error instanceof CustomerProjectInUseError) {
+      return json({ status: "project_link_in_use" }, 409);
+    }
+    if (error instanceof CustomerProjectVersionConflictError) {
+      return json({ status: "project_link_version_conflict" }, 409);
     }
     return json({ status: "service_unavailable" }, 503);
   }

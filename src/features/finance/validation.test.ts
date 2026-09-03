@@ -8,6 +8,7 @@ import {
 
 const id = "10000000-0000-4000-8000-000000000001";
 const operationKey = "40000000-0000-4000-8000-000000000001";
+const projectId = "70000000-0000-4000-8000-000000000001";
 
 describe("finance input validation", () => {
   it("normalizes every accepted API money value to four decimals", () => {
@@ -18,6 +19,7 @@ describe("finance input validation", () => {
         description: "Geçmiş dönem danışmanlık alacağı",
         dueOn: "2026-08-15",
         netAmount: "75000",
+        projectId,
         vatAmount: "0",
       }),
     ).toMatchObject({ netAmount: "75000.0000", vatAmount: "0.0000" });
@@ -61,6 +63,7 @@ describe("finance input validation", () => {
         description: "Alacak",
         dueOn: "2026-09-01",
         netAmount: "1.00001",
+        projectId,
         vatAmount: "0",
       }).success,
     ).toBe(false);
@@ -74,6 +77,7 @@ describe("finance input validation", () => {
         description: "Alacak",
         dueOn: "2026-09-01",
         netAmount: "0",
+        projectId,
         vatAmount: "0",
       }).success,
     ).toBe(false);
@@ -84,7 +88,22 @@ describe("finance input validation", () => {
         description: "Alacak",
         dueOn: "2026-09-01",
         netAmount: "999999999999999.9999",
+        projectId,
         vatAmount: "0.0001",
+      }).success,
+    ).toBe(false);
+  });
+
+  it("requires a canonical project for an opening balance", () => {
+    expect(
+      openingBalanceInputSchema.safeParse({
+        clientOperationKey: operationKey,
+        customerId: id,
+        description: "Alacak",
+        dueOn: "2026-09-01",
+        netAmount: "1",
+        projectId: "PROJECT",
+        vatAmount: "0",
       }).success,
     ).toBe(false);
   });

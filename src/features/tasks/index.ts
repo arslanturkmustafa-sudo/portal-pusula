@@ -8,6 +8,7 @@ export {
   listTasks,
   TaskAssigneeNotFoundError,
   TaskCustomerNotFoundError,
+  TaskCustomerProjectMismatchError,
   TaskNotFoundError,
   TaskProjectNotFoundError,
   TaskVersionConflictError,

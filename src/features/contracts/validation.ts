@@ -6,6 +6,8 @@ const MONTH_PATTERN = /^\d{4}-\d{2}$/u;
 const CLOCK_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d$/u;
 const MONEY_PATTERN = /^(?:0|[1-9]\d{0,14})(?:\.\d{1,4})?$/u;
 const RATE_PATTERN = /^(?:0|[1-9]\d{0,2})(?:\.\d{1,2})?$/u;
+const CANONICAL_UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 
 function isRealIsoDate(value: string): boolean {
   if (!ISO_DATE_PATTERN.test(value)) return false;
@@ -57,6 +59,9 @@ const nullableNoteSchema = z.preprocess(
   z.union([z.string().min(1).max(2000), z.null()]),
 );
 const optionalNoteSchema = nullableNoteSchema.default(null);
+const projectIdSchema = z
+  .string()
+  .regex(CANONICAL_UUID_PATTERN, "Geçerli bir proje seçin.");
 
 export const contractStatusSchema = z.enum(["draft", "active", "closed"]);
 export const vatModeSchema = z.enum(["exempt", "exclusive", "inclusive"]);
@@ -99,6 +104,7 @@ export const createContractInputSchema = z
     internalNote: optionalNoteSchema,
     monthlyFeeAmount: moneySchema,
     paymentDay: z.number().int().min(1).max(31),
+    projectId: projectIdSchema,
     startsOn: isoDateSchema,
     status: contractStatusSchema.default("active"),
     vatMode: vatModeSchema,
@@ -116,6 +122,7 @@ export const updateContractInputSchema = z
     internalNote: nullableNoteSchema,
     monthlyFeeAmount: moneySchema,
     paymentDay: z.number().int().min(1).max(31),
+    projectId: projectIdSchema,
     startsOn: isoDateSchema,
     status: contractStatusSchema,
     vatMode: vatModeSchema,

@@ -7,6 +7,7 @@ vi.mock("server-only", () => ({}));
 
 const mocks = vi.hoisted(() => ({
   appendAuditEvent: vi.fn(),
+  findActiveCustomerProjectForUpdate: vi.fn(),
   findCustomerForUpdate: vi.fn(),
   findProjectForUpdate: vi.fn(),
   findTaskRecordById: vi.fn(),
@@ -22,6 +23,7 @@ vi.mock("@/features/account/repository", () => ({
   findUserAccountById: mocks.findUserAccountById,
 }));
 vi.mock("@/features/customers/repository", () => ({
+  findActiveCustomerProjectForUpdate: mocks.findActiveCustomerProjectForUpdate,
   findCustomerForUpdate: mocks.findCustomerForUpdate,
 }));
 vi.mock("@/features/projects/repository", () => ({
@@ -48,6 +50,7 @@ vi.mock("@/platform/jobs/mysql-transaction", () => ({
 import {
   createTask,
   TaskAssigneeNotFoundError,
+  TaskCustomerProjectMismatchError,
   TaskVersionConflictError,
   updateTask,
 } from "@/features/tasks/service";
@@ -88,6 +91,11 @@ describe("task service", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.findCustomerForUpdate.mockResolvedValue({ id: customerId });
+    mocks.findActiveCustomerProjectForUpdate.mockResolvedValue({
+      customerId,
+      projectId: "40000000-0000-4000-8000-000000000001",
+      status: "active",
+    });
     mocks.findUserAccountById.mockResolvedValue({
       id: accountId,
       status: "active",
@@ -206,6 +214,26 @@ describe("task service", () => {
     );
   });
 
+  it("refuses to reopen a customer task after its project link became inactive", async () => {
+    mocks.findTaskStateForUpdate.mockResolvedValue({
+      ...before,
+      completedAtUtc: "2026-09-02 09:30:00.000000",
+      projectId: "40000000-0000-4000-8000-000000000001",
+      status: "done",
+    });
+    mocks.findActiveCustomerProjectForUpdate.mockResolvedValue(null);
+
+    await expect(
+      updateTask(
+        {} as Pool,
+        taskId,
+        { status: "in_progress", version: 4 },
+        context,
+      ),
+    ).rejects.toBeInstanceOf(TaskCustomerProjectMismatchError);
+    expect(mocks.updateTaskRecord).not.toHaveBeenCalled();
+  });
+
   it("rejects a stale version before writing or auditing", async () => {
     await expect(
       updateTask(
@@ -242,5 +270,32 @@ describe("task service", () => {
     ).rejects.toBeInstanceOf(TaskAssigneeNotFoundError);
     expect(mocks.insertTaskRecord).not.toHaveBeenCalled();
     expect(mocks.appendAuditEvent).not.toHaveBeenCalled();
+  });
+
+  it("rejects a customer and project combination outside the active portfolio", async () => {
+    const projectId = "40000000-0000-4000-8000-000000000001";
+    mocks.findActiveCustomerProjectForUpdate.mockResolvedValue(null);
+
+    await expect(
+      createTask(
+        {} as Pool,
+        {
+          customerId,
+          description: null,
+          dueOn: null,
+          priority: "normal",
+          projectId,
+          status: "todo",
+          title: "Müşteri proje görevi",
+        },
+        context,
+      ),
+    ).rejects.toBeInstanceOf(TaskCustomerProjectMismatchError);
+    expect(mocks.findActiveCustomerProjectForUpdate).toHaveBeenCalledWith(
+      expect.anything(),
+      customerId,
+      projectId,
+    );
+    expect(mocks.insertTaskRecord).not.toHaveBeenCalled();
   });
 });

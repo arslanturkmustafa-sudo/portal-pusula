@@ -4,6 +4,7 @@ import { z } from "zod";
 import {
   ContractNotBillableError,
   FinanceMonthOutsideContractError,
+  FinanceContractProjectMissingError,
   FinanceResourceNotFoundError,
   generateContractMonthReceivable,
   generateReceivableInputSchema,
@@ -12,6 +13,11 @@ import { isAdminAuthenticated } from "@/platform/auth/server-auth";
 import { getDatabaseProbeEnvironment } from "@/platform/config/readiness-env";
 import { getPlatformDatabasePool } from "@/platform/database/mysql-platform";
 import { correlationIdFromHeaders } from "@/platform/http/correlation-id";
+import {
+  isJsonWriteRequest,
+  isSameOriginWriteRequest,
+  readJsonWriteBody,
+} from "@/platform/http/write-request";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -25,19 +31,19 @@ function json(body: unknown, status = 200): NextResponse {
   return response;
 }
 
-function invalidBody(request: NextRequest): boolean {
-  const length = Number(request.headers.get("content-length") ?? "0");
-  return !Number.isFinite(length) || length > 16_384;
-}
-
 export async function POST(request: NextRequest): Promise<NextResponse> {
   if (!(await isAdminAuthenticated(request))) {
     return json({ status: "unauthorized" }, 401);
   }
-  if (invalidBody(request)) return json({ status: "validation_error" }, 400);
+  if (!isSameOriginWriteRequest(request)) return json({ status: "forbidden" }, 403);
+  if (!isJsonWriteRequest(request)) {
+    return json({ status: "unsupported_media_type" }, 415);
+  }
 
   try {
-    const input = generateReceivableInputSchema.parse(await request.json());
+    const input = generateReceivableInputSchema.parse(
+      await readJsonWriteBody(request, 16_384),
+    );
     const result = await generateContractMonthReceivable(
       getPlatformDatabasePool(getDatabaseProbeEnvironment()),
       input,
@@ -57,6 +63,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
     if (error instanceof ContractNotBillableError) {
       return json({ status: "contract_not_billable" }, 409);
+    }
+    if (error instanceof FinanceContractProjectMissingError) {
+      return json({ status: "contract_project_missing" }, 409);
     }
     if (error instanceof FinanceMonthOutsideContractError) {
       return json({ status: "month_outside_contract" }, 409);

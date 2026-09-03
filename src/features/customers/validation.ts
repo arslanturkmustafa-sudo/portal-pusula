@@ -1,5 +1,8 @@
 import { z } from "zod";
 
+const CANONICAL_UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+
 const displayNameSchema = z.string().trim().min(1).max(191);
 const shortCodeSchema = z
   .string()
@@ -9,6 +12,27 @@ const shortCodeSchema = z
   .max(32)
   .regex(/^[A-Z0-9][A-Z0-9_-]*$/u);
 const statusSchema = z.enum(["active", "inactive"]);
+const projectIdsSchema = z
+  .array(
+    z
+      .string()
+      .regex(CANONICAL_UUID_PATTERN, "Geçerli bir proje seçin."),
+  )
+  .min(1, "En az bir proje seçin.")
+  .max(100)
+  .superRefine((projectIds, context) => {
+    const seen = new Set<string>();
+    for (const [index, projectId] of projectIds.entries()) {
+      if (seen.has(projectId)) {
+        context.addIssue({
+          code: "custom",
+          message: "Aynı proje birden fazla seçilemez.",
+          path: [index],
+        });
+      }
+      seen.add(projectId);
+    }
+  });
 
 function emptyToNull(value: unknown): unknown {
   if (typeof value !== "string") return value;
@@ -45,6 +69,7 @@ export const createCustomerInputSchema = z
     displayName: displayNameSchema,
     email: optionalEmailSchema,
     phone: optionalPhoneSchema,
+    projectIds: projectIdsSchema,
     shortCode: shortCodeSchema,
     status: statusSchema.default("active"),
   })
@@ -56,6 +81,7 @@ export const updateCustomerInputSchema = z
     displayName: displayNameSchema.optional(),
     email: optionalEmailSchema.optional(),
     phone: optionalPhoneSchema.optional(),
+    projectIds: projectIdsSchema.optional(),
     shortCode: shortCodeSchema.optional(),
     status: statusSchema.optional(),
   })

@@ -33,6 +33,11 @@ const GUARD_FAILURE_QUERY = "PORTAL_PUSULA_BUNDLE_GUARD_FAILURE";
 const SAFE_NOOP_QUERY = "SELECT 1 WHERE 0";
 const migrationBreakpoint = /--> statement-breakpoint\s*/gu;
 const safeIdentifier = /^[A-Za-z0-9_]{1,64}$/u;
+const CUSTOMER_PROJECTS_PARTNERSHIP_MIGRATION_TAG =
+  "0011_customer_projects_partnership";
+const CUSTOMER_PROJECT_BACKFILL_SQL = `INSERT INTO \`customer_project\` (\`customer_id\`, \`project_id\`, \`status\`, \`version\`, \`created_at_utc\`, \`updated_at_utc\`) SELECT \`seed\`.\`customer_id\`, \`seed\`.\`project_id\`, 'active', 1, CURRENT_TIMESTAMP(6), CURRENT_TIMESTAMP(6) FROM (SELECT \`customer\`.\`id\` AS \`customer_id\`, \`project\`.\`id\` AS \`project_id\` FROM \`customer\` CROSS JOIN \`project\` WHERE BINARY \`project\`.\`short_code\` = BINARY 'MUHENDIS_KAFASI' UNION DISTINCT SELECT \`work_task\`.\`customer_id\` AS \`customer_id\`, \`work_task_project\`.\`project_id\` AS \`project_id\` FROM \`work_task\` JOIN \`work_task_project\` ON \`work_task_project\`.\`task_id\` = \`work_task\`.\`id\` WHERE \`work_task\`.\`customer_id\` IS NOT NULL) AS \`seed\``;
+const CONSULTING_CONTRACT_BACKFILL_SQL = `UPDATE \`consulting_contract\` JOIN \`project\` ON BINARY \`project\`.\`short_code\` = BINARY 'MUHENDIS_KAFASI' SET \`consulting_contract\`.\`project_id\` = \`project\`.\`id\` WHERE \`consulting_contract\`.\`project_id\` IS NULL`;
+const RECEIVABLE_BACKFILL_SQL = `UPDATE \`receivable\` LEFT JOIN \`consulting_contract\` ON \`consulting_contract\`.\`id\` = \`receivable\`.\`contract_id\` JOIN \`project\` ON BINARY \`project\`.\`short_code\` = BINARY 'MUHENDIS_KAFASI' SET \`receivable\`.\`project_id\` = COALESCE(\`consulting_contract\`.\`project_id\`, \`project\`.\`id\`) WHERE \`receivable\`.\`project_id\` IS NULL`;
 
 const defaultProjectRoot = resolve(
   dirname(fileURLToPath(import.meta.url)),
@@ -288,6 +293,81 @@ function parseCreateIndex(statement) {
   };
 }
 
+function parseCustomerProjectsPartnershipStatement(statement) {
+  const normalized = statement.replaceAll(/\s+/gu, " ").trim();
+  if (normalized === CUSTOMER_PROJECT_BACKFILL_SQL) {
+    return { tableName: "customer_project", type: "data-backfill" };
+  }
+  if (normalized === CONSULTING_CONTRACT_BACKFILL_SQL) {
+    return { tableName: "consulting_contract", type: "data-backfill" };
+  }
+  if (normalized === RECEIVABLE_BACKFILL_SQL) {
+    return { tableName: "receivable", type: "data-backfill" };
+  }
+
+  const addColumn = /^ALTER\s+TABLE\s+`(consulting_contract|receivable)`\s+ADD(?:\s+COLUMN)?\s+`project_id`\s+char\(36\)\s+CHARACTER\s+SET\s+ascii\s+COLLATE\s+ascii_bin\s*$/iu.exec(
+    statement,
+  );
+  if (addColumn) {
+    return {
+      columnName: "project_id",
+      tableName: addColumn[1],
+      type: "add-column",
+    };
+  }
+
+  const compositeForeignKey = /^ALTER\s+TABLE\s+`(consulting_contract|receivable)`\s+ADD\s+CONSTRAINT\s+`(fk_(?:consulting_contract|receivable)_customer_project)`\s+FOREIGN\s+KEY\s*\(`customer_id`,`project_id`\)\s+REFERENCES\s+`customer_project`\s*\(`customer_id`,`project_id`\)\s+ON\s+DELETE\s+RESTRICT\s+ON\s+UPDATE\s+RESTRICT\s*$/iu.exec(
+    statement,
+  );
+  if (compositeForeignKey) {
+    const expectedConstraint =
+      compositeForeignKey[1] === "consulting_contract"
+        ? "fk_consulting_contract_customer_project"
+        : "fk_receivable_customer_project";
+    if (compositeForeignKey[2] !== expectedConstraint) {
+      throw new PhpMyAdminBundleError();
+    }
+    return {
+      columnNames: ["customer_id", "project_id"],
+      constraintName: compositeForeignKey[2],
+      referencedColumnNames: ["customer_id", "project_id"],
+      referencedTableName: "customer_project",
+      tableName: compositeForeignKey[1],
+      type: "foreign-key",
+    };
+  }
+
+  if (
+    /^CREATE\s+UNIQUE\s+INDEX\s+`uq_consulting_contract_customer_project_start`\s+ON\s+`consulting_contract`\s*\(`customer_id`,`project_id`,`starts_on`\)\s*$/iu.test(
+      statement,
+    )
+  ) {
+    return {
+      columnNames: ["customer_id", "project_id", "starts_on"],
+      indexName: "uq_consulting_contract_customer_project_start",
+      tableName: "consulting_contract",
+      type: "create-index",
+      unique: true,
+    };
+  }
+
+  if (
+    /^DROP\s+INDEX\s+`uq_consulting_contract_customer_start`\s+ON\s+`consulting_contract`\s*$/iu.test(
+      statement,
+    )
+  ) {
+    return {
+      columnNames: ["customer_id", "starts_on"],
+      indexName: "uq_consulting_contract_customer_start",
+      tableName: "consulting_contract",
+      type: "drop-index",
+      unique: true,
+    };
+  }
+
+  return null;
+}
+
 function hasUnquotedSemicolon(statement) {
   let quote = null;
   for (let index = 0; index < statement.length; index += 1) {
@@ -315,18 +395,31 @@ function hasUnquotedSemicolon(statement) {
   return false;
 }
 
-export function analyzeMigrationStatement(statement) {
+export function analyzeMigrationStatement(statement, migrationTag) {
   if (
     typeof statement !== "string" ||
     statement.length === 0 ||
-    /^\s*(?:DROP|TRUNCATE|RENAME|REPLACE|DELETE|UPDATE)\s/iu.test(
-      statement,
-    ) ||
     /\b(?:PREPARE|EXECUTE|DEALLOCATE|SIGNAL|RESIGNAL|DELIMITER|PROCEDURE|FUNCTION|TRIGGER|EVENT)\b/iu.test(
       statement,
     ) ||
     /@/u.test(statement) ||
     hasUnquotedSemicolon(statement)
+  ) {
+    throw new PhpMyAdminBundleError();
+  }
+
+  const customerProjectsPartnershipAnalysis =
+    migrationTag === CUSTOMER_PROJECTS_PARTNERSHIP_MIGRATION_TAG
+      ? parseCustomerProjectsPartnershipStatement(statement)
+      : null;
+  if (customerProjectsPartnershipAnalysis) {
+    return customerProjectsPartnershipAnalysis;
+  }
+
+  if (
+    /^\s*(?:DROP|TRUNCATE|RENAME|REPLACE|DELETE|UPDATE)\s/iu.test(
+      statement,
+    )
   ) {
     throw new PhpMyAdminBundleError();
   }
@@ -348,6 +441,31 @@ function constraintPredicate(tableName, constraintName, constraintType) {
 }
 
 function statementVerificationPredicate(analysis) {
+  if (analysis.type === "add-column") {
+    return `(SELECT COUNT(*) FROM information_schema.COLUMNS
+               WHERE TABLE_SCHEMA = DATABASE()
+                 AND TABLE_NAME = ${sqlString(analysis.tableName)}
+                 AND COLUMN_NAME = ${sqlString(analysis.columnName)}
+                 AND DATA_TYPE = 'char'
+                 AND COLUMN_TYPE = 'char(36)'
+                 AND CHARACTER_SET_NAME = 'ascii'
+                 AND COLLATION_NAME = 'ascii_bin'
+                 AND IS_NULLABLE = 'YES'
+                 AND (COLUMN_DEFAULT IS NULL OR BINARY COLUMN_DEFAULT = BINARY 'NULL')
+                 AND EXTRA = '') = 1`;
+  }
+
+  if (analysis.type === "data-backfill") {
+    return `(SELECT COUNT(*) FROM ${quotedIdentifier(analysis.tableName)}) = 0`;
+  }
+
+  if (analysis.type === "drop-index") {
+    return `(SELECT COUNT(*) FROM information_schema.STATISTICS
+               WHERE TABLE_SCHEMA = DATABASE()
+                 AND TABLE_NAME = ${sqlString(analysis.tableName)}
+                 AND INDEX_NAME = ${sqlString(analysis.indexName)}) = 0`;
+  }
+
   if (analysis.type === "create-table") {
     const constraints = analysis.constraintNames.map((constraint) => {
       const type =
@@ -385,6 +503,9 @@ function statementVerificationPredicate(analysis) {
   }
 
   if (analysis.type === "foreign-key") {
+    const columnNames = analysis.columnNames ?? [analysis.columnName];
+    const referencedColumnNames =
+      analysis.referencedColumnNames ?? [analysis.referencedColumnName];
     return [
       constraintPredicate(
         analysis.tableName,
@@ -395,9 +516,19 @@ function statementVerificationPredicate(analysis) {
           WHERE CONSTRAINT_SCHEMA = DATABASE()
             AND TABLE_NAME = ${sqlString(analysis.tableName)}
             AND CONSTRAINT_NAME = ${sqlString(analysis.constraintName)}
-            AND COLUMN_NAME = ${sqlString(analysis.columnName)}
-            AND REFERENCED_TABLE_NAME = ${sqlString(analysis.referencedTableName)}
-            AND REFERENCED_COLUMN_NAME = ${sqlString(analysis.referencedColumnName)}) = 1`,
+            AND REFERENCED_TABLE_NAME = ${sqlString(analysis.referencedTableName)}) = ${columnNames.length}`,
+      ...columnNames.map(
+        (columnName, index) =>
+          `(SELECT COUNT(*) FROM information_schema.KEY_COLUMN_USAGE
+              WHERE CONSTRAINT_SCHEMA = DATABASE()
+                AND TABLE_NAME = ${sqlString(analysis.tableName)}
+                AND CONSTRAINT_NAME = ${sqlString(analysis.constraintName)}
+                AND ORDINAL_POSITION = ${index + 1}
+                AND POSITION_IN_UNIQUE_CONSTRAINT = ${index + 1}
+                AND COLUMN_NAME = ${sqlString(columnName)}
+                AND REFERENCED_TABLE_NAME = ${sqlString(analysis.referencedTableName)}
+                AND REFERENCED_COLUMN_NAME = ${sqlString(referencedColumnNames[index])}) = 1`,
+      ),
       `(SELECT COUNT(*) FROM information_schema.REFERENTIAL_CONSTRAINTS
           WHERE CONSTRAINT_SCHEMA = DATABASE()
             AND TABLE_NAME = ${sqlString(analysis.tableName)}
@@ -418,8 +549,13 @@ function statementVerificationPredicate(analysis) {
           AND (SELECT COUNT(*) FROM information_schema.STATISTICS
                  WHERE TABLE_SCHEMA = DATABASE()
                    AND TABLE_NAME = ${sqlString(analysis.tableName)}
+                 AND INDEX_NAME = ${sqlString(analysis.indexName)}
+                 AND COLUMN_NAME IN (${sqlStringList(analysis.columnNames)})) = ${analysis.columnNames.length}
+          ${analysis.unique === true ? `AND (SELECT COUNT(*) FROM information_schema.STATISTICS
+                 WHERE TABLE_SCHEMA = DATABASE()
+                   AND TABLE_NAME = ${sqlString(analysis.tableName)}
                    AND INDEX_NAME = ${sqlString(analysis.indexName)}
-                   AND COLUMN_NAME IN (${sqlStringList(analysis.columnNames)})) = ${analysis.columnNames.length}`;
+                   AND NON_UNIQUE = 0) = ${analysis.columnNames.length}` : ""}`;
 }
 
 function guardedStatementLines({ statement, expectedStep, predicate }) {
@@ -530,7 +666,21 @@ function expectedSchema(migrations) {
           name: analysis.constraintName,
           tableName: analysis.tableName,
         });
-      } else {
+      } else if (analysis.type === "add-column") {
+        const columns = tables.get(analysis.tableName);
+        if (!columns || columns.includes(analysis.columnName)) {
+          throw new PhpMyAdminBundleError();
+        }
+        columns.push(analysis.columnName);
+      } else if (analysis.type === "drop-index") {
+        const index = indexes.findIndex(
+          (candidate) =>
+            candidate.name === analysis.indexName &&
+            candidate.tableName === analysis.tableName,
+        );
+        if (index < 0) throw new PhpMyAdminBundleError();
+        indexes.splice(index, 1);
+      } else if (analysis.type === "create-index") {
         indexes.push({ name: analysis.indexName, tableName: analysis.tableName });
       }
     }
@@ -878,7 +1028,7 @@ export async function buildPhpMyAdminMigrationBundle({
       "utf8",
     );
     const statements = splitMigrationSql(sql).map((statement) => ({
-      analysis: analyzeMigrationStatement(statement),
+      analysis: analyzeMigrationStatement(statement, expected.sqlFileName.replace(/\.sql$/u, "")),
       hash: sha256(statement),
       sql: statement,
     }));

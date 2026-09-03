@@ -41,6 +41,10 @@ type TaskDto = Readonly<{
 type CustomerDto = Readonly<{
   displayName: string;
   id: string;
+  projects?: readonly Readonly<{
+    id: string;
+    status: ProjectDto["status"];
+  }>[];
   shortCode: string;
   status: "active" | "inactive";
 }>;
@@ -179,6 +183,20 @@ function taskBody(draft: TaskDraft) {
     projectId: draft.projectId || null,
     status: draft.status,
     title: draft.title.trim(),
+  };
+}
+
+function taskUpdateBody(draft: TaskDraft, task: TaskDto) {
+  const next = taskBody(draft);
+  return {
+    ...(next.customerId === task.customerId ? {} : { customerId: next.customerId }),
+    ...(next.description === task.description ? {} : { description: next.description }),
+    ...(next.dueOn === task.dueOn ? {} : { dueOn: next.dueOn }),
+    ...(next.priority === task.priority ? {} : { priority: next.priority }),
+    ...(next.projectId === task.projectId ? {} : { projectId: next.projectId }),
+    ...(next.status === task.status ? {} : { status: next.status }),
+    ...(next.title === task.title ? {} : { title: next.title }),
+    version: task.version,
   };
 }
 
@@ -452,6 +470,30 @@ export function TasksWorkspace() {
     });
   }, [dueFilter, projectFilter, query, tasks, today]);
 
+  const editorProjects = useMemo(() => {
+    if (draft.customerId === "") return projects;
+    const customer = customers.find((item) => item.id === draft.customerId);
+    if (customer?.projects === undefined) return projects;
+    const linkedIds = new Set(customer.projects.map((project) => project.id));
+    return projects.filter(
+      (project) =>
+        linkedIds.has(project.id) ||
+        (editingTask?.customerId === draft.customerId &&
+          editingTask.projectId === project.id),
+    );
+  }, [customers, draft.customerId, editingTask, projects]);
+
+  const editorCustomers = useMemo(() => {
+    if (draft.projectId === "") return customers;
+    return customers.filter(
+      (customer) =>
+        customer.projects === undefined ||
+        customer.projects.some((project) => project.id === draft.projectId) ||
+        (editingTask?.projectId === draft.projectId &&
+          editingTask.customerId === customer.id),
+    );
+  }, [customers, draft.projectId, editingTask]);
+
   const tasksByStatus = useMemo(
     () =>
       Object.fromEntries(
@@ -510,6 +552,13 @@ export function TasksWorkspace() {
     }
 
     const existing = editingTask;
+    const requestBody = existing === null ? body : taskUpdateBody(draft, existing);
+    if (existing !== null && Object.keys(requestBody).length === 1) {
+      setAnnouncement(`${existing.title} görevinde değişiklik yok.`);
+      closeEditor(false);
+      setFocusTaskId(existing.id);
+      return;
+    }
     setSaveState("saving");
     setFormError(null);
     setBoardError(null);
@@ -517,9 +566,7 @@ export function TasksWorkspace() {
       const response = await fetch(
         existing === null ? "/api/tasks" : `/api/tasks/${existing.id}`,
         {
-          body: JSON.stringify(
-            existing === null ? body : { ...body, version: existing.version },
-          ),
+          body: JSON.stringify(requestBody),
           credentials: "same-origin",
           headers: { "Content-Type": "application/json" },
           method: existing === null ? "POST" : "PATCH",
@@ -536,8 +583,10 @@ export function TasksWorkspace() {
       };
       if (!response.ok || payload.task === undefined) {
         setFormError(
-          response.status === 409
-            ? "Görev başka bir işlemde değişti. Sayfayı yenileyip yeniden deneyin."
+          payload.status === "customer_project_mismatch"
+            ? "Seçilen müşteri bu projeye bağlı değil. Müşteri veya proje seçimini değiştirin."
+            : response.status === 409
+              ? "Görev başka bir işlemde değişti. Sayfayı yenileyip yeniden deneyin."
             : payload.status === "validation_error"
               ? "Başlık, vade, öncelik ve durum alanlarını kontrol edin."
               : "Görev kaydedilemedi. Lütfen yeniden deneyin.",
@@ -600,7 +649,9 @@ export function TasksWorkspace() {
       };
       if (!response.ok || payload.task === undefined) {
         setBoardError(
-          response.status === 409
+          payload.status === "customer_project_mismatch"
+            ? "Bu müşteri artık görevin projesine bağlı değil. Müşteri veya proje bağlantısını düzeltip yeniden deneyin."
+            : response.status === 409
             ? "Görev başka bir işlemde değişti. Panoyu yenileyip yeniden deneyin."
             : "Görev durumu değiştirilemedi. Lütfen yeniden deneyin.",
         );
@@ -692,7 +743,7 @@ export function TasksWorkspace() {
                     {editingTask?.projectName ?? "Mevcut proje"}
                   </option>
                 ) : null}
-                {projects.map((project) => (
+                {editorProjects.map((project) => (
                   <option key={project.id} value={project.id}>
                     {project.displayName} · {project.shortCode}
                     {project.status === "completed" || project.status === "cancelled"
@@ -719,7 +770,7 @@ export function TasksWorkspace() {
                     {editingTask?.customerName ?? "Mevcut müşteri"}
                   </option>
                 ) : null}
-                {customers.map((customer) => (
+                {editorCustomers.map((customer) => (
                   <option key={customer.id} value={customer.id}>
                     {customer.displayName} · {customer.shortCode}
                     {customer.status === "inactive" ? " (pasif)" : ""}

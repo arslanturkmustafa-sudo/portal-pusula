@@ -14,6 +14,11 @@ import { isAdminAuthenticated } from "@/platform/auth/server-auth";
 import { getDatabaseProbeEnvironment } from "@/platform/config/readiness-env";
 import { getPlatformDatabasePool } from "@/platform/database/mysql-platform";
 import { correlationIdFromHeaders } from "@/platform/http/correlation-id";
+import {
+  isJsonWriteRequest,
+  isSameOriginWriteRequest,
+  readJsonWriteBody,
+} from "@/platform/http/write-request";
 import { PlatformInputError } from "@/platform/validation/canonical-identifiers";
 
 export const dynamic = "force-dynamic";
@@ -34,11 +39,6 @@ function json(body: unknown, status = 200): NextResponse {
 
 function databasePool() {
   return getPlatformDatabasePool(getDatabaseProbeEnvironment());
-}
-
-function bodyIsTooLarge(request: NextRequest): boolean {
-  const declaredLength = Number(request.headers.get("content-length") ?? "0");
-  return !Number.isFinite(declaredLength) || declaredLength > 32_768;
 }
 
 function mappedError(error: unknown): NextResponse | null {
@@ -93,13 +93,16 @@ export async function PUT(
   if (!(await isAdminAuthenticated(request))) {
     return json({ status: "unauthorized" }, 401);
   }
-  if (bodyIsTooLarge(request)) {
-    return json({ status: "validation_error" }, 400);
+  if (!isSameOriginWriteRequest(request)) return json({ status: "forbidden" }, 403);
+  if (!isJsonWriteRequest(request)) {
+    return json({ status: "unsupported_media_type" }, 415);
   }
 
   try {
     const { contractId, id, month } = await context.params;
-    const input = monthlyVisitPlanInputSchema.parse(await request.json());
+    const input = monthlyVisitPlanInputSchema.parse(
+      await readJsonWriteBody(request),
+    );
     const monthPlan = await replaceMonthlyVisitPlan(
       databasePool(),
       id,

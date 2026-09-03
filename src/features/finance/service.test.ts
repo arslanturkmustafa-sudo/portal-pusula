@@ -7,6 +7,7 @@ vi.mock("server-only", () => ({}));
 
 const mocks = vi.hoisted(() => ({
   appendAuditEvent: vi.fn(),
+  findActiveCustomerProjectForUpdate: vi.fn(),
   findCollectionByClientOperationKeyForUpdate: vi.fn(),
   findCustomerForUpdate: vi.fn(),
   findFinanceContractForUpdate: vi.fn(),
@@ -19,6 +20,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/features/customers/repository", () => ({
+  findActiveCustomerProjectForUpdate: mocks.findActiveCustomerProjectForUpdate,
   findCustomerForUpdate: mocks.findCustomerForUpdate,
 }));
 
@@ -53,11 +55,14 @@ import {
   ContractNotBillableError,
   createOpeningBalance,
   createReceivableCollection,
+  FinanceContractProjectMissingError,
+  FinanceCustomerProjectUnavailableError,
   FinanceIdempotencyConflictError,
   generateContractMonthReceivable,
   listFinanceReceivables,
 } from "@/features/finance/service";
 
+const projectId = "70000000-0000-4000-8000-000000000001";
 const receivable = {
   collectedAmount: "25.0000",
   contractId: "20000000-0000-4000-8000-000000000001",
@@ -70,6 +75,9 @@ const receivable = {
   id: "30000000-0000-4000-8000-000000000001",
   netAmount: "100.0000",
   periodMonth: "2026-09",
+  projectId,
+  projectName: "Mühendis Kafası",
+  projectShortCode: "MUHENDIS_KAFASI",
   sourceType: "contract_month" as const,
   totalAmount: "120.0000",
   updatedAtUtc: "2026-09-01 09:00:00.000000",
@@ -86,6 +94,10 @@ describe("finance write service", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.findCollectionByClientOperationKeyForUpdate.mockResolvedValue(null);
+    mocks.findActiveCustomerProjectForUpdate.mockResolvedValue({
+      customerId: receivable.customerId,
+      projectId,
+    });
   });
 
   it("summarizes current-month remaining and collected amounts as decimal strings", async () => {
@@ -127,6 +139,7 @@ describe("finance write service", () => {
       expect.anything(),
       "2026-09-01",
       "2026-10-01",
+      undefined,
     );
   });
 
@@ -137,6 +150,7 @@ describe("finance write service", () => {
       id: receivable.contractId,
       monthlyFeeAmount: "100.0000",
       paymentDay: 5,
+      projectId,
       startsOn: "2026-09-01",
       status: "active",
       vatMode: "exclusive",
@@ -162,6 +176,7 @@ describe("finance write service", () => {
       id: receivable.contractId,
       monthlyFeeAmount: "100.0000",
       paymentDay: 5,
+      projectId,
       startsOn: "2025-09-01",
       status: "closed",
       vatMode: "exclusive",
@@ -179,6 +194,31 @@ describe("finance write service", () => {
     expect(mocks.insertReceivableRecord).not.toHaveBeenCalled();
   });
 
+  it("does not generate a receivable until a legacy contract is assigned to a project", async () => {
+    mocks.findFinanceContractForUpdate.mockResolvedValue({
+      customerId: receivable.customerId,
+      endsOn: "2027-08-31",
+      id: receivable.contractId,
+      monthlyFeeAmount: "100.0000",
+      paymentDay: 5,
+      projectId: null,
+      startsOn: "2026-09-01",
+      status: "active",
+      vatMode: "exclusive",
+      vatRate: "20.00",
+    });
+
+    await expect(
+      generateContractMonthReceivable(
+        {} as Pool,
+        { contractId: receivable.contractId, month: "2026-09" },
+        context,
+      ),
+    ).rejects.toBeInstanceOf(FinanceContractProjectMissingError);
+    expect(mocks.findGeneratedReceivableForUpdate).not.toHaveBeenCalled();
+    expect(mocks.insertReceivableRecord).not.toHaveBeenCalled();
+  });
+
   it("generates a boundary-month snapshot from the prorated contract fee", async () => {
     mocks.findFinanceContractForUpdate.mockResolvedValue({
       customerId: receivable.customerId,
@@ -186,6 +226,7 @@ describe("finance write service", () => {
       id: receivable.contractId,
       monthlyFeeAmount: "120000.0000",
       paymentDay: 5,
+      projectId,
       startsOn: "2026-09-15",
       status: "active",
       vatMode: "exclusive",
@@ -372,6 +413,7 @@ describe("finance write service", () => {
         description: "Devreden alacak",
         dueOn: "2026-08-15",
         netAmount: "100",
+        projectId,
         vatAmount: "0",
       },
       context,
@@ -379,5 +421,27 @@ describe("finance write service", () => {
 
     expect(result.created).toBe(false);
     expect(mocks.appendAuditEvent).not.toHaveBeenCalled();
+  });
+
+  it("rejects an opening balance outside the customer's active project portfolio", async () => {
+    mocks.findCustomerForUpdate.mockResolvedValue({ id: receivable.customerId });
+    mocks.findActiveCustomerProjectForUpdate.mockResolvedValue(null);
+
+    await expect(
+      createOpeningBalance(
+        {} as Pool,
+        {
+          clientOperationKey,
+          customerId: receivable.customerId,
+          description: "Devreden alacak",
+          dueOn: "2026-08-15",
+          netAmount: "100",
+          projectId,
+          vatAmount: "0",
+        },
+        context,
+      ),
+    ).rejects.toBeInstanceOf(FinanceCustomerProjectUnavailableError);
+    expect(mocks.insertOpeningBalanceRecordIdempotently).not.toHaveBeenCalled();
   });
 });
