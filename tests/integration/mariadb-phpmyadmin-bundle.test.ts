@@ -21,6 +21,9 @@ const disposableMariaDbEnabled =
 const repositoryRoot = process.cwd();
 const journalTable = "__drizzle_migrations";
 const knownTablesInDropOrder = [
+  "credit_card_installment",
+  "expense",
+  "credit_card",
   "work_task_project",
   "work_task",
   "project",
@@ -463,8 +466,8 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
           },
           sessionRestored: true,
         });
-        expect(await tableNames(pool)).toHaveLength(16);
-        expect(await journalRows(pool)).toHaveLength(10);
+        expect(await tableNames(pool)).toHaveLength(19);
+        expect(await journalRows(pool)).toHaveLength(11);
       } catch (error) {
         reusable = false;
         throw error;
@@ -630,11 +633,11 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
         tablesAfter,
       }).toEqual({
         diagnostics: {
-          application_columns: 153,
-          checks: 71,
-          foreign_keys: 10,
-          indexes: 50,
-          matching_application_tables: 15,
+          application_columns: 201,
+          checks: 96,
+          foreign_keys: 13,
+          indexes: 62,
+          matching_application_tables: 18,
           matching_journal_tables: 1,
           sql_mode: expect.any(String),
         },
@@ -648,8 +651,11 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
           "_platform_migration_verification",
           "audit_event",
           "consulting_contract",
+          "credit_card",
+          "credit_card_installment",
           "cron_dispatch_gate",
           "customer",
+          "expense",
           "job_run",
           "monthly_visit_commitment",
           "outbox_event",
@@ -661,7 +667,7 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
           "work_task",
           "work_task_project",
         ],
-        journalCount: 10,
+        journalCount: 11,
       });
 
       await expect(
@@ -675,7 +681,7 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
 
       const bundleSchema = await schemaDefinitionSnapshot(pool);
       await expect(runMigration()).resolves.toBeUndefined();
-      expect(await journalRows(pool)).toHaveLength(10);
+      expect(await journalRows(pool)).toHaveLength(11);
       expect(await schemaDefinitionSnapshot(pool)).toEqual(bundleSchema);
 
       await resetKnownTables(pool);

@@ -22,9 +22,12 @@ Kaynakta çalışan ilk dikey dilim şunları içerir:
 - görev oluşturma, düzenleme, durum ve öncelik takibi yapılan Kanban çalışma alanı;
 - Mühendis Kafası, ByPusula, OptiPusula ve 7 Emlak Ajansı için proje portföyü oluşturma ve düzenleme;
 - görevleri projeye bağlama, proje rozetiyle gösterme ve projeye göre filtreleme;
+- genel veya proje bağlantılı gider oluşturma, düzenleme, iptal etme ve ay/kategori/ödeme yöntemine göre filtreleme;
+- kredi kartlarını yalnız tanımlayıcı son dört haneyle izleme, kart harcamasından ekstre ayı/vade tarihli kesin taksit planı üretme ve taksit ödeme durumunu yönetme;
+- giderlerde net/KDV/toplam tutar snapshot'ı ile aktif gider, KDV ve kart harcaması özetlerini hesaplama;
 - PWA kabuğu, liveness/readiness ve mevcut güvenli platform altyapısı.
 
-Gider/kart, vergi tahmini ve otomatik aylık üretim sıradaki iş dilimleridir. Canlı ekranda henüz açılmayan alanlar veri varmış gibi gösterilmez.
+Vergi tahmini, gelir-gider proje kârlılığı ve otomatik aylık üretim sıradaki iş dilimleridir. Canlı ekranda henüz açılmayan alanlar veri varmış gibi gösterilmez.
 
 ## Teknik temel
 
@@ -81,8 +84,9 @@ Cron değişkenleri kaynakta varsayılan kapalı altyapı adayıdır; gerçek i�
 - `0007_user_account.sql`
 - `0008_work_tasks.sql`
 - `0009_projects.sql`
+- `0010_expenses_cards.sql`
 
-Uygulanmış migration dosyası değiştirilmez; her düzeltme yeni ileri yönlü migration olur. `0004_customer.sql` müşteri tablosunu, `0005_consulting_contract_visits.sql` sözleşme ve aylık ziyaret tablolarını, `0006_receivables.sql` alacak ve tahsilat tablolarını, `0007_user_account.sql` uygulama içinden parola yönetilebilen yönetici hesabını, `0008_work_tasks.sql` Kanban görevlerini, `0009_projects.sql` ise proje portföyü ile görev-proje bağını ekler. Mevcut Hostinger veritabanına clean-only phpMyAdmin paketi tekrar yüklenmez; journal'ı bulunan ve SSH/npm erişimi olmayan hedefte [seçili incremental phpMyAdmin paketi](docs/phpmyadmin-incremental-migration.md) yalnız sıradaki migration'ı uygular.
+Uygulanmış migration dosyası değiştirilmez; her düzeltme yeni ileri yönlü migration olur. `0004_customer.sql` müşteri tablosunu, `0005_consulting_contract_visits.sql` sözleşme ve aylık ziyaret tablolarını, `0006_receivables.sql` alacak ve tahsilat tablolarını, `0007_user_account.sql` uygulama içinden parola yönetilebilen yönetici hesabını, `0008_work_tasks.sql` Kanban görevlerini, `0009_projects.sql` proje portföyü ile görev-proje bağını, `0010_expenses_cards.sql` ise kredi kartı, gider ve kart taksit planı tablolarını ekler. Mevcut Hostinger veritabanına clean-only phpMyAdmin paketi tekrar yüklenmez; journal'ı bulunan ve SSH/npm erişimi olmayan hedefte [seçili incremental phpMyAdmin paketi](docs/phpmyadmin-incremental-migration.md) yalnız sıradaki migration'ı uygular.
 
 ## Yerel geliştirme
 
@@ -113,10 +117,10 @@ npm run package:hostinger
 Canlı kabul sırası:
 
 1. Proje dalının kalite kapılarını ve PR CI sonucunu doğrula; otomatik Hostinger dağıtımını tetikleyebilecek `main` birleştirmesini henüz yapma.
-2. Canlı veritabanının güncel yedeğini doğrula; ardından yalnız `0009_projects` için üretilen hedefe bağlı incremental phpMyAdmin paketini bir kez uygula.
-3. Exact `PORTAL_PUSULA_INCREMENTAL_MIGRATION_OK` / `0009_projects` sonucunu, on journal satırını ve iki yeni tabloyu salt okunur doğrula.
+2. Canlı veritabanının güncel yedeğini doğrula; ardından yalnız `0010_expenses_cards` için üretilen hedefe bağlı incremental phpMyAdmin paketini bir kez uygula.
+3. Exact `PORTAL_PUSULA_INCREMENTAL_MIGRATION_OK` / `0010_expenses_cards` sonucunu, on bir journal satırını, üç yeni tabloyu ve üç `RESTRICT` foreign key'i salt okunur doğrula.
 4. PR'ı `main` dalına birleştir; bağlı Git dağıtımını bekle veya aynı kaynakla yeniden üretilmiş güncel ZIP'i dağıt ve build'in `Akım` olmasını bekle.
-5. `/giris`, müşteri/sözleşme düzenleme, `/projeler` ve görev-proje seçme/filtreleme akışlarını doğrula.
+5. `/giris`, müşteri/sözleşme düzenleme, `/projeler`, görev-proje seçme/filtreleme, `/finans/giderler` ve `/finans/kartlar` akışlarını doğrula.
 6. Sorun çıkarsa yalnız ilgili sınırda hedefli test ve log incelemesi yap; migration başarı satırı yoksa aynı paketi yeniden çalıştırma.
 
 ## Belgeler

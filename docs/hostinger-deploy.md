@@ -1,6 +1,6 @@
-# Hostinger dağıtım runbook'u — Projeler V1
+# Hostinger dağıtım runbook'u — Gider ve Kart V1
 
-Bu runbook, `portal.muhendiskafasi.com.tr` üzerindeki Hostinger Business Node.js Web App hedefini ve `0009_projects` ile gelen proje portföyü/görev-proje bağlantısını kapsar. Canlı veritabanı `0008_work_tasks` seviyesindeyken yeni uygulama dağıtılmadan önce `0009_projects` hedefe bağlı incremental paketle uygulanır. Mevcut auth, müşteri, sözleşme, ziyaret, finans, günlük plan ve görev verileri korunur.
+Bu runbook, `portal.muhendiskafasi.com.tr` üzerindeki Hostinger Business Node.js Web App hedefini ve `0010_expenses_cards` ile gelen gider/kredi kartı ödeme planı dilimini kapsar. Canlı veritabanı `0009_projects` seviyesindeyken yeni uygulama dağıtılmadan önce `0010_expenses_cards` hedefe bağlı incremental paketle uygulanır. Mevcut auth, müşteri, sözleşme, ziyaret, finans, günlük plan, görev ve proje verileri korunur.
 
 ## Kanıtlanan runtime ve dağıtım kararı
 
@@ -36,18 +36,18 @@ Son komut `dist/portal-pusula-hostinger.zip` dosyasını iki kez üretip byte-id
 
 Uygulama ZIP'i DB şeması uygulamaz. npm/SSH erişimi olmayan, yeni ve tamamen boş disposable staging DB'si için [phpMyAdmin clean-only migration runbook'u](./phpmyadmin-clean-migration.md); journal'ı bulunan mevcut DB'de yalnız sıradaki migration için [phpMyAdmin incremental migration runbook'u](./phpmyadmin-incremental-migration.md) izlenir. SQL artefaktları Hostinger ZIP'inin içine eklenmez.
 
-Arşiv kökünde doğrudan `package.json`, `package-lock.json`, `.nvmrc`, `next.config.mjs`, `next-env.d.ts`, `tsconfig.json` ve `postcss.config.mjs` bulunur. `drizzle/` içindeki `0000`–`0009`, `public/`, production için gereken migration scriptleri ve testleri çıkarılmış `src/` sabit allowlist ile dahil edilir. `src/**/*.test.ts(x)`, `tests/`, disposable DB/E2E/paketleme scriptleri, herhangi bir alt dizindeki `.env*`, özel anahtar/credential dosyaları, `.next/`, `node_modules/`, `dist/`, `outputs/`, `work/`, log/coverage/Playwright/test çıktıları ve Git verisi hariçtir. Nested yasak yol bulunduğunda paket içerik üretmeden fail-closed olur. Production ZIP migration dosyalarını taşısa da Hostinger build/start akışı migration çalıştırmaz; canlı DB yalnız ayrı incremental paketle yükseltilir.
+Arşiv kökünde doğrudan `package.json`, `package-lock.json`, `.nvmrc`, `next.config.mjs`, `next-env.d.ts`, `tsconfig.json` ve `postcss.config.mjs` bulunur. `drizzle/` içindeki `0000`–`0010`, `public/`, production için gereken migration scriptleri ve testleri çıkarılmış `src/` sabit allowlist ile dahil edilir. `src/**/*.test.ts(x)`, `tests/`, disposable DB/E2E/paketleme scriptleri, herhangi bir alt dizindeki `.env*`, özel anahtar/credential dosyaları, `.next/`, `node_modules/`, `dist/`, `outputs/`, `work/`, log/coverage/Playwright/test çıktıları ve Git verisi hariçtir. Nested yasak yol bulunduğunda paket içerik üretmeden fail-closed olur. Production ZIP migration dosyalarını taşısa da Hostinger build/start akışı migration çalıştırmaz; canlı DB yalnız ayrı incremental paketle yükseltilir.
 
 ## DB-first Hostinger yükleme akışı
 
 1. Proje dalının yerel kalite kapıları ve PR CI sonucu tamamlanır; Hostinger'ı tetikleyebilecek `main` birleştirmesi bekletilir.
-2. Canlı DB yedeği ve dokuz satırlı journal doğrulanır; `project` ile `work_task_project` tablolarının henüz bulunmadığı kontrol edilir.
-3. [Incremental migration runbook'u](./phpmyadmin-incremental-migration.md) ile yalnız `0009_projects` hedefe bağlı paketi üretilir, doğrulanır ve tek kez içe aktarılır.
-4. Exact başarı satırı, on journal satırı, iki yeni tablo ve iki `RESTRICT` foreign key doğrulanır.
+2. Canlı DB yedeği ve on satırlı journal doğrulanır; `credit_card`, `expense` ile `credit_card_installment` tablolarının henüz bulunmadığı kontrol edilir.
+3. [Incremental migration runbook'u](./phpmyadmin-incremental-migration.md) ile yalnız `0010_expenses_cards` hedefe bağlı paketi üretilir, doğrulanır ve tek kez içe aktarılır.
+4. Exact başarı satırı, on bir journal satırı, üç yeni tablo, üç `RESTRICT` foreign key ve sürümlü CHECK/UNIQUE/index sözleşmesi doğrulanır.
 5. PR `main` dalına birleştirilir. Hostinger Git bağlantısı otomatik dağıtıyorsa yeni commitin tamamlanması beklenir; değilse aynı doğrulanmış kaynakla yeniden üretilen `dist/portal-pusula-hostinger.zip` hPanel'den yüklenir.
 6. Node 24.x, kök `./`, çıktı `.next` ve `npm run build` → `next build --webpack` ayarları korunur.
-7. Projeler V1 yeni environment değişkeni istemez. Mevcut secret/env değerleri değiştirilmez; cron değişkenleri eklenmez veya etkinleştirilmez.
-8. Dağıtım `Akım` olduktan sonra liveness/readiness, giriş, müşteri-sözleşme, proje ve görev-proje akışları doğrulanır.
+7. Gider ve Kart V1 yeni environment değişkeni istemez. Mevcut secret/env değerleri değiştirilmez; cron değişkenleri eklenmez veya etkinleştirilmez.
+8. Dağıtım `Akım` olduktan sonra liveness/readiness, giriş, müşteri-sözleşme, proje, görev-proje, gider ve kart ödeme planı akışları doğrulanır.
 9. Runtime loglarında yalnız genel sonuç/correlation ID aranır; raw DB hatası, parola, token veya Authorization değeri bulunmamalıdır.
 
 ## MySQL readiness ayarları
@@ -101,16 +101,16 @@ Canlı kabulte `/sw.js` yanıtında şu başlıklar birlikte görülmelidir:
 
 ## Redeploy ve geri alma
 
-- `0009_projects` additive'dir; DB-first aralığında eski uygulama çalışmayı sürdürür.
-- Migration başarıyla uygulandıktan sonra eski uygulamaya dönmek iki yeni tabloyu silmez; eski kod bu tabloları kullanmadığı için kısa süreli uygulama geri dönüşü şema açısından uyumludur.
+- `0010_expenses_cards` additive'dir; DB-first aralığında eski uygulama çalışmayı sürdürür.
+- Migration başarıyla uygulandıktan sonra eski uygulamaya dönmek üç yeni tabloyu silmez; eski kod bu tabloları kullanmadığı için kısa süreli uygulama geri dönüşü şema açısından uyumludur.
 - MariaDB DDL transactional değildir. Exact başarı satırı alınmayan incremental paket yeniden çalıştırılmaz; hedef salt okunur incelenir ve gerekirse yeni forward-fix migration hazırlanır.
 - Önceki uygulama artefaktı yalnız secret-safe biçimde korunmuş, yeni şemayla uyumluluğu doğrulanmış ve aynı session güvenlik sözleşmesini taşıyorsa geri dönüş adayıdır.
-- `/api/internal/cron/dispatch` varsayılan kapalıdır; Projeler V1 dağıtımı cron kurulumu veya değişikliği yapmaz.
+- `/api/internal/cron/dispatch` varsayılan kapalıdır; Gider ve Kart V1 dağıtımı cron kurulumu veya değişikliği yapmaz.
 
 ## Canlı kabul kontrolü
 
-- [ ] `0009_projects` incremental importu exact başarı satırıyla tamamlandı.
-- [ ] Journal on satır; `project` ve `work_task_project` tabloları ile iki `RESTRICT` foreign key doğrulandı.
+- [ ] `0010_expenses_cards` incremental importu exact başarı satırıyla tamamlandı.
+- [ ] Journal on bir satır; `credit_card`, `expense` ve `credit_card_installment` tabloları ile üç `RESTRICT` foreign key ve sürümlü CHECK/UNIQUE/index sözleşmesi doğrulandı.
 - [ ] Git veya yeniden üretilmiş ZIP build'i `Akım` ve runtime hata sayısı 0.
 - [ ] Ana sayfa 200; public liveness minimal 200.
 - [ ] Readiness header olmadan ve yanlış header ile generic 404.
@@ -124,6 +124,9 @@ Canlı kabulte `/sw.js` yanıtında şu başlıklar birlikte görülmelidir:
 - [ ] Migration öncesi güncel canlı DB yedeği ve hedef kimliği doğrulandı.
 - [ ] `/projeler` üzerinde proje oluşturma/düzenleme çalışıyor.
 - [ ] `/gorevler` üzerinde proje seçme, rozet ve filtreleme çalışıyor.
+- [ ] `/finans/giderler` üzerinde genel ve proje bağlantılı gider oluşturma, filtreleme, düzenleme ve gerekçeli iptal çalışıyor; iptal edilen gider aktif toplamdan çıkıyor.
+- [ ] `/finans/kartlar` üzerinde yalnız son dört hane ile kart oluşturma/düzenleme, ekstre-vade planını görme ve taksiti ödendi/planlandı işaretleme çalışıyor.
+- [ ] Kredi kartı giderinde taksitlerin toplamı gider toplamına exact eşit; ödenmiş taksiti bulunan giderde finansal/kart planı değişikliği engelleniyor.
 - [ ] `/musteriler` sözleşme düzenleme modu kendiliğinden kapanmıyor ve kayıt tamamlanıyor.
 - [ ] Hostinger cron exact `POST` ve custom Authorization header'ı secret sızdırmadan destekliyor; timezone/retry/overlap ölçüldü.
 - [ ] Yetkili permit ile dayanıklı suppression aynı generic 202'yi veriyor; gerçek gate/DB arızası generic 503 kalıyor.

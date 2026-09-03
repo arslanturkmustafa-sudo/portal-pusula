@@ -1,6 +1,6 @@
-# Migration runbook'u — operasyon, görev ve proje şeması
+# Migration runbook'u — operasyon, proje ve finans şeması
 
-Bu runbook Portal Pusula'nın migration mekanizmasını, platform temelini ve operasyon domain tablolarını kapsar. Sürümlü sıra iki immutable migration ve bunları değiştirmeden eklenen sekiz ileri yönlü migration'dan oluşur:
+Bu runbook Portal Pusula'nın migration mekanizmasını, platform temelini ve operasyon domain tablolarını kapsar. Sürümlü sıra iki immutable migration ve bunları değiştirmeden eklenen dokuz ileri yönlü migration'dan oluşur:
 
 - `0000_platform_migration_verification.sql`: yalnız sentetik `DECIMAL(19,4)`, UTC, transaction ve DB-level idempotency doğrulamasına ayrılmış `_platform_migration_verification` tablosu;
 - `0001_platform_job_outbox_audit.sql`: yalnız `scheduled_job`, `job_run`, `outbox_event` ve `audit_event` platform tabloları;
@@ -12,10 +12,11 @@ Bu runbook Portal Pusula'nın migration mekanizmasını, platform temelini ve op
 - `0007_user_account.sql`: tek yönetici hesabının normalize e-posta, scrypt parola özeti, hesap durumu ve oturumları geçersiz kılan kimlik bilgisi sürümünü ekler.
 - `0008_work_tasks.sql`: müşteri ve sorumlu bağlantısı kurulabilen Kanban görevlerini, durum/öncelik/vade alanlarını ve optimistic version sözleşmesini ekler.
 - `0009_projects.sql`: proje portföyünü ve her görevi en fazla bir projeye bağlayan `work_task_project` ilişki tablosunu ekler.
+- `0010_expenses_cards.sql`: kredi kartı tanımlarını, genel veya proje bağlantılı giderleri ve kart harcamalarından üretilen ekstre ayı/vade tarihli taksit planını ekler.
 
-Bu şema müşteri, sözleşme, ziyaret, alacak/tahsilat, yönetici hesabı, görev ve proje portföyünü içerir; henüz gider, kart, vergi tahmini, çok kullanıcılı workspace/organization veya RBAC tablolarını içermez. İlk yönetici hesabı güvenli geçişte mevcut environment kimliğinden oluşturulur; sonraki giriş ve parola değişiklikleri `user_account` üzerinden yürür. Immutable `0000`/`0001` dosyaları değiştirilmemiştir; `0002`–`0009` ayrı ileri yönlü migration'lardır. Uygulanan her migration daha sonra değiştirilemez; sonraki düzeltme yine yeni migration olmalıdır.
+Bu şema müşteri, sözleşme, ziyaret, alacak/tahsilat, yönetici hesabı, görev, proje portföyü, gider ve kredi kartı ödeme planını içerir; henüz vergi tahmini, proje bazlı gelir-gider kârlılığı, çok kullanıcılı workspace/organization veya RBAC tablolarını içermez. İlk yönetici hesabı güvenli geçişte mevcut environment kimliğinden oluşturulur; sonraki giriş ve parola değişiklikleri `user_account` üzerinden yürür. Immutable `0000`/`0001` dosyaları değiştirilmemiştir; `0002`–`0010` ayrı ileri yönlü migration'lardır. Uygulanan her migration daha sonra değiştirilemez; sonraki düzeltme yine yeni migration olmalıdır.
 
-Canlı Hostinger veritabanında `0009_projects` yalnız kullanıcı onaylı DB-first değişiklik penceresinde ve hedefe bağlı incremental phpMyAdmin paketiyle uygulanır. Gerçek veritabanı parolası veya başka bir sır CLI argümanına, komut geçmişine, loga, test çıktısına ya da sürümlü dosyaya yazılmaz.
+Canlı Hostinger veritabanında `0010_expenses_cards` yalnız kullanıcı onaylı DB-first değişiklik penceresinde ve hedefe bağlı incremental phpMyAdmin paketiyle uygulanır. Gerçek veritabanı parolası veya başka bir sır CLI argümanına, komut geçmişine, loga, test çıktısına ya da sürümlü dosyaya yazılmaz.
 
 SSH/npm erişimi olmayan Hostinger hedefindeki yalnız boş ve disposable staging kurulumu için ayrı [phpMyAdmin clean-only migration runbook'u](./phpmyadmin-clean-migration.md) kullanılır. Bu paket mevcut şemayı yükseltmez. Journal'ı bulunan mevcut hedefte yalnız sıradaki seçili migration için [phpMyAdmin incremental migration runbook'u](./phpmyadmin-incremental-migration.md) kullanılır.
 
@@ -46,7 +47,7 @@ Test hedefleri iki ayrı kanıt sınıfıdır:
 
 **Migration correctness**
 
-- boş veritabanında `0000` → `0009` sırasıyla clean migrate ve eksiksiz journal;
+- boş veritabanında `0000` → `0010` sırasıyla clean migrate ve eksiksiz journal;
 - ikinci runner çalışmasının no-op olması;
 - uyumsuz aynı adlı tablo varken migration'ın ve journal kaydının fail-closed kalması;
 - değiştirilmiş uygulanmış SQL/journal hash'inin şema veya veri değişmeden reddedilmesi;
@@ -113,24 +114,27 @@ Her migration uygulanmadan önce `drizzle/` altındaki yeni SQL sürüm kontrol�
 - `0008` yalnız `work_task` tablosunu, müşteri ve yönetici hesabına iki `RESTRICT` foreign key'i ve Kanban sorgu indexlerini eklemeli; destructive DDL veya seed veri içermemeli;
 - `0009` yalnız `project` ve `work_task_project` tablolarını, iki `RESTRICT` foreign key'i ve üç sorgu indexini eklemeli; mevcut tablo/kolon değiştirmemeli, seed veri veya destructive DDL içermemeli;
 - `0009` proje kimliği/kodu/türü/durumu/para birimi ile görev-proje kimliklerinde `ascii_bin`, metin alanlarında `utf8mb4_unicode_ci`, para alanında `DECIMAL(19,4)` ve zaman alanlarında UTC `DATETIME(6)` sözleşmesini korumalı.
+- `0010` yalnız `credit_card`, `expense` ve `credit_card_installment` tablolarını, üç `RESTRICT` foreign key'i ve gider/kart planı sorgu indexlerini eklemeli; mevcut tablo/kolon değiştirmemeli, seed veri veya destructive DDL içermemeli;
+- `0010` canonical kimlik/idempotency, allowlist durum-kategori-ödeme alanları, `DECIMAL(19,4)` para snapshot'ları, aktif/iptal gider bütünlüğü, taksit sıra/ödeme bütünlüğü ve UTC `DATETIME(6)` sözleşmelerini DB seviyesinde korumalı;
+- `credit_card` yalnız kartın uygulama içi adı, isteğe bağlı banka ve son dört hanesini tutmalı; tam kart numarası, CVV, son kullanma tarihi veya başka ödeme sırrı şemada bulunmamalı.
 
 Uygulanmış bir SQL dosyası sonradan düzenlenmez; düzeltme yeni ve ileri yönlü bir migration olarak eklenir.
 
-## `0009_projects` için DB-first canlı sıra
+## `0010_expenses_cards` için DB-first canlı sıra
 
 Canlı migration ayrı kullanıcı onayı ve değişiklik penceresi olmadan başlatılmaz. Hostinger Git bağlantısı `main` birleşmesini otomatik dağıtabileceği için sıra şöyledir:
 
 1. Proje dalındaki SQL farkını ve kalite kapılarını doğrula; PR CI tamamen yeşil olsun, ancak `main` birleşmesini henüz yapma.
-2. `0009_projects` migration kimliğini kaydet: `created_at = 1788423447345`, SQL SHA-256 `86e1b6730d77d1e5d70ed011a0073926a1704b14940fa22c12bce94ae9b3d8f2`, yedi statement.
+2. `0010_expenses_cards` migration kimliği, SQL özeti ve statement sayısını sürümlü journal ile üretilen manifestten doğrula; bu değerleri elle kopyalayıp belgeye sabitleme.
 3. Migration öncesi güncel yedeğin zamanını ve kimliğini doğrula; bakım/geri dönüş penceresini ve durdurma koşullarını belirle.
-4. phpMyAdmin'de canlı DB'nin dokuz exact journal satırında ve son `0008_work_tasks` kaydında olduğunu, `project` ile `work_task_project` tablolarının bulunmadığını salt okunur doğrula.
-5. DB ve sunucu sürümü digest'lerini importtan hemen önce al; yalnız `0009_projects` için [incremental paketi](./phpmyadmin-incremental-migration.md) üretip manifest/hash kontrollerinden geçir.
-6. Hedefe bağlı paketi tek kez içe aktar. Yalnız exact `PORTAL_PUSULA_INCREMENTAL_MIGRATION_OK` / `0009_projects` sonucu başarıdır; sonuç yoksa paketi yeniden çalıştırma.
-7. On journal satırını, iki yeni tabloyu ve iki `RESTRICT` foreign key'i salt okunur doğrula.
+4. phpMyAdmin'de canlı DB'nin on exact journal satırında ve son `0009_projects` kaydında olduğunu; `credit_card`, `expense` ve `credit_card_installment` tablolarının bulunmadığını salt okunur doğrula.
+5. DB ve sunucu sürümü digest'lerini importtan hemen önce al; yalnız `0010_expenses_cards` için [incremental paketi](./phpmyadmin-incremental-migration.md) üretip manifest/hash kontrollerinden geçir.
+6. Hedefe bağlı paketi tek kez içe aktar. Yalnız exact `PORTAL_PUSULA_INCREMENTAL_MIGRATION_OK` / `0010_expenses_cards` sonucu başarıdır; sonuç yoksa paketi yeniden çalıştırma.
+7. On bir journal satırını; üç yeni `InnoDB` / `utf8mb4_unicode_ci` tabloyu; üç `RESTRICT` foreign key'i ve beklenen unique/check/index yapılarını salt okunur doğrula.
 8. DB doğrulandıktan sonra PR'ı `main` dalına birleştir. Bağlı Git dağıtımını bekle veya aynı kaynakla yeniden üretilmiş güncel Hostinger ZIP'ini dağıt.
-9. Liveness/readiness ile giriş, proje oluşturma/düzenleme, görev-proje seçme/filtreleme ve müşteri sözleşmesi düzenleme smoke kontrollerini çalıştır.
+9. Liveness/readiness ile giriş, mevcut operasyon akışları, `/finans/giderler` gider oluşturma/düzenleme/iptal ve `/finans/kartlar` kart/taksit ödeme planı smoke kontrollerini çalıştır.
 
-`0009` additive bir migration'dır: eski uygulama iki yeni tabloyu kullanmadığı için DB-first aralığında çalışmaya devam eder. Uygulama ZIP'i migration çalıştırmaz. Backup/restore ayrıntıları ve geri dönüş yetki sınırı [backup/restore runbook'unda](./backup-restore.md) korunur.
+`0010` additive bir migration'dır: eski uygulama üç yeni tabloyu kullanmadığı için DB-first aralığında çalışmaya devam eder. Uygulama ZIP'i migration çalıştırmaz. Backup/restore ayrıntıları ve geri dönüş yetki sınırı [backup/restore runbook'unda](./backup-restore.md) korunur.
 
 ## Geri dönüş sınırları
 

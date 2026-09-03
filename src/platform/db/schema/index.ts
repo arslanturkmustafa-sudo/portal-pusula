@@ -67,3 +67,14 @@ export {
   type ProjectRecord,
   type WorkTaskProjectRecord,
 } from "./project";
+export {
+  creditCard,
+  creditCardInstallment,
+  expense,
+  type CreditCardInstallmentRecord,
+  type CreditCardRecord,
+  type ExpenseRecord,
+  type NewCreditCardInstallmentRecord,
+  type NewCreditCardRecord,
+  type NewExpenseRecord,
+} from "./finance-spending";
