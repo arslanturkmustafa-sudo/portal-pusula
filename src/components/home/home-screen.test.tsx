@@ -23,6 +23,7 @@ describe("HomeScreen", () => {
     const table = screen.getByRole("table", { name: "Müşteri kayıtları" });
     expect(within(table).getAllByRole("row")).toHaveLength(6);
     expect(within(table).getByText("Atlas Makina")).toBeInTheDocument();
+    expect(within(table).getByText("İzleyen ayın 5. günü")).toBeInTheDocument();
     expect(within(table).getAllByText("Gecikti")).toHaveLength(2);
 
     expect(screen.queryByText("Yerel tasarım önizlemesi")).not.toBeInTheDocument();

@@ -56,6 +56,18 @@ describe("FinanceWorkspace", () => {
     expect(screen.getByLabelText("KDV tutarı")).toHaveValue(0);
   });
 
+  it("explains that a generated receivable is due in the month after service", async () => {
+    const user = userEvent.setup();
+    render(<FinanceWorkspace customers={customers} live={false} />);
+
+    await user.click(screen.getByRole("button", { name: "Ayı oluştur" }));
+
+    expect(screen.getByLabelText("Hizmet ayı")).toBeInTheDocument();
+    expect(
+      screen.getByText(/vade, sözleşmedeki ödeme gününe göre izleyen ayda oluşur/u),
+    ).toBeInTheDocument();
+  });
+
   it("does not present sample money while live records are loading", () => {
     vi.stubGlobal("fetch", vi.fn(() => new Promise(() => undefined)));
 

@@ -11,13 +11,14 @@ import styles from "./task-report-workspace.module.css";
 
 type TaskStatus = "backlog" | "todo" | "in_progress" | "blocked" | "done" | "cancelled";
 type TaskPriority = "low" | "normal" | "high" | "urgent";
+type ReportCustomer = Readonly<{
+  displayName: string;
+  id: string;
+  shortCode: string;
+  status: "active" | "inactive";
+}>;
 type TaskReport = Readonly<{
-  customer: Readonly<{
-    displayName: string;
-    id: string;
-    shortCode: string;
-    status: "active" | "inactive";
-  }>;
+  customer: ReportCustomer;
   filter: Readonly<{
     customerId: string;
     from?: string;
@@ -76,6 +77,17 @@ function generatedLabel(value: string): string {
   }).format(new Date(value));
 }
 
+function isReportCustomer(value: unknown): value is ReportCustomer {
+  if (typeof value !== "object" || value === null) return false;
+  const candidate = value as Partial<ReportCustomer>;
+  return (
+    typeof candidate.displayName === "string" &&
+    typeof candidate.id === "string" &&
+    typeof candidate.shortCode === "string" &&
+    (candidate.status === "active" || candidate.status === "inactive")
+  );
+}
+
 export function TaskReportWorkspace() {
   const searchParams = useSearchParams();
   const query = searchParams.toString();
@@ -85,6 +97,10 @@ export function TaskReportWorkspace() {
     report: TaskReport | null;
     state: "error" | "forbidden" | "ready" | "too-large";
   } | null>(null);
+  const [customerRequest, setCustomerRequest] = useState<{
+    customers: readonly ReportCustomer[];
+    state: "error" | "loading" | "ready";
+  }>({ customers: [], state: "loading" });
   const isCurrentRequest = request?.query === query;
   const report = isCurrentRequest ? request.report : null;
   const state = !customerId
@@ -128,6 +144,51 @@ export function TaskReportWorkspace() {
     return () => controller.abort();
   }, [customerId, query]);
 
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetch("/api/customers", {
+      cache: "no-store",
+      credentials: "same-origin",
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (response.status === 401) {
+          redirectToPortalLogin();
+          return null;
+        }
+        if (!response.ok) throw new Error("Report customers unavailable.");
+        const payload = (await response.json()) as { customers?: unknown };
+        if (!Array.isArray(payload.customers)) {
+          throw new Error("Report customer response is invalid.");
+        }
+        const customers = payload.customers.filter(isReportCustomer);
+        if (customers.length !== payload.customers.length) {
+          throw new Error("Report customer response is invalid.");
+        }
+        return customers;
+      })
+      .then((customers) => {
+        if (customers === null) return;
+        setCustomerRequest({ customers, state: "ready" });
+      })
+      .catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        setCustomerRequest({ customers: [], state: "error" });
+      });
+    return () => controller.abort();
+  }, []);
+
+  const customerOptions = useMemo(() => {
+    const options = new Map<string, ReportCustomer>();
+    for (const customer of customerRequest.customers) {
+      options.set(customer.id, customer);
+    }
+    if (report) options.set(report.customer.id, report.customer);
+    return [...options.values()].sort((left, right) =>
+      left.displayName.localeCompare(right.displayName, "tr-TR"),
+    );
+  }, [customerRequest.customers, report]);
+
   const rangeLabel = useMemo(() => {
     const from = searchParams.get("from");
     const to = searchParams.get("to");
@@ -136,10 +197,36 @@ export function TaskReportWorkspace() {
 
   if (!customerId) {
     return (
-      <section className={styles.message}>
+      <section className={`${styles.message} ${styles.customerPicker}`}>
         <p className="eyebrow">FİRMA RAPORU</p>
-        <h1>Önce bir firma seçin</h1>
-        <p>Görevler sayfasındaki müşteri filtresinden firmayı seçip raporu açın.</p>
+        <h1>Firma görev raporu</h1>
+        <p>Raporlamak istediğiniz firmayı seçin; tarih ve durum aralığını sonraki ekranda daraltabilirsiniz.</p>
+        {customerRequest.state === "loading" ? (
+          <p role="status">Firma listesi hazırlanıyor…</p>
+        ) : null}
+        {customerRequest.state === "ready" && customerOptions.length > 0 ? (
+          <form action="/gorevler/rapor" method="get">
+            <label>
+              <span>Firma</span>
+              <select defaultValue="" name="customerId" required>
+                <option disabled value="">Firma seçin</option>
+                {customerOptions.map((customer) => (
+                  <option key={customer.id} value={customer.id}>
+                    {customer.displayName} · {customer.shortCode}
+                    {customer.status === "inactive" ? " (pasif)" : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button className="primary-action" type="submit">Raporu aç</button>
+          </form>
+        ) : null}
+        {customerRequest.state === "ready" && customerOptions.length === 0 ? (
+          <p role="status">Raporlanabilecek firma bulunmuyor.</p>
+        ) : null}
+        {customerRequest.state === "error" ? (
+          <p role="alert">Firma listesine ulaşılamadı. Görev panosundan bir firma seçerek yeniden deneyin.</p>
+        ) : null}
         <Link className="text-action" href="/gorevler">Görevlere dön</Link>
       </section>
     );
@@ -167,7 +254,17 @@ export function TaskReportWorkspace() {
       </div>
 
       <form className={styles.controls} action="/gorevler/rapor" method="get">
-        <input name="customerId" type="hidden" value={report.customer.id} />
+        <label>
+          <span>Firma</span>
+          <select defaultValue={report.customer.id} name="customerId" required>
+            {customerOptions.map((customer) => (
+              <option key={customer.id} value={customer.id}>
+                {customer.displayName} · {customer.shortCode}
+                {customer.status === "inactive" ? " (pasif)" : ""}
+              </option>
+            ))}
+          </select>
+        </label>
         <label><span>Vade başlangıcı</span><input defaultValue={report.filter.from ?? ""} name="from" type="date" /></label>
         <label><span>Vade bitişi</span><input defaultValue={report.filter.to ?? ""} name="to" type="date" /></label>
         <label>

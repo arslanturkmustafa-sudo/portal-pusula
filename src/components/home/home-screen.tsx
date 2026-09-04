@@ -93,7 +93,7 @@ const sampleCustomers: readonly CustomerView[] = [
     id: "sample-1",
     visit: "3 Eylül",
     fee: "120.000 ₺",
-    payment: "Ayın 5'i",
+    payment: "İzleyen ayın 5. günü",
     projects: [sampleProject],
     status: "Tahsil edildi",
     tone: "paid",
@@ -105,7 +105,7 @@ const sampleCustomers: readonly CustomerView[] = [
     id: "sample-2",
     visit: "10 Eylül",
     fee: "50.000 ₺ + KDV",
-    payment: "Ayın 10'u",
+    payment: "İzleyen ayın 10. günü",
     projects: [sampleProject],
     status: "Gecikti",
     tone: "late",
@@ -117,7 +117,7 @@ const sampleCustomers: readonly CustomerView[] = [
     id: "sample-3",
     visit: "Planlanmadı",
     fee: "75.000 ₺",
-    payment: "Ayın 15'i",
+    payment: "İzleyen ayın 15. günü",
     projects: [sampleProject],
     status: "Bekliyor",
     tone: "waiting",
@@ -129,7 +129,7 @@ const sampleCustomers: readonly CustomerView[] = [
     id: "sample-4",
     visit: "17 Eylül",
     fee: "50.000 ₺ + KDV",
-    payment: "Ayın 20'si",
+    payment: "İzleyen ayın 20. günü",
     projects: [sampleProject],
     status: "Bekliyor",
     tone: "waiting",
@@ -141,7 +141,7 @@ const sampleCustomers: readonly CustomerView[] = [
     id: "sample-5",
     visit: "Planlanmadı",
     fee: "50.000 ₺",
-    payment: "Ayın 25'i",
+    payment: "İzleyen ayın 25. günü",
     projects: [sampleProject],
     status: "Gecikti",
     tone: "late",
@@ -182,8 +182,8 @@ function storedCustomerView(
     name: customer.displayName,
     payment: capabilities.canReadBilling && billing
       ? billing.paymentDays.length === 1
-        ? `Ayın ${billing.paymentDays[0]}. günü`
-        : `Ayın ${billing.paymentDays.join(", ")}. günleri`
+        ? `İzleyen ayın ${billing.paymentDays[0]}. günü`
+        : `İzleyen ayın ${billing.paymentDays.join(", ")}. günleri`
       : "Erişim kısıtlı",
     phone: customer.phone,
     projects: customer.projects,
@@ -378,7 +378,7 @@ export function HomeScreen({
             ? {
                 ...customer,
                 fee: contractFeeLabel(contract),
-                payment: `Ayın ${contract.paymentDay}. günü`,
+                payment: `İzleyen ayın ${contract.paymentDay}. günü`,
               }
             : customer,
         ),

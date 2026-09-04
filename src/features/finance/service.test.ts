@@ -83,7 +83,7 @@ const receivable = {
   customerId: "10000000-0000-4000-8000-000000000001",
   customerName: "Test Müşterisi",
   description: "2026-09 aylık danışmanlık hizmeti",
-  dueOn: "2026-09-05",
+  dueOn: "2026-10-05",
   id: "30000000-0000-4000-8000-000000000001",
   netAmount: "100.0000",
   periodMonth: "2026-09",
@@ -318,6 +318,7 @@ describe("finance write service", () => {
     expect(mocks.insertReceivableRecord).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
+        dueOn: "2026-10-05",
         netAmount: "64000.0000",
         totalAmount: "76800.0000",
         vatAmount: "12800.0000",

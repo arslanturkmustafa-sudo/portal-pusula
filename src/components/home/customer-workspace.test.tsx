@@ -522,6 +522,10 @@ describe("CustomerWorkspace reliable date writes", () => {
     expect(
       screen.getByRole("spinbutton", { name: /Ödeme günü/u }),
     ).toHaveValue(5);
+    expect(screen.getByText("İzleyen ayın 5. günü")).toBeInTheDocument();
+    expect(
+      screen.getByText(/Vade, hizmet ayını izleyen ayda/u),
+    ).toBeInTheDocument();
 
     fireEvent.input(screen.getByLabelText("Başlangıç"), {
       target: { value: "2027-01-15" },

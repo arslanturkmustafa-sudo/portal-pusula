@@ -781,21 +781,37 @@ export function TasksWorkspace({
   return (
     <div className="tasks-page-workspace">
       <PortalPageHeader
-        actions={capabilities.canWriteTasks ? (
-          <button
-            aria-controls="task-editor"
-            aria-expanded={editorOpen}
-            className="primary-action"
-            disabled={saveState === "saving"}
-            ref={createButtonRef}
-            type="button"
-            onClick={() => {
-              if (editorOpen) closeEditor();
-              else openCreateEditor();
-            }}
-          >
-            {editorOpen ? "Formu kapat" : "+ Görev ekle"}
-          </button>
+        actions={capabilities.canExportReports || capabilities.canWriteTasks ? (
+          <>
+            {capabilities.canExportReports ? (
+              <Link
+                className="text-action"
+                href={
+                  customerFilter !== "all" && customerFilter !== "unassigned"
+                    ? `/gorevler/rapor?customerId=${encodeURIComponent(customerFilter)}`
+                    : "/gorevler/rapor"
+                }
+              >
+                Firma görev raporu
+              </Link>
+            ) : null}
+            {capabilities.canWriteTasks ? (
+              <button
+                aria-controls="task-editor"
+                aria-expanded={editorOpen}
+                className="primary-action"
+                disabled={saveState === "saving"}
+                ref={createButtonRef}
+                type="button"
+                onClick={() => {
+                  if (editorOpen) closeEditor();
+                  else openCreateEditor();
+                }}
+              >
+                {editorOpen ? "Formu kapat" : "+ Görev ekle"}
+              </button>
+            ) : null}
+          </>
         ) : undefined}
         context="İş takibi"
         note="İşleri proje, müşteri, öncelik ve vade bilgisiyle beş aşamada takip edin."
@@ -1028,15 +1044,6 @@ export function TasksWorkspace({
                 </button>
               ))}
             </div>
-            {capabilities.canExportReports &&
-            customerFilter !== "all" && customerFilter !== "unassigned" ? (
-              <Link
-                className="text-action task-report-link"
-                href={`/gorevler/rapor?customerId=${encodeURIComponent(customerFilter)}`}
-              >
-                Firma görev raporu
-              </Link>
-            ) : null}
           </div>
         </div>
 

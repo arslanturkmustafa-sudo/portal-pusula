@@ -13,10 +13,11 @@ export function monthBounds(month: string): Readonly<{
 }
 
 export function dueDateForMonth(month: string, paymentDay: number): string {
-  const year = Number(month.slice(0, 4));
-  const monthNumber = Number(month.slice(5, 7));
+  const dueMonth = monthBounds(month).nextMonthStart.slice(0, 7);
+  const year = Number(dueMonth.slice(0, 4));
+  const monthNumber = Number(dueMonth.slice(5, 7));
   const lastDay = new Date(Date.UTC(year, monthNumber, 0)).getUTCDate();
-  return `${month}-${String(Math.min(paymentDay, lastDay)).padStart(2, "0")}`;
+  return `${dueMonth}-${String(Math.min(paymentDay, lastDay)).padStart(2, "0")}`;
 }
 
 export function monthIntersectsPeriod(

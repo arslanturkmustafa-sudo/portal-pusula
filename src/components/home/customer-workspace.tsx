@@ -1463,7 +1463,7 @@ function CustomerWorkspaceSession({
                     }))
                   }
                 />
-                <small>Kısa aylarda son geçerli gün esas alınır.</small>
+                <small>Vade, hizmet ayını izleyen ayda; kısa aylarda son geçerli günde oluşur.</small>
               </label>
               <label className="contract-note">
                 <span>İç not</span>
@@ -1486,7 +1486,7 @@ function CustomerWorkspaceSession({
                 <div><dt>Net</dt><dd>{formatMoney(financialPreview.net)}</dd></div>
                 <div><dt>KDV</dt><dd>{formatMoney(financialPreview.vat)}</dd></div>
                 <div><dt>Aylık toplam</dt><dd>{formatMoney(financialPreview.total)}</dd></div>
-                <div><dt>Vade</dt><dd>Ayın {draft.paymentDay || "—"}. günü</dd></div>
+                <div><dt>Vade</dt><dd>İzleyen ayın {draft.paymentDay || "—"}. günü</dd></div>
               </dl>
 
               <div className="contract-actions">

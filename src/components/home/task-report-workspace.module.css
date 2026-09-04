@@ -1,6 +1,6 @@
 .workspace { max-width: 1040px; margin: 0 auto; padding-top: 22px; }
 .actions { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
-.controls { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) auto; gap: 10px; align-items: end; margin-bottom: 18px; padding: 14px; border: 1px solid var(--line); border-radius: 13px; background: var(--sheet); }
+.controls { display: grid; grid-template-columns: minmax(180px, 1.2fr) repeat(3, minmax(130px, 1fr)) auto; gap: 10px; align-items: end; margin-bottom: 18px; padding: 14px; border: 1px solid var(--line); border-radius: 13px; background: var(--sheet); }
 .controls label { display: grid; gap: 5px; }
 .controls label span { color: var(--ink-soft); font-size: .68rem; }
 .controls input,
@@ -39,11 +39,17 @@
 .message { max-width: 620px; margin: 12vh auto; padding: 28px; border: 1px solid var(--line); border-radius: 16px; background: var(--sheet); }
 .message h1 { margin: 8px 0; font-size: 2rem; }
 .message p { color: var(--ink-soft); line-height: 1.55; }
+.customerPicker form { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 10px; margin: 22px 0 16px; padding: 14px; border: 1px solid var(--line); border-radius: 13px; background: var(--sheet-soft); }
+.customerPicker label { display: grid; gap: 6px; min-width: 0; }
+.customerPicker label span { color: var(--ink-soft); font-size: .68rem; }
+.customerPicker select { min-height: 42px; min-width: 0; padding: 0 10px; border: 1px solid var(--line-strong); background: #fff; }
+.customerPicker > a { display: inline-flex; align-items: center; justify-content: center; }
 
 @media (max-width: 760px) {
   .workspace { padding-top: 14px; }
   .actions { align-items: stretch; flex-direction: column-reverse; }
   .controls { grid-template-columns: 1fr; }
+  .customerPicker form { grid-template-columns: 1fr; }
   .reportHeader { align-items: flex-start; flex-direction: column; }
   .reportHeader > div { text-align: left; }
   .customerBand { grid-template-columns: 1fr 1fr; }

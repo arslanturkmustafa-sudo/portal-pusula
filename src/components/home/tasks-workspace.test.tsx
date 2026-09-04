@@ -94,6 +94,7 @@ describe("TasksWorkspace", () => {
       throw new Error(`Unexpected request: ${String(input)}`);
     });
     vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
 
     render(<TasksWorkspace />);
 
@@ -115,6 +116,16 @@ describe("TasksWorkspace", () => {
     expect(screen.getAllByRole("article")).toHaveLength(6);
     expect(screen.queryByText("Bağımlılıklar ve zaman takibi")).not
       .toBeInTheDocument();
+    const reportLink = screen.getByRole("link", { name: "Firma görev raporu" });
+    expect(reportLink).toHaveAttribute("href", "/gorevler/rapor");
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Müşteri filtresi" }),
+      customer.id,
+    );
+    expect(reportLink).toHaveAttribute(
+      "href",
+      "/gorevler/rapor?customerId=customer-1",
+    );
 
     const stageSelector = screen.getByRole("combobox", {
       name: "Gösterilen Kanban aşaması",

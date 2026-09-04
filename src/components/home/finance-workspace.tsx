@@ -119,12 +119,12 @@ const samplePayload: ReceivablePayload = {
       createdAtUtc: "2026-09-01T06:00:00.000Z",
       customerId: "sample-1",
       customerName: "Atlas Makina",
-      description: "Eylül 2026 danışmanlık bedeli",
+      description: "Ağustos 2026 danışmanlık bedeli",
       dueOn: "2026-09-05",
       id: "sample-receivable-1",
       netAmount: "120000.0000",
       outstandingAmount: "0.0000",
-      periodMonth: "2026-09",
+      periodMonth: "2026-08",
       projectId: "sample-project-1",
       projectName: "Mühendis Kafası",
       projectShortCode: "MUHENDIS_KAFASI",
@@ -139,12 +139,12 @@ const samplePayload: ReceivablePayload = {
       createdAtUtc: "2026-09-01T06:00:00.000Z",
       customerId: "sample-2",
       customerName: "Vega Endüstri",
-      description: "Eylül 2026 danışmanlık bedeli",
+      description: "Ağustos 2026 danışmanlık bedeli",
       dueOn: "2026-09-10",
       id: "sample-receivable-2",
       netAmount: "50000.0000",
       outstandingAmount: "35000.0000",
-      periodMonth: "2026-09",
+      periodMonth: "2026-08",
       projectId: "sample-project-1",
       projectName: "Mühendis Kafası",
       projectShortCode: "MUHENDIS_KAFASI",
@@ -597,7 +597,7 @@ export function FinanceWorkspace({
             </h3>
             <p>
               {activeAction === "generate"
-                ? "Seçilen sözleşme ve dönem için hakedişi bir kez üretir."
+                ? "Seçilen sözleşme ve hizmet ayı için hakedişi bir kez üretir; vade, sözleşmedeki ödeme gününe göre izleyen ayda oluşur."
                 : activeAction === "opening"
                   ? "Sisteme başlamadan önce doğmuş açık bakiyeyi kaydeder."
                   : "Ödemenin tamamını veya bir bölümünü açık alacağa işler."}
@@ -643,7 +643,7 @@ export function FinanceWorkspace({
                 </select>
               </label>
               <label>
-                <span>Dönem</span>
+                <span>Hizmet ayı</span>
                 <input defaultValue={currentIstanbulMonth()} name="month" required type="month" />
               </label>
               {contractLoadState === "error" ? (
