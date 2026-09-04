@@ -60,6 +60,16 @@ export {
   type UserAccountRecord,
 } from "./user-account";
 export {
+  loginAttemptThrottle,
+  type LoginAttemptThrottleRecord,
+  type NewLoginAttemptThrottleRecord,
+} from "./login-attempt-throttle";
+export {
+  type NewUserPermissionRecord,
+  userPermission,
+  type UserPermissionRecord,
+} from "./user-permission";
+export {
   workTask,
   type NewWorkTaskRecord,
   type WorkTaskRecord,

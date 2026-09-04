@@ -66,6 +66,9 @@ const context = {
   now,
 };
 const before = {
+  archiveReason: null,
+  archivedAtUtc: null,
+  archivedByUserAccountId: null,
   assigneeUserAccountId: accountId,
   completedAtUtc: null,
   createdAtUtc: "2026-09-02 09:00:00.000000",
@@ -90,7 +93,10 @@ const projection = {
 describe("task service", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.findCustomerForUpdate.mockResolvedValue({ id: customerId });
+    mocks.findCustomerForUpdate.mockResolvedValue({
+      archivedAtUtc: null,
+      id: customerId,
+    });
     mocks.findActiveCustomerProjectForUpdate.mockResolvedValue({
       customerId,
       projectId: "40000000-0000-4000-8000-000000000001",
@@ -100,7 +106,10 @@ describe("task service", () => {
       id: accountId,
       status: "active",
     });
-    mocks.findProjectForUpdate.mockResolvedValue({ id: "project-id" });
+    mocks.findProjectForUpdate.mockResolvedValue({
+      archivedAtUtc: null,
+      id: "project-id",
+    });
     mocks.findTaskRecordById.mockResolvedValue(projection);
     mocks.findTaskStateForUpdate.mockResolvedValue(before);
     mocks.updateTaskRecord.mockResolvedValue(true);

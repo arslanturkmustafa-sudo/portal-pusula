@@ -10,6 +10,7 @@ import {
   findCustomerForUpdate,
 } from "@/features/customers/repository";
 import { findProjectForUpdate } from "@/features/projects/repository";
+import { LifecycleArchivedRecordError } from "@/features/lifecycle";
 import {
   findTaskRecordById,
   findTaskStateForUpdate,
@@ -100,7 +101,9 @@ async function assertTaskReferences(
 ): Promise<void> {
   if (customerId !== null) {
     const customer = await findCustomerForUpdate(connection, customerId);
-    if (!customer) throw new TaskCustomerNotFoundError();
+    if (!customer || customer.archivedAtUtc !== null) {
+      throw new TaskCustomerNotFoundError();
+    }
   }
 
   if (assigneeUserAccountId !== null) {
@@ -115,7 +118,9 @@ async function assertTaskReferences(
 
   if (projectId !== null) {
     const project = await findProjectForUpdate(connection, projectId);
-    if (!project) throw new TaskProjectNotFoundError();
+    if (!project || project.archivedAtUtc !== null) {
+      throw new TaskProjectNotFoundError();
+    }
   }
 
   if (
@@ -153,6 +158,9 @@ export async function createTask(
       ? (context.actorId ?? null)
       : input.assigneeUserAccountId;
   const task: WorkTaskState = {
+    archiveReason: null,
+    archivedAtUtc: null,
+    archivedByUserAccountId: null,
     assigneeUserAccountId,
     completedAtUtc: input.status === "done" ? now : null,
     createdAtUtc: now,
@@ -205,6 +213,9 @@ export async function updateTask(
   return withUtcTransaction(pool, async (connection) => {
     const before = await findTaskStateForUpdate(connection, id);
     if (!before) throw new TaskNotFoundError();
+    if (before.archivedAtUtc !== null) {
+      throw new LifecycleArchivedRecordError();
+    }
     if (before.version !== input.version) {
       throw new TaskVersionConflictError();
     }
@@ -241,6 +252,7 @@ export async function updateTask(
       );
     } else if (
       after.status !== "done" &&
+      after.status !== "cancelled" &&
       after.customerId !== null &&
       after.projectId !== null &&
       !(await findActiveCustomerProjectForUpdate(

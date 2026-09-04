@@ -13,7 +13,7 @@ afterEach(() => cleanup());
 
 describe("PortalNavigation", () => {
   it("links every module to an explicit page and marks the current path", () => {
-    render(<PortalNavigation />);
+    render(<PortalNavigation principal={{ permissions: [], role: "owner" }} />);
     const navigation = screen.getByRole("navigation", { name: "Ana navigasyon" });
     const expectedLinks = [
       ["Müşteriler", "/musteriler"],
@@ -21,6 +21,7 @@ describe("PortalNavigation", () => {
       ["Görevler", "/gorevler"],
       ["Finans", "/finans"],
       ["Projeler", "/projeler"],
+      ["Kullanıcılar", "/kullanicilar"],
       ["Hesabım", "/hesabim"],
     ] as const;
 
@@ -34,5 +35,18 @@ describe("PortalNavigation", () => {
       "aria-current",
       "page",
     );
+  });
+
+  it("omits financial and account-management destinations for a member without those permissions", () => {
+    render(
+      <PortalNavigation
+        principal={{ permissions: ["customers.read", "tasks.read"], role: "member" }}
+      />,
+    );
+    const navigation = screen.getByRole("navigation", { name: "Ana navigasyon" });
+    expect(within(navigation).getByRole("link", { name: "Müşteriler" })).toBeVisible();
+    expect(within(navigation).getByRole("link", { name: "Görevler" })).toBeVisible();
+    expect(within(navigation).queryByRole("link", { name: "Finans" })).toBeNull();
+    expect(within(navigation).queryByRole("link", { name: "Kullanıcılar" })).toBeNull();
   });
 });

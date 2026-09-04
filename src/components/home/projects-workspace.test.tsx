@@ -282,4 +282,23 @@ describe("ProjectsWorkspace", () => {
       screen.getByRole("link", { name: "Müşterileri görüntüle ve düzenle" }),
     ).toHaveAttribute("href", `/musteriler?projectId=${project.id}`);
   });
+
+  it("keeps project editing available while exact lifecycle and audit capabilities are absent", async () => {
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>(async (input) => {
+      const url = String(input);
+      if (url === "/api/projects") return jsonResponse({ projects: [project] });
+      if (url === "/api/customers") return jsonResponse({ customers: [customer] });
+      throw new Error(`Unexpected request: ${url}`);
+    }));
+
+    render(
+      <ProjectsWorkspace
+        capabilities={{ canLifecycleProjects: false, canReadAudit: false }}
+      />,
+    );
+
+    expect(await screen.findByRole("button", { name: "Projeyi düzenle" }))
+      .toBeInTheDocument();
+    expect(screen.queryByText("İşlemler")).not.toBeInTheDocument();
+  });
 });

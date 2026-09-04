@@ -5,12 +5,22 @@ export {
   authenticateAccountLogin,
   canUseLegacySession,
   changeAccountPassword,
+  createManagedUser,
   CurrentPasswordInvalidError,
   initializeAccountFromLegacySession,
   legacyAccountSummary,
+  listManagedUsers,
+  ManagedUserEmailConflictError,
+  ManagedUserNotFoundError,
+  ManagedUserOwnerProtectedError,
+  ManagedUserVersionConflictError,
+  updateManagedUser,
   validateAccountSession,
+  validateAccountPrincipalSession,
   type AccountSummary,
   type AccountWriteContext,
+  type ValidatedAccountSession,
+  type ManagedUser,
 } from "./service";
 export {
   type UserAccount,
@@ -20,3 +30,9 @@ export {
   passwordChangeInputSchema,
   type PasswordChangeInput,
 } from "./validation";
+export {
+  type CreateManagedUserInput,
+  createManagedUserInputSchema,
+  type UpdateManagedUserInput,
+  updateManagedUserInputSchema,
+} from "./user-management-validation";

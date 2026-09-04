@@ -4,6 +4,7 @@ import {
   createCommissionInputSchema,
   createContributionReceiptInputSchema,
   createContributionInputSchema,
+  reverseContributionReceiptInputSchema,
   updateCommissionInputSchema,
 } from "./validation";
 
@@ -86,5 +87,19 @@ describe("partnership finance validation", () => {
       expectedAmount: "7000",
       projectId,
     })).toThrow();
+  });
+
+  it("validates and trims receipt reversal identity and reason", () => {
+    expect(reverseContributionReceiptInputSchema.parse({
+      clientOperationKey: operationKey,
+      reason: "  Yanlış hesaba işlendi  ",
+    })).toEqual({
+      clientOperationKey: operationKey,
+      reason: "Yanlış hesaba işlendi",
+    });
+    expect(reverseContributionReceiptInputSchema.safeParse({
+      clientOperationKey: operationKey,
+      reason: "x",
+    }).success).toBe(false);
   });
 });

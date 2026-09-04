@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState, type ChangeEvent } from "react";
 
+import { redirectToPortalLogin as redirectToLogin } from "@/platform/navigation/portal-return-path";
+
 type VisitResolutionStatus =
   | "planned"
   | "completed"
@@ -120,10 +122,6 @@ function timeRangeLabel(item: DailyPlanItem): string {
 
 function durationLabel(minutes: number | null): string {
   return minutes === null ? "Süre belirtilmedi" : `${minutes} dk`;
-}
-
-function redirectToLogin(): void {
-  window.location.assign(new URL("/giris", window.location.origin).toString());
 }
 
 function statusClass(status: VisitResolutionStatus): string {

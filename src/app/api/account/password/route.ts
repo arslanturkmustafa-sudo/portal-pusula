@@ -18,7 +18,7 @@ import {
   sessionCookieName,
   sessionCookieOptions,
 } from "@/platform/auth/session";
-import { authenticateAdminRequest } from "@/platform/auth/server-auth";
+import { authenticatePrincipalRequest } from "@/platform/auth/server-auth";
 import { getAuthEnvironment } from "@/platform/config/auth-env";
 import { getAuthStorageMode } from "@/platform/config/auth-storage-mode";
 import { getDatabaseProbeEnvironment } from "@/platform/config/readiness-env";
@@ -95,7 +95,7 @@ async function readBody(request: NextRequest): Promise<unknown> {
 }
 
 export async function PATCH(request: NextRequest): Promise<NextResponse> {
-  const principal = await authenticateAdminRequest(request);
+  const principal = await authenticatePrincipalRequest(request);
   if (!principal) return json({ status: "unauthorized" }, 401);
   if (!sameOrigin(request)) return json({ status: "forbidden" }, 403);
   if (!isJsonRequest(request)) {

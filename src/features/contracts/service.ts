@@ -36,6 +36,7 @@ import {
   type UpdateVisitResolutionInput,
   updateVisitResolutionInputSchema,
 } from "@/features/contracts/validation";
+import { LifecycleArchivedRecordError } from "@/features/lifecycle";
 import { appendAuditEvent } from "@/platform/audit/repository";
 import { withUtcTransaction } from "@/platform/jobs/mysql-transaction";
 import { toUtcDateTime6 } from "@/platform/jobs/time";
@@ -90,6 +91,13 @@ export class ContractClosedError extends Error {
   }
 }
 
+export class ContractVersionConflictError extends Error {
+  constructor() {
+    super("The contract was changed by another request.");
+    this.name = "ContractVersionConflictError";
+  }
+}
+
 export class MonthOutsideContractError extends Error {
   constructor() {
     super("The requested month is outside the contract period.");
@@ -112,6 +120,7 @@ export class VisitLockedError extends Error {
 }
 
 export type ContractWriteContext = Readonly<{
+  actorId?: string;
   correlationId: string;
   now?: Date;
 }>;
@@ -167,6 +176,7 @@ function localPlanDateTimeToUtc(
 
 function contractAuditSummary(contract: ConsultingContract) {
   return {
+    archivedAtUtc: contract.archivedAtUtc,
     customerId: contract.customerId,
     endsOn: contract.endsOn,
     monthlyFeeAmount: contract.monthlyFeeAmount,
@@ -176,6 +186,7 @@ function contractAuditSummary(contract: ConsultingContract) {
     status: contract.status,
     vatMode: contract.vatMode,
     vatRate: contract.vatRate,
+    version: contract.version,
   };
 }
 
@@ -244,6 +255,7 @@ export async function createCustomerContract(
   context: ContractWriteContext,
 ): Promise<ConsultingContract> {
   assertCanonicalUuid(customerId);
+  if (context.actorId !== undefined) assertCanonicalUuid(context.actorId);
   const input = createContractInputSchema.parse(rawInput);
   const now = toUtcDateTime6(context.now ?? new Date());
 
@@ -276,6 +288,9 @@ export async function createCustomerContract(
       }
 
       const contract: ConsultingContract = {
+        archiveReason: null,
+        archivedAtUtc: null,
+        archivedByUserAccountId: null,
         createdAtUtc: now,
         currency: "TRY",
         customerId,
@@ -290,11 +305,13 @@ export async function createCustomerContract(
         updatedAtUtc: now,
         vatMode: input.vatMode,
         vatRate: input.vatRate,
+        version: 1,
       };
 
       await insertContractRecord(connection, contract);
       await appendAuditEvent(connection, {
         action: "consulting_contract.created",
+        actorId: context.actorId,
         actorType: "user",
         afterSummary: contractAuditSummary(contract),
         correlationId: context.correlationId,
@@ -319,6 +336,7 @@ export async function updateCustomerContract(
 ): Promise<ConsultingContract> {
   assertCanonicalUuid(customerId);
   assertCanonicalUuid(contractId);
+  if (context.actorId !== undefined) assertCanonicalUuid(context.actorId);
   const input = updateContractInputSchema.parse(rawInput);
   const now = toUtcDateTime6(context.now ?? new Date());
 
@@ -335,15 +353,22 @@ export async function updateCustomerContract(
         contractId,
       );
       if (!before) throw new ContractResourceNotFoundError();
-      const projectChanged = input.projectId !== before.projectId;
+      if (before.archivedAtUtc !== null) {
+        throw new LifecycleArchivedRecordError();
+      }
+      if (before.version !== input.version) {
+        throw new ContractVersionConflictError();
+      }
+      const { version: expectedVersion, ...changes } = input;
+      const projectChanged = changes.projectId !== before.projectId;
       const reopensHistoricalContract =
-        before.status === "closed" && input.status !== "closed";
+        before.status === "closed" && changes.status !== "closed";
       if (projectChanged || reopensHistoricalContract) {
         if (
           !(await findActiveCustomerProjectForUpdate(
             connection,
             customerId,
-            input.projectId,
+            changes.projectId,
           ))
         ) {
           throw new ContractProjectUnavailableError();
@@ -357,13 +382,13 @@ export async function updateCustomerContract(
       }
 
       if (
-        input.status !== "closed" &&
+        changes.status !== "closed" &&
         (await findOverlappingContract(
           connection,
           customerId,
-          input.projectId,
-          input.startsOn,
-          input.endsOn,
+          changes.projectId,
+          changes.startsOn,
+          changes.endsOn,
           contractId,
         ))
       ) {
@@ -373,8 +398,8 @@ export async function updateCustomerContract(
         await contractHasVisitOutsideRange(
           connection,
           contractId,
-          input.startsOn,
-          input.endsOn,
+          changes.startsOn,
+          changes.endsOn,
         )
       ) {
         throw new ContractVisitRangeConflictError();
@@ -382,12 +407,16 @@ export async function updateCustomerContract(
 
       const after: ConsultingContract = {
         ...before,
-        ...input,
+        ...changes,
         updatedAtUtc: now,
+        version: before.version + 1,
       };
-      await updateContractRecord(connection, after);
+      if (!(await updateContractRecord(connection, after, expectedVersion))) {
+        throw new ContractVersionConflictError();
+      }
       await appendAuditEvent(connection, {
         action: "consulting_contract.updated",
+        actorId: context.actorId,
         actorType: "user",
         afterSummary: contractAuditSummary(after),
         beforeSummary: contractAuditSummary(before),
@@ -444,6 +473,7 @@ export async function replaceMonthlyVisitPlan(
 ): Promise<MonthlyVisitPlan> {
   assertCanonicalUuid(customerId);
   assertCanonicalUuid(contractId);
+  if (context.actorId !== undefined) assertCanonicalUuid(context.actorId);
   const input = monthlyVisitPlanInputSchema.parse(rawInput);
   const { monthStart, nextMonthStart } = monthBounds(month);
   const now = toUtcDateTime6(context.now ?? new Date());
@@ -512,6 +542,7 @@ export async function replaceMonthlyVisitPlan(
     await insertVisitRecords(connection, requested);
     await appendAuditEvent(connection, {
       action: "monthly_visit_plan.replaced",
+      actorId: context.actorId,
       actorType: "user",
       afterSummary: planAuditSummary(month, requested),
       beforeSummary: planAuditSummary(month, existing),
@@ -535,6 +566,7 @@ export async function updateMonthlyVisit(
   assertCanonicalUuid(customerId);
   assertCanonicalUuid(contractId);
   assertCanonicalUuid(visitId);
+  if (context.actorId !== undefined) assertCanonicalUuid(context.actorId);
   const input = updateVisitResolutionInputSchema.parse(rawInput);
   const now = toUtcDateTime6(context.now ?? new Date());
 
@@ -582,6 +614,7 @@ export async function updateMonthlyVisit(
     await updateVisitRecord(connection, after);
     await appendAuditEvent(connection, {
       action: "monthly_visit_commitment.updated",
+      actorId: context.actorId,
       actorType: "user",
       afterSummary: visitAuditSummary(after),
       beforeSummary: visitAuditSummary(before),

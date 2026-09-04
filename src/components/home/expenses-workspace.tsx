@@ -10,6 +10,9 @@ import {
   type FormEvent,
 } from "react";
 
+import { redirectToPortalLogin as redirectToLogin } from "@/platform/navigation/portal-return-path";
+import { RecordLifecycleControls } from "@/components/portal/record-lifecycle-controls";
+
 type LoadState = "error" | "loading" | "ready";
 type SaveState = "idle" | "saving";
 type EditorMode = "copy" | "create" | "edit" | null;
@@ -250,15 +253,25 @@ function expenseBody(draft: ExpenseDraft) {
   };
 }
 
-function redirectToLogin(): void {
-  window.location.assign(new URL("/giris", window.location.origin).toString());
-}
-
 function canonicalSearch(value: string): string {
   return value.trim().toLocaleLowerCase("tr-TR");
 }
 
-export function ExpensesWorkspace() {
+type ExpensesWorkspaceProps = Readonly<{
+  capabilities?: Readonly<{
+    canReadAudit: boolean;
+    canReverseExpenses: boolean;
+  }>;
+}>;
+
+const fullExpenseCapabilities: NonNullable<ExpensesWorkspaceProps["capabilities"]> = {
+  canReadAudit: true,
+  canReverseExpenses: true,
+};
+
+export function ExpensesWorkspace({
+  capabilities = fullExpenseCapabilities,
+}: ExpensesWorkspaceProps = {}) {
   const [projects, setProjects] = useState<readonly ProjectDto[]>([]);
   const [cards, setCards] = useState<readonly CreditCardDto[]>([]);
   const [expenses, setExpenses] = useState<readonly ExpenseDto[]>([]);
@@ -893,6 +906,24 @@ export function ExpensesWorkspace() {
                     >
                       Kopyala
                     </button>
+                    <RecordLifecycleControls
+                      actions={capabilities.canReverseExpenses && expense.status === "active" ? [{
+                        description: "Gideri silmeden finansal toplamlardan çıkarır ve gerekçeli iz bırakır.",
+                        id: "void",
+                        label: "Geçersiz kıl",
+                        request: {
+                          endpoint: `/api/finance/expenses/${expense.id}`,
+                          kind: "expense-void",
+                          version: expense.version,
+                        },
+                        tone: "danger",
+                      }] : []}
+                      canReadHistory={capabilities.canReadAudit}
+                      entityId={expense.id}
+                      entityLabel={expense.description}
+                      entityType="expense"
+                      onSuccess={() => setRequestRevision((current) => current + 1)}
+                    />
                   </div>
                 </td>
               </tr>

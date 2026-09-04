@@ -13,10 +13,12 @@ import {
   updateTask,
   updateTaskInputSchema,
 } from "@/features/tasks";
+import { LifecycleArchivedRecordError } from "@/features/lifecycle";
 import {
-  authenticateAdminRequest,
-  type AuthenticatedAdmin,
+  authenticatePrincipalRequest,
+  type AuthenticatedPrincipal,
 } from "@/platform/auth/server-auth";
+import { hasPermission } from "@/platform/auth/permissions";
 import { getDatabaseProbeEnvironment } from "@/platform/config/readiness-env";
 import { getPlatformDatabasePool } from "@/platform/database/mysql-platform";
 import { correlationIdFromHeaders } from "@/platform/http/correlation-id";
@@ -91,7 +93,7 @@ async function readBody(request: NextRequest): Promise<unknown> {
   return JSON.parse(text) as unknown;
 }
 
-function actorId(principal: AuthenticatedAdmin): string | undefined {
+function actorId(principal: AuthenticatedPrincipal): string | undefined {
   return principal.kind === "account" ? principal.accountId : undefined;
 }
 
@@ -99,8 +101,11 @@ export async function PATCH(
   request: NextRequest,
   context: TaskRouteContext,
 ): Promise<NextResponse> {
-  const principal = await authenticateAdminRequest(request);
+  const principal = await authenticatePrincipalRequest(request);
   if (!principal) return json({ status: "unauthorized" }, 401);
+  if (!hasPermission(principal, "tasks.write")) {
+    return json({ status: "forbidden" }, 403);
+  }
   if (!sameOrigin(request)) return json({ status: "forbidden" }, 403);
   if (!isJsonRequest(request)) {
     return json({ status: "unsupported_media_type" }, 415);
@@ -110,6 +115,12 @@ export async function PATCH(
   try {
     const { id } = await context.params;
     const input = updateTaskInputSchema.parse(await readBody(request));
+    if (
+      Object.prototype.hasOwnProperty.call(input, "assigneeUserAccountId") &&
+      !hasPermission(principal, "tasks.assign")
+    ) {
+      return json({ status: "forbidden" }, 403);
+    }
     const task = await updateTask(
       getPlatformDatabasePool(getDatabaseProbeEnvironment()),
       id,
@@ -142,6 +153,9 @@ export async function PATCH(
     }
     if (error instanceof TaskVersionConflictError) {
       return json({ status: "version_conflict" }, 409);
+    }
+    if (error instanceof LifecycleArchivedRecordError) {
+      return json({ status: "record_archived" }, 409);
     }
     const mysqlErrorCode = safeMySqlErrorCode(error);
     requestLogger(correlationId).error(

@@ -14,7 +14,10 @@ import {
   findContributionByOperationKeyForUpdate,
   findContributionByProjectMonthForUpdate,
   findContributionReceiptByOperationKeyForUpdate,
+  findContributionReceiptForUpdate,
+  findContributionReceiptReversalForUpdate,
   findContributionForUpdate,
+  findLatestActiveContributionReceiptDate,
   insertCommissionRecordIdempotently,
   insertContributionRecordIdempotently,
   insertContributionReceiptIdempotently,
@@ -39,6 +42,8 @@ import {
   createContributionReceiptInputSchema,
   type PartnershipListFilter,
   partnershipListFilterSchema,
+  type ReverseContributionReceiptInput,
+  reverseContributionReceiptInputSchema,
   type UpdateCommissionInput,
   type UpdateContributionInput,
   updateCommissionInputSchema,
@@ -102,6 +107,20 @@ export class PartnershipContributionOverpaymentError extends Error {
   constructor() {
     super("Contribution receipt exceeds the outstanding amount.");
     this.name = "PartnershipContributionOverpaymentError";
+  }
+}
+
+export class PartnershipReceiptNotReversibleError extends Error {
+  constructor() {
+    super("Only an original partnership contribution receipt can be reversed.");
+    this.name = "PartnershipReceiptNotReversibleError";
+  }
+}
+
+export class PartnershipReceiptAlreadyReversedError extends Error {
+  constructor() {
+    super("Partnership contribution receipt was already reversed.");
+    this.name = "PartnershipReceiptAlreadyReversedError";
   }
 }
 
@@ -250,7 +269,25 @@ function receiptCreateMatches(
     stored.contributionId === contributionId &&
     stored.amount === input.amount &&
     stored.receivedOn === input.receivedOn &&
-    stored.note === input.note
+    stored.note === input.note &&
+    stored.entryType === "receipt" &&
+    stored.reversalOfId === null &&
+    stored.reversalReason === null
+  );
+}
+
+function receiptReversalMatches(
+  stored: PartnershipContributionReceipt,
+  original: PartnershipContributionReceipt,
+  input: ReturnType<typeof reverseContributionReceiptInputSchema.parse>,
+): boolean {
+  return (
+    stored.contributionId === original.contributionId &&
+    stored.amount === original.amount &&
+    stored.entryType === "reversal" &&
+    stored.reversalOfId === original.id &&
+    stored.reversalReason === input.reason &&
+    stored.note === null
   );
 }
 
@@ -596,7 +633,10 @@ export async function createPartnershipContributionReceipt(
       ...input,
       contributionId,
       createdAtUtc: now,
+      entryType: "receipt",
       id: randomUUID(),
+      reversalOfId: null,
+      reversalReason: null,
     };
     const receipt = await insertContributionReceiptIdempotently(connection, pending);
     if (!receiptCreateMatches(receipt, contributionId, input)) {
@@ -639,5 +679,120 @@ export async function createPartnershipContributionReceipt(
       occurredAtUtc: now,
     });
     return { contribution: after, created: true, receipt };
+  });
+}
+
+export async function reversePartnershipContributionReceipt(
+  pool: Pool,
+  receiptId: string,
+  rawInput: ReverseContributionReceiptInput,
+  context: PartnershipWriteContext,
+): Promise<Readonly<{
+  contribution: PartnershipContribution;
+  created: boolean;
+  reversal: PartnershipContributionReceipt;
+}>> {
+  assertCanonicalUuid(receiptId);
+  if (context.actorId !== undefined) assertCanonicalUuid(context.actorId);
+  const input = reverseContributionReceiptInputSchema.parse(rawInput);
+  const nowDate = context.now ?? new Date();
+  const receivedOn = istanbulDate(nowDate);
+  const now = toUtcDateTime6(nowDate);
+
+  return withUtcTransaction(pool, async (connection) => {
+    const operationReplay = await findContributionReceiptByOperationKeyForUpdate(
+      connection,
+      input.clientOperationKey,
+    );
+    if (operationReplay) {
+      const original = await findContributionReceiptForUpdate(connection, receiptId);
+      if (!original || !receiptReversalMatches(operationReplay, original, input)) {
+        throw new PartnershipIdempotencyConflictError();
+      }
+      const contribution = await findContributionForUpdate(connection, original.contributionId);
+      if (!contribution) throw new PartnershipRecordNotFoundError();
+      return { contribution, created: false, reversal: operationReplay };
+    }
+
+    const original = await findContributionReceiptForUpdate(connection, receiptId);
+    if (!original) throw new PartnershipRecordNotFoundError();
+    if (
+      original.entryType !== "receipt" ||
+      original.reversalOfId !== null ||
+      original.reversalReason !== null
+    ) {
+      throw new PartnershipReceiptNotReversibleError();
+    }
+
+    const before = await findContributionForUpdate(connection, original.contributionId);
+    if (!before) throw new PartnershipRecordNotFoundError();
+    if (await findContributionReceiptReversalForUpdate(connection, original.id)) {
+      throw new PartnershipReceiptAlreadyReversedError();
+    }
+
+    const receivedAmount = new Decimal(before.receivedAmount).minus(original.amount);
+    if (receivedAmount.isNegative()) {
+      throw new PartnershipReceiptNotReversibleError();
+    }
+    const pending: PartnershipContributionReceipt = {
+      amount: original.amount,
+      clientOperationKey: input.clientOperationKey,
+      contributionId: original.contributionId,
+      createdAtUtc: now,
+      entryType: "reversal",
+      id: randomUUID(),
+      note: null,
+      receivedOn,
+      reversalOfId: original.id,
+      reversalReason: input.reason,
+    };
+    const reversal = await insertContributionReceiptIdempotently(connection, pending);
+    if (!receiptReversalMatches(reversal, original, input)) {
+      throw new PartnershipIdempotencyConflictError();
+    }
+    if (reversal.id !== pending.id) {
+      const contribution = await findContributionForUpdate(connection, original.contributionId);
+      if (!contribution) throw new PartnershipRecordNotFoundError();
+      return { contribution, created: false, reversal };
+    }
+
+    const latestReceivedOn = await findLatestActiveContributionReceiptDate(
+      connection,
+      original.contributionId,
+    );
+    const status: ContributionStatus = receivedAmount.isZero()
+      ? "expected"
+      : receivedAmount.equals(before.expectedAmount)
+        ? "received"
+        : "partial";
+    const after: PartnershipContribution = {
+      ...before,
+      receivedAmount: receivedAmount.toFixed(4),
+      receivedOn: latestReceivedOn,
+      status,
+      updatedAtUtc: now,
+      version: before.version + 1,
+    };
+    if (!(await updateContributionRecord(connection, after, before.version))) {
+      throw new PartnershipVersionConflictError();
+    }
+    await appendAuditEvent(connection, {
+      action: "partnership_contribution.receipt_reversed",
+      actorId: context.actorId,
+      actorType: "user",
+      afterSummary: {
+        amount: reversal.amount,
+        contribution: contributionSummary(after),
+        contributionId: after.id,
+        reason: input.reason,
+        reversalOfId: original.id,
+      },
+      beforeSummary: contributionSummary(before),
+      correlationId: context.correlationId,
+      entityId: reversal.id,
+      entityType: "partnership_contribution_receipt",
+      occurredAtUtc: now,
+    });
+    return { contribution: after, created: true, reversal };
   });
 }

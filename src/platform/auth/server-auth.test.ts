@@ -8,12 +8,12 @@ vi.mock("server-only", () => ({}));
 const mocks = vi.hoisted(() => ({
   canUseLegacySession: vi.fn(),
   getAuthStorageMode: vi.fn(),
-  validateAccountSession: vi.fn(),
+  validateAccountPrincipalSession: vi.fn(),
 }));
 
 vi.mock("@/features/account", () => ({
   canUseLegacySession: mocks.canUseLegacySession,
-  validateAccountSession: mocks.validateAccountSession,
+  validateAccountPrincipalSession: mocks.validateAccountPrincipalSession,
 }));
 vi.mock("@/platform/config/auth-env", () => ({
   getAuthEnvironment: () => ({
@@ -32,7 +32,10 @@ vi.mock("@/platform/database/mysql-platform", () => ({
   getPlatformDatabasePool: () => ({}),
 }));
 
-import { authenticateAdminRequest } from "@/platform/auth/server-auth";
+import {
+  authenticateAdminRequest,
+  authenticatePrincipalRequest,
+} from "@/platform/auth/server-auth";
 import {
   createAccountSessionToken,
   createSessionToken,
@@ -53,12 +56,17 @@ describe("secure administrator authentication", () => {
     vi.stubEnv("ADMIN_EMAIL", "yonetici@example.com");
     vi.stubEnv("ADMIN_PASSWORD_HASH", "configured");
     vi.stubEnv("SESSION_SECRET", secret);
-    mocks.validateAccountSession.mockResolvedValue({
-      credentialVersion: 2,
-      email: "yonetici@example.com",
-      id: accountId,
-      passwordChangedAtUtc: "2026-09-01 09:00:00.000000",
-      status: "active",
+    mocks.validateAccountPrincipalSession.mockResolvedValue({
+      account: {
+        credentialVersion: 2,
+        displayName: "Portal Yöneticisi",
+        email: "yonetici@example.com",
+        id: accountId,
+        passwordChangedAtUtc: "2026-09-01 09:00:00.000000",
+        role: "owner",
+        status: "active",
+      },
+      permissions: [],
     });
     mocks.getAuthStorageMode.mockReturnValue("database");
   });
@@ -76,7 +84,7 @@ describe("secure administrator authentication", () => {
       credentialVersion: 2,
       kind: "account",
     });
-    expect(mocks.validateAccountSession).toHaveBeenCalledWith({}, accountId, 2);
+    expect(mocks.validateAccountPrincipalSession).toHaveBeenCalledWith({}, accountId, 2);
   });
 
   it("rejects v1 as soon as a database account exists", async () => {
@@ -87,19 +95,70 @@ describe("secure administrator authentication", () => {
     ).resolves.toBeNull();
   });
 
+  it("accepts a member principal only for an explicitly granted module", async () => {
+    mocks.validateAccountPrincipalSession.mockResolvedValueOnce({
+      account: {
+        credentialVersion: 2,
+        displayName: "Ayşe Yılmaz",
+        email: "ayse@example.com",
+        id: accountId,
+        passwordChangedAtUtc: "2026-09-01 09:00:00.000000",
+        role: "member",
+        status: "active",
+      },
+      permissions: ["tasks.read"],
+    });
+    const memberRequest = request(createAccountSessionToken(secret, accountId, 2));
+
+    await expect(authenticatePrincipalRequest(memberRequest)).resolves.toMatchObject({
+      role: "member",
+    });
+    mocks.validateAccountPrincipalSession.mockResolvedValueOnce({
+      account: {
+        credentialVersion: 2,
+        displayName: "Ayşe Yılmaz",
+        email: "ayse@example.com",
+        id: accountId,
+        passwordChangedAtUtc: "2026-09-01 09:00:00.000000",
+        role: "member",
+        status: "active",
+      },
+      permissions: ["tasks.read"],
+    });
+    await expect(
+      authenticateAdminRequest(memberRequest, "tasks.read"),
+    ).resolves.toMatchObject({ role: "member" });
+    mocks.validateAccountPrincipalSession.mockResolvedValueOnce({
+      account: {
+        credentialVersion: 2,
+        displayName: "Ayşe Yılmaz",
+        email: "ayse@example.com",
+        id: accountId,
+        passwordChangedAtUtc: "2026-09-01 09:00:00.000000",
+        role: "member",
+        status: "active",
+      },
+      permissions: ["tasks.read"],
+    });
+    await expect(
+      authenticateAdminRequest(memberRequest, "finance.receivables.read"),
+    ).resolves.toBeNull();
+  });
+
   it("accepts only v1 without database access in explicit environment mode", async () => {
     mocks.getAuthStorageMode.mockReturnValue("environment");
 
     await expect(
       authenticateAdminRequest(request(createSessionToken(secret))),
-    ).resolves.toEqual({
+    ).resolves.toMatchObject({
       email: "yonetici@example.com",
       kind: "legacy",
+      role: "owner",
     });
     await expect(
       authenticateAdminRequest(request(createAccountSessionToken(secret, accountId, 2))),
     ).resolves.toBeNull();
     expect(mocks.canUseLegacySession).not.toHaveBeenCalled();
-    expect(mocks.validateAccountSession).not.toHaveBeenCalled();
+    expect(mocks.validateAccountPrincipalSession).not.toHaveBeenCalled();
   });
 });

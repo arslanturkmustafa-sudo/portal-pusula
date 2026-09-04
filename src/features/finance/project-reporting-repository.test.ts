@@ -83,6 +83,10 @@ describe("project finance reporting repository", () => {
     expect(result.commissions[0]?.earnedAmount).toBe("25000.0000");
     expect(result.contributions[0]?.expectedAmount).toBe("7000.0000");
     expect(execute).toHaveBeenCalledTimes(6);
+    expect(String(execute.mock.calls[1]?.[0])).toContain("r.record_state = 'active'");
+    expect(String(execute.mock.calls[1]?.[0])).toMatch(/entry_type = 'reversal' THEN -amount/iu);
+    expect(String(execute.mock.calls[2]?.[0])).toMatch(/rc\.entry_type = 'reversal' THEN -rc\.amount/iu);
+    expect(String(execute.mock.calls[5]?.[0])).toMatch(/entry_type = 'reversal' THEN -amount/iu);
     expect(execute.mock.calls[1]?.[1]).toEqual([
       "2026-09-20",
       "2026-09-01",

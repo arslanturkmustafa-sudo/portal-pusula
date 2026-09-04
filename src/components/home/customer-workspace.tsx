@@ -8,6 +8,8 @@ import {
   type FormEvent,
 } from "react";
 
+import { RecordLifecycleControls } from "@/components/portal/record-lifecycle-controls";
+
 type VatMode = "exempt" | "exclusive" | "inclusive";
 type ProjectStatus =
   | "planned"
@@ -29,6 +31,8 @@ type ProjectDto = Readonly<{
 }>;
 
 type ContractDto = Readonly<{
+  archiveReason?: string | null;
+  archivedAtUtc?: string | null;
   currency: "TRY";
   customerId: string;
   endsOn: string;
@@ -41,6 +45,7 @@ type ContractDto = Readonly<{
   status: "draft" | "active" | "closed";
   vatMode: VatMode;
   vatRate: string;
+  version?: number;
 }>;
 
 type VisitDto = Readonly<{
@@ -75,6 +80,8 @@ type ContractDraft = {
 };
 
 type EditableCustomer = Readonly<{
+  archiveReason?: string | null;
+  archivedAtUtc?: string | null;
   contactNote?: string | null;
   displayName?: string;
   email?: string | null;
@@ -84,9 +91,12 @@ type EditableCustomer = Readonly<{
   projects?: readonly ProjectDto[];
   shortCode?: string;
   status?: "active" | "inactive";
+  version?: number;
 }>;
 
 type CustomerDto = Readonly<{
+  archiveReason?: string | null;
+  archivedAtUtc?: string | null;
   contactNote: string | null;
   displayName: string;
   email: string | null;
@@ -95,6 +105,7 @@ type CustomerDto = Readonly<{
   projects: readonly ProjectDto[];
   shortCode: string;
   status: "active" | "inactive";
+  version?: number;
 }>;
 
 type CustomerDraft = {
@@ -107,12 +118,23 @@ type CustomerDraft = {
 
 type CustomerWorkspaceProps = Readonly<{
   availableProjects?: readonly ProjectDto[];
+  capabilities?: Readonly<{
+    canLifecycleContracts: boolean;
+    canLifecycleCustomers: boolean;
+    canReadAudit: boolean;
+  }>;
   customer: EditableCustomer;
   live: boolean;
   onContractSaved: (contract: ContractDto) => void;
   onCustomerSaved?: (customer: CustomerDto) => void;
   onVisitsSaved: (visits: readonly VisitDto[]) => void;
 }>;
+
+const fullLifecycleCapabilities: NonNullable<CustomerWorkspaceProps["capabilities"]> = {
+  canLifecycleContracts: true,
+  canLifecycleCustomers: true,
+  canReadAudit: true,
+};
 
 type LoadState = "error" | "loading" | "ready";
 type SaveState = "error" | "idle" | "saving";
@@ -403,6 +425,7 @@ export function CustomerWorkspace(props: CustomerWorkspaceProps) {
 
 function CustomerWorkspaceSession({
   availableProjects = [],
+  capabilities = fullLifecycleCapabilities,
   customer,
   live,
   onContractSaved,
@@ -432,6 +455,8 @@ function CustomerWorkspaceSession({
   const [visitSaveId, setVisitSaveId] = useState<string | null>(null);
   const [periodTouched, setPeriodTouched] = useState(false);
   const [customerRecord, setCustomerRecord] = useState<CustomerDto>(() => ({
+    archiveReason: customer.archiveReason ?? null,
+    archivedAtUtc: customer.archivedAtUtc ?? null,
     contactNote: customer.contactNote ?? null,
     displayName: customer.displayName ?? customer.name,
     email: customer.email ?? null,
@@ -440,6 +465,7 @@ function CustomerWorkspaceSession({
     projects: customer.projects ?? [],
     shortCode: customer.shortCode ?? "",
     status: customer.status ?? "active",
+    version: customer.version,
   }));
   const [customerEditDraft, setCustomerEditDraft] = useState<CustomerDraft>(
     () => customerDraft(customer),
@@ -448,7 +474,9 @@ function CustomerWorkspaceSession({
     useState<SaveState>("idle");
   const [customerError, setCustomerError] = useState<string | null>(null);
   const [isEditingCustomer, setIsEditingCustomer] = useState(false);
+  const [lifecycleRevision, setLifecycleRevision] = useState(0);
   const onContractSavedRef = useRef(onContractSaved);
+  const onCustomerSavedRef = useRef(onCustomerSaved);
   const onVisitsSavedRef = useRef(onVisitsSaved);
   const contractCustomerIdRef = useRef(customer.id);
   const customerProjectsRef = useRef(customer.projects ?? []);
@@ -460,6 +488,10 @@ function CustomerWorkspaceSession({
   useEffect(() => {
     onContractSavedRef.current = onContractSaved;
   }, [onContractSaved]);
+
+  useEffect(() => {
+    onCustomerSavedRef.current = onCustomerSaved;
+  }, [onCustomerSaved]);
 
   useEffect(() => {
     onVisitsSavedRef.current = onVisitsSaved;
@@ -525,7 +557,7 @@ function CustomerWorkspaceSession({
       });
 
     return () => controller.abort();
-  }, [customer.id, live]);
+  }, [customer.id, lifecycleRevision, live]);
 
   useEffect(() => {
     const hasCompleteCustomer =
@@ -534,7 +566,7 @@ function CustomerWorkspaceSession({
       customer.phone !== undefined &&
       customer.contactNote !== undefined &&
       customer.projects !== undefined;
-    if (!live || hasCompleteCustomer) return;
+    if (!live || (hasCompleteCustomer && lifecycleRevision === 0)) return;
     const controller = new AbortController();
 
     void fetch("/api/customers", {
@@ -551,6 +583,7 @@ function CustomerWorkspaceSession({
         if (!stored) return;
         setCustomerRecord(stored);
         setCustomerEditDraft(customerDraft(stored));
+        onCustomerSavedRef.current?.(stored);
       })
       .catch((error: unknown) => {
         if (error instanceof DOMException && error.name === "AbortError") return;
@@ -564,6 +597,7 @@ function CustomerWorkspaceSession({
     customer.id,
     customer.phone,
     customer.projects,
+    lifecycleRevision,
     live,
   ]);
 
@@ -721,7 +755,7 @@ function CustomerWorkspaceSession({
       setCustomerError("Müşteriyi en az bir projeye bağlayın.");
       return;
     }
-    const body: Record<string, string | null | readonly string[]> = {};
+    const body: Record<string, number | string | null | readonly string[]> = {};
     if (submitted.displayName !== customerRecord.displayName) {
       body.displayName = submitted.displayName;
     }
@@ -748,6 +782,12 @@ function CustomerWorkspaceSession({
       setCustomerError(null);
       return;
     }
+    if (typeof customerRecord.version !== "number") {
+      setCustomerSaveState("error");
+      setCustomerError("Kayıt sürümü alınamadı. Sayfayı yenileyip tekrar deneyin.");
+      return;
+    }
+    body.version = customerRecord.version;
 
     setCustomerSaveState("saving");
     setCustomerError(null);
@@ -807,6 +847,11 @@ function CustomerWorkspaceSession({
       setContractError(contractErrorMessage("validation_error"));
       return;
     }
+    if (contract !== null && typeof contract.version !== "number") {
+      setContractSaveState("error");
+      setContractError("Kayıt sürümü alınamadı. Sayfayı yenileyip tekrar deneyin.");
+      return;
+    }
 
     setContractSaveState("saving");
     setContractError(null);
@@ -825,6 +870,7 @@ function CustomerWorkspaceSession({
           projectId: submittedDraft.projectId,
           startsOn: submittedDraft.startsOn,
           status: contract?.status ?? "active",
+          ...(contract === null ? {} : { version: contract.version }),
           vatMode: submittedDraft.vatMode,
           vatRate:
             submittedDraft.vatMode === "exempt"
@@ -1165,6 +1211,35 @@ function CustomerWorkspaceSession({
             >
               Müşteri bilgilerini düzenle
             </button>
+            <RecordLifecycleControls
+              actions={!capabilities.canLifecycleCustomers || typeof customerRecord.version !== "number" ? [] : customerRecord.archivedAtUtc ? [{
+                description: "Müşteriyi arşivden çıkarır; pasif durumunu ayrıca değiştirmez.",
+                id: "restore",
+                label: "Arşivden çıkar",
+                request: {
+                  action: "restore",
+                  endpoint: `/api/customers/${customerRecord.id}/lifecycle`,
+                  kind: "lifecycle",
+                  version: customerRecord.version,
+                },
+              }] : customerRecord.status === "inactive" ? [{
+                description: "Müşteriyi aktif listeden kaldırır; sözleşme ve işlem geçmişi korunur.",
+                id: "archive",
+                label: "Arşivle",
+                request: {
+                  action: "archive",
+                  endpoint: `/api/customers/${customerRecord.id}/lifecycle`,
+                  kind: "lifecycle",
+                  version: customerRecord.version,
+                },
+                tone: "danger",
+              }] : []}
+              canReadHistory={capabilities.canReadAudit}
+              entityId={customerRecord.id}
+              entityLabel={customerRecord.displayName}
+              entityType="customer"
+              onSuccess={() => setLifecycleRevision((current) => current + 1)}
+            />
           </div>
         )}
       </div>
@@ -1487,6 +1562,35 @@ function CustomerWorkspaceSession({
                     >
                       Sözleşmeyi düzenle
                     </button>
+                    <RecordLifecycleControls
+                      actions={!capabilities.canLifecycleContracts || typeof contract.version !== "number" ? [] : contract.archivedAtUtc ? [{
+                        description: "Sözleşmeyi arşivden çıkarır; kapalı durumunu ayrıca değiştirmez.",
+                        id: "restore",
+                        label: "Arşivden çıkar",
+                        request: {
+                          action: "restore",
+                          endpoint: `/api/customers/${customerRecord.id}/contracts/${contract.id}/lifecycle`,
+                          kind: "lifecycle",
+                          version: contract.version,
+                        },
+                      }] : contract.status === "closed" ? [{
+                        description: "Sözleşmeyi silmeden çalışma dönemlerinden kaldırır; geçmiş ve finansal iz korunur.",
+                        id: "archive",
+                        label: "Arşivle",
+                        request: {
+                          action: "archive",
+                          endpoint: `/api/customers/${customerRecord.id}/contracts/${contract.id}/lifecycle`,
+                          kind: "lifecycle",
+                          version: contract.version,
+                        },
+                        tone: "danger",
+                      }] : []}
+                      canReadHistory={capabilities.canReadAudit}
+                      entityId={contract.id}
+                      entityLabel={`${customerRecord.displayName} sözleşmesi`}
+                      entityType="consulting_contract"
+                      onSuccess={() => setLifecycleRevision((current) => current + 1)}
+                    />
                   </>
                 )}
               </div>

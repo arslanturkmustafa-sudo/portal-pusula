@@ -51,6 +51,29 @@ button, a { color: inherit; }
 }
 .skip-link:focus { transform: translateY(0); }
 
+@media print {
+  @page { size: A4 portrait; margin: 12mm; }
+
+  body {
+    background: #fff !important;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+
+  .skip-link,
+  .ledger-rail { display: none !important; }
+
+  .workbench-shell {
+    display: block !important;
+    min-height: 0 !important;
+  }
+
+  .workbench-main {
+    max-width: none !important;
+    padding: 0 !important;
+  }
+}
+
 .workbench-shell {
   min-height: 100vh;
   display: grid;
@@ -3540,4 +3563,488 @@ button, a { color: inherit; }
 @media (max-width: 430px) {
   .customer-project-picker { padding-right: 0.55rem; padding-left: 0.55rem; }
   .customer-project-options > label { min-height: 48px; }
+}
+
+/* Portal Pusula v2 — günlük operasyon kokpiti */
+:root {
+  --paper: #f4f6fa;
+  --sheet: #ffffff;
+  --sheet-soft: #f8f9fc;
+  --ink: #111827;
+  --ink-soft: #667085;
+  --line: #e4e7ec;
+  --line-strong: #d0d5dd;
+  --forest: #3157d5;
+  --terracotta: #ef6a4c;
+  --focus: #3157d5;
+  --nav: #101728;
+  --nav-soft: #182238;
+  --nav-copy: #e8edfa;
+  --positive: #17805c;
+  --warning: #b05f13;
+  --danger: #c9364d;
+  --ink-strong: var(--ink);
+  --ink-muted: var(--ink-soft);
+  --line-subtle: var(--line);
+  --surface-raised: var(--sheet);
+  --shadow-sm: 0 1px 2px rgb(16 24 40 / 5%);
+  --shadow-md: 0 10px 28px rgb(16 24 40 / 8%);
+}
+
+body {
+  background: var(--paper);
+  font-family: var(--font-geist-sans), "Segoe UI Variable Text", "Segoe UI", sans-serif;
+  font-size: 15px;
+  letter-spacing: -0.008em;
+}
+
+button,
+input,
+textarea,
+select {
+  font-family: inherit;
+}
+
+.workbench-shell :is(h1, h2, h3, h4),
+.workbench-shell :is(.ledger-summary strong, .finance-summary strong, .project-finance-summary dd, .next-action strong) {
+  font-family: var(--font-geist-sans), "Segoe UI Variable Display", sans-serif;
+}
+
+.workbench-shell :is(.eyebrow, .section-kicker, .ledger-nav-index, .customer-link small, .day-time) {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+}
+
+.workbench-shell {
+  grid-template-columns: 232px minmax(0, 1fr);
+  background: var(--paper);
+}
+
+.ledger-rail {
+  z-index: 40;
+  padding: 16px 14px;
+  border-right: 0;
+  background: var(--nav);
+  color: var(--nav-copy);
+  box-shadow: 8px 0 28px rgb(16 23 40 / 10%);
+}
+
+.ledger-brand {
+  min-height: 72px;
+  gap: 11px;
+  padding: 10px 8px 17px;
+  border-bottom: 1px solid rgb(255 255 255 / 9%);
+}
+
+.ledger-brand-mark {
+  width: 38px;
+  height: 38px;
+  border: 0;
+  border-radius: 12px;
+  background: #4f6bff;
+  box-shadow: 0 8px 18px rgb(79 107 255 / 30%);
+  color: #fff;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 0.68rem;
+  letter-spacing: -0.02em;
+}
+
+.ledger-brand strong {
+  font-family: var(--font-geist-sans), sans-serif;
+  font-size: 0.92rem;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+
+.ledger-brand small,
+.ledger-workspace span,
+.ledger-rail-footer small {
+  color: #8f9bb3;
+  font-size: 0.68rem;
+}
+
+.ledger-workspace {
+  margin: 13px 0 8px;
+  padding: 12px 10px;
+  border: 1px solid rgb(255 255 255 / 8%);
+  border-radius: 11px;
+  background: rgb(255 255 255 / 4%);
+}
+
+.ledger-workspace span {
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 0.59rem;
+}
+
+.ledger-workspace strong {
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 560;
+}
+
+.ledger-nav {
+  gap: 5px;
+  margin-top: 6px;
+}
+
+.ledger-nav-mobile {
+  display: none;
+}
+
+.ledger-nav a {
+  min-height: 45px;
+  grid-template-columns: 21px minmax(0, 1fr);
+  gap: 10px;
+  padding: 0 11px;
+  border: 0;
+  border-radius: 10px;
+  color: #aeb8cc;
+  font-size: 0.8rem;
+  font-weight: 510;
+}
+
+.ledger-nav a:hover {
+  background: rgb(255 255 255 / 6%);
+  color: #fff;
+}
+
+.ledger-nav a.is-active {
+  background: #4f6bff;
+  box-shadow: 0 7px 18px rgb(35 55 130 / 28%);
+  color: #fff;
+  font-weight: 630;
+}
+
+.ledger-nav-icon {
+  width: 19px;
+  height: 19px;
+}
+
+.ledger-nav-index {
+  display: none;
+}
+
+.ledger-rail-footer {
+  margin: auto 3px 0;
+  padding: 15px 7px 6px;
+  border-top-color: rgb(255 255 255 / 9%);
+}
+
+.ledger-rail-footer strong {
+  color: #dce4f4;
+  font-size: 0.68rem;
+  font-weight: 560;
+}
+
+.connection-dot {
+  width: 7px;
+  height: 7px;
+  background: #43d69a;
+  box-shadow: 0 0 0 4px rgb(67 214 154 / 12%);
+}
+
+.workbench-main {
+  padding: 0 32px 42px;
+}
+
+.workbench-header {
+  min-height: 112px;
+  padding: 24px 0 18px;
+  border-bottom: 1px solid var(--line-strong);
+}
+
+.eyebrow,
+.section-kicker {
+  color: #758199;
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+
+.workbench-header h1 {
+  font-size: clamp(2rem, 3.2vw, 2.8rem);
+  font-weight: 665;
+  letter-spacing: -0.052em;
+  line-height: 1;
+}
+
+.header-note {
+  max-width: 62ch;
+  margin-top: 0.55rem;
+  font-size: 0.79rem;
+  line-height: 1.5;
+}
+
+.primary-action,
+.text-action,
+.workbench-shell button {
+  border-radius: 9px;
+}
+
+.primary-action {
+  border-color: var(--forest);
+  background: var(--forest);
+  box-shadow: var(--shadow-sm);
+}
+
+.primary-action:hover {
+  background: #2448c0;
+}
+
+.text-action {
+  border-color: var(--line-strong);
+  background: var(--sheet);
+}
+
+.workbench-shell :is(input, textarea, select) {
+  border-radius: 9px;
+}
+
+.ledger-summary,
+.finance-summary,
+.project-finance-summary {
+  margin-top: 18px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--sheet);
+  box-shadow: var(--shadow-sm);
+}
+
+.ledger-summary > div,
+.finance-summary > div,
+.project-finance-summary > div {
+  border-color: var(--line);
+}
+
+.ledger-summary strong {
+  font-size: 1.38rem;
+  font-weight: 650;
+}
+
+.customer-entry,
+.finance-entry {
+  margin-top: 18px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--sheet);
+  box-shadow: var(--shadow-sm);
+}
+
+.customer-entry > div {
+  padding-left: 12px;
+  border-left-color: #4f6bff;
+}
+
+.customer-entry h2,
+.section-heading h2 {
+  font-size: 1.18rem;
+  font-weight: 650;
+  letter-spacing: -0.025em;
+}
+
+.customer-table th,
+.finance-table th,
+.project-finance-table th {
+  color: #758199;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 0.58rem;
+  letter-spacing: 0.045em;
+}
+
+.customer-table tbody tr,
+.finance-table tbody tr,
+.project-finance-table tbody tr {
+  transition: background-color 140ms ease;
+}
+
+.customer-table tbody tr:hover,
+.finance-table tbody tr:hover,
+.project-finance-table tbody tr:hover {
+  background: #f7f9fd;
+}
+
+.finance-subnav {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--sheet);
+}
+
+.finance-subnav a {
+  border-color: var(--line);
+}
+
+.portal-access-denied {
+  max-width: 640px;
+  margin: 10vh auto 0;
+  padding: 32px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--sheet);
+  box-shadow: var(--shadow-sm);
+}
+
+.portal-access-denied h1 {
+  margin: 8px 0 10px;
+  font-size: clamp(1.7rem, 4vw, 2.5rem);
+  letter-spacing: -0.045em;
+}
+
+.portal-access-denied > p:not(.eyebrow) {
+  max-width: 54ch;
+  margin: 0 0 24px;
+  color: var(--ink-soft);
+  line-height: 1.6;
+}
+
+@media (max-width: 760px) {
+  body {
+    font-size: 16px;
+  }
+
+  .ledger-rail {
+    position: static;
+    padding: 0;
+    background: var(--nav);
+  }
+
+  .ledger-brand {
+    min-height: 64px;
+    padding: 10px 16px;
+    border-bottom: 0;
+  }
+
+  .ledger-brand-mark {
+    width: 36px;
+    height: 36px;
+  }
+
+  .ledger-nav {
+    gap: 0;
+    padding: 6px max(6px, env(safe-area-inset-right)) calc(6px + env(safe-area-inset-bottom)) max(6px, env(safe-area-inset-left));
+    border-top: 1px solid #dfe3ec;
+    background: rgb(255 255 255 / 96%);
+  }
+
+  .ledger-nav-desktop {
+    display: none;
+  }
+
+  .ledger-nav-mobile {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+
+  .ledger-nav a {
+    min-height: 56px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    justify-content: center;
+    padding: 4px 2px;
+    border-radius: 9px;
+    color: #667085;
+    font-size: 0.64rem;
+  }
+
+  .ledger-nav a.is-active {
+    box-shadow: none;
+    color: #fff;
+  }
+
+  .ledger-nav-icon {
+    width: 19px;
+    height: 19px;
+  }
+
+  .ledger-nav-short {
+    display: inline;
+  }
+
+  .mobile-nav-more {
+    position: relative;
+    min-width: 0;
+  }
+
+  .mobile-nav-more > summary {
+    min-height: 56px;
+    display: flex;
+    align-items: center;
+    flex-direction: column;
+    gap: 3px;
+    justify-content: center;
+    padding: 4px 2px;
+    border-radius: 9px;
+    color: #667085;
+    cursor: pointer;
+    font-size: 0.64rem;
+    list-style: none;
+  }
+
+  .mobile-nav-more > summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .mobile-nav-more > summary.is-active,
+  .mobile-nav-more[open] > summary {
+    background: #4f6bff;
+    color: #fff;
+  }
+
+  .mobile-nav-menu {
+    position: absolute;
+    right: 4px;
+    bottom: calc(100% + 10px);
+    width: min(270px, calc(100vw - 16px));
+    display: grid;
+    gap: 4px;
+    padding: 8px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: #fff;
+    box-shadow: 0 18px 40px rgb(16 24 40 / 18%);
+  }
+
+  .ledger-nav .mobile-nav-menu a {
+    min-height: 48px;
+    display: grid;
+    grid-template-columns: 22px minmax(0, 1fr);
+    justify-content: start;
+    padding: 0 12px;
+    color: var(--ink);
+    text-align: left;
+  }
+
+  .mobile-nav-menu .ledger-nav-label {
+    display: inline;
+  }
+
+  .mobile-nav-menu .ledger-nav-short {
+    display: none;
+  }
+
+  .workbench-main {
+    padding: 0 16px calc(86px + env(safe-area-inset-bottom));
+  }
+
+  .workbench-header {
+    min-height: 146px;
+    padding-top: 22px;
+  }
+
+  .workbench-header h1 {
+    font-size: 2.15rem;
+  }
+
+  .customer-entry,
+  .finance-entry {
+    padding: 16px;
+  }
+
+  .finance-subnav {
+    display: flex;
+    overflow-x: auto;
+  }
 }

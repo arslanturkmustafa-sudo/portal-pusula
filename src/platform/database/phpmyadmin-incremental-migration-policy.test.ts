@@ -57,6 +57,9 @@ const analyzeIncrementalMigrationStatement = untypedAnalyze as (
 
 const customerProjectsPartnershipMigrationTag =
   "0011_customer_projects_partnership";
+const userPermissionsMigrationTag = "0012_user_permissions";
+const recordLifecycleMigrationTag = "0014_record_lifecycle";
+const financialReversalsMigrationTag = "0015_financial_reversals";
 const incremental0011Backfills = untyped0011Backfills as {
   consultingContract: string;
   customerProject: string;
@@ -189,6 +192,49 @@ async function build0011(outputDirectory: string) {
   };
 }
 
+async function build0012(outputDirectory: string) {
+  const summary = await buildPhpMyAdminIncrementalMigrationBundle({
+    migrationTag: userPermissionsMigrationTag,
+    outputDirectory,
+    projectRoot,
+    serverVersionSha256,
+    targetDatabaseSha256,
+  });
+  const sql = await readFile(resolve(projectRoot, summary.sqlPath), "utf8");
+  const manifestText = await readFile(
+    resolve(projectRoot, summary.manifestPath),
+    "utf8",
+  );
+  return {
+    manifest: JSON.parse(manifestText) as IncrementalManifest,
+    sql,
+    summary,
+  };
+}
+
+async function buildCurrentIncremental(
+  migrationTag: string,
+  outputDirectory: string,
+) {
+  const summary = await buildPhpMyAdminIncrementalMigrationBundle({
+    migrationTag,
+    outputDirectory,
+    projectRoot,
+    serverVersionSha256,
+    targetDatabaseSha256,
+  });
+  const sql = await readFile(resolve(projectRoot, summary.sqlPath), "utf8");
+  const manifestText = await readFile(
+    resolve(projectRoot, summary.manifestPath),
+    "utf8",
+  );
+  return {
+    manifest: JSON.parse(manifestText) as IncrementalManifest,
+    sql,
+    summary,
+  };
+}
+
 function candidateStatements(sql: string): string[] {
   return [...sql.matchAll(/SET @pp_candidate_sql = 0x([0-9a-f]+);/gu)].map(
     (match) => Buffer.from(match[1], "hex").toString("utf8"),
@@ -267,6 +313,188 @@ describe.sequential("phpMyAdmin incremental migration bundle policy", () => {
         "ALTER TABLE `consulting_contract` ADD CONSTRAINT `fk_consulting_contract_customer_project` FOREIGN KEY (`customer_id`,`project_id`) REFERENCES `customer_project`(`customer_id`,`project_id`) ON DELETE restrict ON UPDATE restrict",
       ),
     );
+  });
+
+  it("builds a target-bound 0012 user-permission artifact with exact transitional guards", async () => {
+    const first = await build0012(await temporaryOutputDirectory());
+    const second = await build0012(await temporaryOutputDirectory());
+    const migrationSql = await readFile(
+      resolve(projectRoot, "drizzle", `${userPermissionsMigrationTag}.sql`),
+      "utf8",
+    );
+    const migrationStatements = migrationSql
+      .split(/--> statement-breakpoint\s*/gu)
+      .map((statement) => statement.trim().replace(/;$/u, ""));
+
+    expect(second.summary).toMatchObject({
+      migrationTag: userPermissionsMigrationTag,
+      statementCount: 7,
+    });
+    expect(first.manifest.expectedJournalCount).toBe(12);
+    expect(first.manifest.expectedPreviousMigration.tag).toBe(
+      customerProjectsPartnershipMigrationTag,
+    );
+    expect(first.manifest.migration.tag).toBe(userPermissionsMigrationTag);
+    expect(first.manifest.migration.statementHashes).toHaveLength(7);
+    expect(candidateStatements(first.sql)).toEqual([
+      ...migrationStatements,
+      expect.stringContaining("INSERT INTO `__drizzle_migrations`"),
+    ]);
+    expect(first.manifest.targetObjects).toEqual(
+      expect.arrayContaining([
+        {
+          name: "chk_user_account_state",
+          tableName: "user_account",
+          type: "drop-check",
+        },
+        {
+          name: "display_name,role",
+          tableName: "user_account",
+          type: "add-user-account-columns",
+        },
+        {
+          name: "display_name,role",
+          tableName: "user_account",
+          type: "modify-user-account-columns",
+        },
+        {
+          name: "user_permission",
+          tableName: "user_permission",
+          type: "create-table",
+        },
+        {
+          name: "idx_user_account_role_status",
+          tableName: "user_account",
+          type: "create-index",
+        },
+      ]),
+    );
+    expect(first.sql).toContain("COLUMN_NAME IN ('display_name', 'role')) = 0");
+    expect(first.sql).toContain("REPLACE(COLUMN_DEFAULT, '''', '') = 'owner'");
+    expect(first.sql).toContain("REPLACE(COLUMN_DEFAULT, '''', '') = 'member'");
+    const initialGuard = first.sql.slice(
+      0,
+      first.sql.indexOf("SET @pp_candidate_sql = 0x"),
+    );
+    expect(initialGuard).toContain(
+      "CONSTRAINT_NAME = 'chk_user_account_state' AND CONSTRAINT_TYPE = 'CHECK') = 1",
+    );
+    expect(initialGuard.match(/chk_user_account_state/gu)).toHaveLength(1);
+    expect(first.sql).not.toContain("PORTAL_PUSULA_INVALID_SQL_MODE");
+  });
+
+  it("accepts only the exact 0012 user-account transition statements", async () => {
+    const migrationSql = await readFile(
+      resolve(projectRoot, "drizzle", `${userPermissionsMigrationTag}.sql`),
+      "utf8",
+    );
+    const statements = migrationSql
+      .split(/--> statement-breakpoint\s*/gu)
+      .map((statement) => statement.trim().replace(/;$/u, ""));
+
+    expect(
+      statements.map((statement) =>
+        analyzeIncrementalMigrationStatement(statement, userPermissionsMigrationTag),
+      ),
+    ).toHaveLength(7);
+    expect(() =>
+      analyzeIncrementalMigrationStatement(
+        statements[0].replace("chk_user_account_state", "chk_other"),
+        userPermissionsMigrationTag,
+      ),
+    ).toThrow();
+    expect(() =>
+      analyzeIncrementalMigrationStatement(
+        statements[1].replace("DEFAULT 'owner'", "DEFAULT 'member'"),
+        userPermissionsMigrationTag,
+      ),
+    ).toThrow();
+  });
+
+  it.each([
+    {
+      expectedJournalCount: 14,
+      expectedPreviousTag: "0013_login_attempt_throttle",
+      migrationTag: recordLifecycleMigrationTag,
+      requiredTarget: {
+        name: "archive_reason",
+        tableName: "customer",
+        type: "add-column",
+      },
+      statementCount: 44,
+    },
+    {
+      expectedJournalCount: 15,
+      expectedPreviousTag: recordLifecycleMigrationTag,
+      migrationTag: financialReversalsMigrationTag,
+      requiredTarget: {
+        name: "uq_receivable_collection_reversal",
+        tableName: "receivable_collection",
+        type: "create-index",
+      },
+      statementCount: 26,
+    },
+  ])(
+    "builds deterministic guarded $migrationTag artifact",
+    async ({
+      expectedJournalCount,
+      expectedPreviousTag,
+      migrationTag,
+      requiredTarget,
+      statementCount,
+    }) => {
+      const first = await buildCurrentIncremental(
+        migrationTag,
+        await temporaryOutputDirectory(),
+      );
+      const second = await buildCurrentIncremental(
+        migrationTag,
+        await temporaryOutputDirectory(),
+      );
+
+      expect(second.summary).toMatchObject({ migrationTag, statementCount });
+      expect(first.summary.sqlSha256).toBe(second.summary.sqlSha256);
+      expect(first.manifest.expectedJournalCount).toBe(expectedJournalCount);
+      expect(first.manifest.expectedPreviousMigration.tag).toBe(
+        expectedPreviousTag,
+      );
+      expect(first.manifest.targetObjects).toContainEqual(requiredTarget);
+      expect(first.manifest.migration.statementHashes).toHaveLength(
+        statementCount,
+      );
+      expect(first.sql).toContain(
+        Buffer.from("PORTAL_PUSULA_INCREMENTAL_MIGRATION_OK", "utf8").toString(
+          "hex",
+        ),
+      );
+      if (migrationTag === recordLifecycleMigrationTag) {
+        const initialGuard = first.sql.slice(
+          0,
+          first.sql.indexOf("SET @pp_candidate_sql = 0x"),
+        );
+        expect(initialGuard).toContain(
+          "INDEX_NAME = 'idx_customer_status_name') = 2",
+        );
+        expect(initialGuard).not.toContain(
+          "TABLE_NAME = 'customer' AND INDEX_NAME = 'idx_customer_status_name') = 0",
+        );
+      }
+    },
+  );
+
+  it("rejects mutated lifecycle and reversal column definitions", () => {
+    expect(() =>
+      analyzeIncrementalMigrationStatement(
+        "ALTER TABLE `customer` ADD `archive_reason` varchar(500) NOT NULL",
+        recordLifecycleMigrationTag,
+      ),
+    ).toThrow();
+    expect(() =>
+      analyzeIncrementalMigrationStatement(
+        "ALTER TABLE `receivable` ADD `record_state` varchar(16) DEFAULT 'voided' NOT NULL",
+        financialReversalsMigrationTag,
+      ),
+    ).toThrow();
   });
 
   it("requires the exact previous journal and records the selected hash", async () => {

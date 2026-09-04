@@ -10,6 +10,8 @@ import {
   type FormEvent,
 } from "react";
 
+import { redirectToPortalLogin as redirectToLogin } from "@/platform/navigation/portal-return-path";
+
 type LoadState = "error" | "loading" | "ready";
 type SaveState = "idle" | "saving";
 type CardStatus = "active" | "inactive";
@@ -172,10 +174,6 @@ function withCurrentStatus(installment: CardInstallmentDto): CardInstallmentDto 
     return installment;
   }
   return { ...installment, status: "overdue" };
-}
-
-function redirectToLogin(): void {
-  window.location.assign(new URL("/giris", window.location.origin).toString());
 }
 
 export function CardPlanWorkspace() {

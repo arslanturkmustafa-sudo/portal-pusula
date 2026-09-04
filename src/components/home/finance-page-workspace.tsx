@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 
 import { FinanceWorkspace } from "@/components/home/finance-workspace";
+import { redirectToPortalLogin as redirectToLogin } from "@/platform/navigation/portal-return-path";
 
 type StoredCustomer = Readonly<{
   displayName: string;
@@ -28,11 +29,14 @@ type FinanceCustomer = Readonly<{
 
 type FinanceProject = NonNullable<FinanceCustomer["projects"]>[number];
 
-function redirectToLogin(): void {
-  window.location.assign(new URL("/giris", window.location.origin).toString());
-}
+type FinancePageWorkspaceProps = Readonly<{
+  capabilities: Readonly<{
+    canReadAudit: boolean;
+    canReverseReceivables: boolean;
+  }>;
+}>;
 
-export function FinancePageWorkspace() {
+export function FinancePageWorkspace({ capabilities }: FinancePageWorkspaceProps) {
   const [customers, setCustomers] = useState<readonly FinanceCustomer[]>([]);
   const [projects, setProjects] = useState<readonly FinanceProject[]>([]);
   const [loadState, setLoadState] = useState<"error" | "loading" | "ready">(
@@ -110,7 +114,7 @@ export function FinancePageWorkspace() {
           müşteri seçilerek işlem yapılamayabilir.
         </p>
       ) : null}
-      <FinanceWorkspace customers={customers} live projects={projects} />
+      <FinanceWorkspace capabilities={capabilities} customers={customers} live projects={projects} />
     </>
   );
 }

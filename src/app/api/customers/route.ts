@@ -9,7 +9,8 @@ import {
   CustomerShortCodeConflictError,
   listCustomers,
 } from "@/features/customers";
-import { isAdminAuthenticated } from "@/platform/auth/server-auth";
+import { hasPermission } from "@/platform/auth/permissions";
+import { authenticatePrincipalRequest } from "@/platform/auth/server-auth";
 import { getDatabaseProbeEnvironment } from "@/platform/config/readiness-env";
 import { getPlatformDatabasePool } from "@/platform/database/mysql-platform";
 import { correlationIdFromHeaders } from "@/platform/http/correlation-id";
@@ -38,12 +39,20 @@ function databasePool() {
 }
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  if (!(await isAdminAuthenticated(request))) {
+  const principal = await authenticatePrincipalRequest(request);
+  if (!principal) {
     return json({ status: "unauthorized" }, 401);
+  }
+  if (!hasPermission(principal, "customers.read")) {
+    return json({ status: "forbidden" }, 403);
   }
 
   try {
-    const customers = await listCustomers(databasePool());
+    const customers = await listCustomers(databasePool(), {
+      includeBilling: hasPermission(principal, "contracts.billing.read"),
+      includeContact: hasPermission(principal, "customers.contact.read"),
+      includeVisits: hasPermission(principal, "visits.read"),
+    });
     return json({ customers });
   } catch {
     return json({ status: "service_unavailable" }, 503);
@@ -51,8 +60,15 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  if (!(await isAdminAuthenticated(request))) {
+  const principal = await authenticatePrincipalRequest(request);
+  if (!principal) {
     return json({ status: "unauthorized" }, 401);
+  }
+  if (
+    !hasPermission(principal, "customers.write") ||
+    !hasPermission(principal, "customers.contact.read")
+  ) {
+    return json({ status: "forbidden" }, 403);
   }
 
   if (!isSameOriginWriteRequest(request)) return json({ status: "forbidden" }, 403);
@@ -66,6 +82,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       await readJsonWriteBody(request, 16_384),
     );
     const customer = await createCustomer(databasePool(), input, {
+      actorId: principal.kind === "account" ? principal.accountId : undefined,
       correlationId,
     });
     return json({ customer }, 201);

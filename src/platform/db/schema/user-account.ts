@@ -3,6 +3,7 @@ import {
   char,
   check,
   datetime,
+  index,
   int,
   mysqlTable,
   uniqueIndex,
@@ -14,10 +15,12 @@ export const userAccount = mysqlTable(
   {
     id: char("id", { length: 36 }).primaryKey(),
     email: varchar("email", { length: 254 }).notNull(),
+    displayName: varchar("display_name", { length: 191 }).notNull(),
     passwordHash: varchar("password_hash", { length: 191 }).notNull(),
     credentialVersion: int("credential_version", { unsigned: true })
       .default(1)
       .notNull(),
+    role: varchar("role", { length: 16 }).default("member").notNull(),
     status: varchar("status", { length: 16 }).default("active").notNull(),
     passwordChangedAtUtc: datetime("password_changed_at_utc", {
       fsp: 6,
@@ -49,12 +52,18 @@ export const userAccount = mysqlTable(
         AND BINARY ${table.email} = BINARY LOWER(${table.email})`,
     ),
     check(
+      "chk_user_account_display_name",
+      sql`CHAR_LENGTH(${table.displayName}) BETWEEN 1 AND 191
+        AND ${table.displayName} = TRIM(${table.displayName})`,
+    ),
+    check(
       "chk_user_account_password_hash",
       sql`BINARY ${table.passwordHash} REGEXP '^(scrypt:32768:8:1:[A-Za-z0-9_-]{22}:[A-Za-z0-9_-]{86}|scrypt\\$32768\\$8\\$1\\$[A-Za-z0-9_-]{22}\\$[A-Za-z0-9_-]{86})$'`,
     ),
     check(
       "chk_user_account_state",
       sql`${table.credentialVersion} >= 1
+        AND BINARY ${table.role} IN (BINARY 'owner', BINARY 'member')
         AND BINARY ${table.status} IN (BINARY 'active', BINARY 'disabled')`,
     ),
     check(
@@ -63,6 +72,7 @@ export const userAccount = mysqlTable(
         AND ${table.passwordChangedAtUtc} <= ${table.updatedAtUtc}`,
     ),
     uniqueIndex("uq_user_account_email").on(table.email),
+    index("idx_user_account_role_status").on(table.role, table.status),
   ],
 );
 

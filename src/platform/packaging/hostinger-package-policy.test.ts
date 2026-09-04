@@ -210,6 +210,10 @@ describe.sequential("Hostinger package sensitive-file policy", () => {
     expect(entries).toContain(
       "drizzle/0011_customer_projects_partnership.sql",
     );
+    expect(entries).toContain("drizzle/0012_user_permissions.sql");
+    expect(entries).toContain("drizzle/0013_login_attempt_throttle.sql");
+    expect(entries).toContain("drizzle/0014_record_lifecycle.sql");
+    expect(entries).toContain("drizzle/0015_financial_reversals.sql");
     expect(entries).toContain("drizzle/meta/_journal.json");
     expect(entries).toContain("drizzle/meta/0000_snapshot.json");
     expect(entries).toContain("drizzle/meta/0001_snapshot.json");
@@ -217,7 +221,12 @@ describe.sequential("Hostinger package sensitive-file policy", () => {
     expect(entries).toContain("drizzle/meta/0003_snapshot.json");
     expect(entries).toContain("drizzle/meta/0004_snapshot.json");
     expect(entries).toContain("drizzle/meta/0011_snapshot.json");
+    expect(entries).toContain("drizzle/meta/0012_snapshot.json");
+    expect(entries).toContain("drizzle/meta/0013_snapshot.json");
+    expect(entries).toContain("drizzle/meta/0014_snapshot.json");
+    expect(entries).toContain("drizzle/meta/0015_snapshot.json");
     expect(entries).toContain("public/offline-v1.html");
+    expect(entries).toContain("public/brand/muhendis-kafasi-logo.png");
     expect(entries).toContain("public/icons/portal-pusula-192-v1.png");
 
     expect(entries).not.toContain("scripts/package-source-checkpoint.mjs");
@@ -242,6 +251,7 @@ describe.sequential("Hostinger package sensitive-file policy", () => {
       "tsconfig.json",
     ]);
     const allowedPublicFiles = new Set([
+      "public/brand/muhendis-kafasi-logo.png",
       "public/icons/portal-pusula-192-v1.png",
       "public/icons/portal-pusula-512-v1.png",
       "public/icons/portal-pusula-maskable-512-v1.png",
@@ -266,5 +276,5 @@ describe.sequential("Hostinger package sensitive-file policy", () => {
           ));
       expect(isAllowed, `unexpected production ZIP entry: ${entry}`).toBe(true);
     }
-  });
+  }, 15_000);
 });

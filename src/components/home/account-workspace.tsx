@@ -2,11 +2,15 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 
+import { redirectToPortalLogin as redirectToLogin } from "@/platform/navigation/portal-return-path";
+
 type AccountView = Readonly<{
+  displayName: string;
   email: string;
   passwordChangedAtUtc: string | null;
   passwordManagementAvailable: boolean;
   requiresCurrentPassword: boolean;
+  role: "member" | "owner";
 }>;
 
 type AccountWorkspaceProps = Readonly<{
@@ -14,10 +18,12 @@ type AccountWorkspaceProps = Readonly<{
 }>;
 
 const previewAccount: AccountView = {
+  displayName: "Portal Yöneticisi",
   email: "yonetici@example.com",
   passwordChangedAtUtc: null,
   passwordManagementAvailable: true,
   requiresCurrentPassword: true,
+  role: "owner",
 };
 
 function passwordChangedLabel(value: string | null): string {
@@ -29,10 +35,6 @@ function passwordChangedLabel(value: string | null): string {
     dateStyle: "long",
     timeZone: "Europe/Istanbul",
   }).format(date);
-}
-
-function redirectToLogin(): void {
-  window.location.assign(new URL("/giris", window.location.origin).toString());
 }
 
 export function AccountWorkspace({ live = false }: AccountWorkspaceProps) {
@@ -169,8 +171,10 @@ export function AccountWorkspace({ live = false }: AccountWorkspaceProps) {
       {account ? (
         <div className="account-workspace-grid">
           <div className="account-identity">
+            <span>{account.role === "owner" ? "Sahip hesabı" : "Ekip hesabı"}</span>
+            <strong>{account.displayName}</strong>
             <span>Giriş e-postası</span>
-            <strong>{account.email}</strong>
+            <small>{account.email}</small>
             <small>
               Son parola değişikliği: {passwordChangedLabel(account.passwordChangedAtUtc)}
             </small>

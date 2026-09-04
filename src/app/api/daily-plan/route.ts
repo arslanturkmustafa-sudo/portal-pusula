@@ -26,7 +26,7 @@ function databasePool() {
 }
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  if (!(await isAdminAuthenticated(request))) {
+  if (!(await isAdminAuthenticated(request, "daily-plan.read"))) {
     return json({ status: "unauthorized" }, 401);
   }
 

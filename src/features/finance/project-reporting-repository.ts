@@ -180,12 +180,14 @@ export async function readProjectFinanceLedger(
             END), 0.0000) AS overdue_amount
        FROM receivable r
        LEFT JOIN (
-         SELECT receivable_id, SUM(amount) AS collected_amount
+         SELECT receivable_id,
+                SUM(CASE WHEN entry_type = 'reversal' THEN -amount ELSE amount END) AS collected_amount
            FROM receivable_collection
           GROUP BY receivable_id
        ) rc ON rc.receivable_id = r.id
-      WHERE (r.period_month >= ? AND r.period_month < ?)
-         OR (r.period_month IS NULL AND r.due_on >= ? AND r.due_on < ?)
+      WHERE r.record_state = 'active'
+        AND ((r.period_month >= ? AND r.period_month < ?)
+         OR (r.period_month IS NULL AND r.due_on >= ? AND r.due_on < ?))
       GROUP BY r.project_id`,
     [
       today,
@@ -199,7 +201,7 @@ export async function readProjectFinanceLedger(
   const [collectionRows] = await connection.execute<CollectionAggregateRow[]>(
     `SELECT r.project_id,
             COUNT(*) AS entry_count,
-            COALESCE(SUM(rc.amount), 0.0000) AS collected_amount
+            COALESCE(SUM(CASE WHEN rc.entry_type = 'reversal' THEN -rc.amount ELSE rc.amount END), 0.0000) AS collected_amount
        FROM receivable_collection rc
        JOIN receivable r ON r.id = rc.receivable_id
       WHERE rc.collected_on >= ? AND rc.collected_on < ?
@@ -287,7 +289,8 @@ export async function readProjectFinanceLedger(
             COALESCE(SUM(COALESCE(receipt.received_amount, 0.0000)), 0.0000) AS received_amount
        FROM partnership_contribution pc
        LEFT JOIN (
-         SELECT contribution_id, SUM(amount) AS received_amount
+         SELECT contribution_id,
+                SUM(CASE WHEN entry_type = 'reversal' THEN -amount ELSE amount END) AS received_amount
            FROM partnership_contribution_receipt
           WHERE received_on >= ? AND received_on < ?
           GROUP BY contribution_id

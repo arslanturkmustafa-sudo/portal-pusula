@@ -13,7 +13,7 @@ const mocks = vi.hoisted(() => {
   class TaskProjectNotFoundError extends Error {}
   class TaskVersionConflictError extends Error {}
   return {
-    authenticateAdminRequest: vi.fn(),
+    authenticatePrincipalRequest: vi.fn(),
     parseUpdate: vi.fn(),
     requestLogger: vi.fn(),
     TaskAssigneeNotFoundError,
@@ -37,7 +37,7 @@ vi.mock("@/features/tasks", () => ({
   updateTaskInputSchema: { parse: mocks.parseUpdate },
 }));
 vi.mock("@/platform/auth/server-auth", () => ({
-  authenticateAdminRequest: mocks.authenticateAdminRequest,
+  authenticatePrincipalRequest: mocks.authenticatePrincipalRequest,
 }));
 vi.mock("@/platform/config/readiness-env", () => ({
   getDatabaseProbeEnvironment: () => ({}),
@@ -56,9 +56,12 @@ const taskId = "30000000-0000-4000-8000-000000000001";
 const principal = {
   accountId,
   credentialVersion: 1,
+  displayName: "Yönetici",
   email: "yonetici@example.com",
   kind: "account" as const,
   passwordChangedAtUtc: "2026-09-01 09:00:00.000000",
+  permissions: [] as const,
+  role: "owner" as const,
 };
 const task = {
   assigneeEmail: "yonetici@example.com",
@@ -98,7 +101,7 @@ const context = { params: Promise.resolve({ id: taskId }) };
 describe("task item API", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.authenticateAdminRequest.mockResolvedValue(principal);
+    mocks.authenticatePrincipalRequest.mockResolvedValue(principal);
     mocks.parseUpdate.mockImplementation((value: unknown) => value);
     mocks.requestLogger.mockReturnValue({ error: vi.fn() });
     mocks.updateTask.mockResolvedValue(task);
@@ -136,6 +139,23 @@ describe("task item API", () => {
 
     expect(response.status).toBe(403);
     expect(mocks.parseUpdate).not.toHaveBeenCalled();
+    expect(mocks.updateTask).not.toHaveBeenCalled();
+  });
+
+  it("requires assignment permission when clearing or changing an assignee", async () => {
+    mocks.authenticatePrincipalRequest.mockResolvedValueOnce({
+      ...principal,
+      permissions: ["tasks.read", "tasks.write"],
+      role: "member",
+    });
+    mocks.parseUpdate.mockReturnValueOnce({
+      assigneeUserAccountId: null,
+      version: 1,
+    });
+
+    const response = await PATCH(request(), context);
+
+    expect(response.status).toBe(403);
     expect(mocks.updateTask).not.toHaveBeenCalled();
   });
 });

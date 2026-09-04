@@ -2,7 +2,14 @@ import { FinanceSubnavigation } from "@/components/home/finance-subnavigation";
 import { PartnershipWorkspace } from "@/components/home/partnership-workspace";
 import { PortalPageHeader } from "@/components/portal/portal-page-header";
 
-export function PartnershipPageWorkspace() {
+type PartnershipPageWorkspaceProps = Readonly<{
+  capabilities: Readonly<{
+    canReadAudit: boolean;
+    canReversePartnership: boolean;
+  }>;
+}>;
+
+export function PartnershipPageWorkspace({ capabilities }: PartnershipPageWorkspaceProps) {
   return (
     <>
       <PortalPageHeader
@@ -11,7 +18,7 @@ export function PartnershipPageWorkspace() {
         title="Finans"
       />
       <FinanceSubnavigation />
-      <PartnershipWorkspace />
+      <PartnershipWorkspace capabilities={capabilities} />
     </>
   );
 }

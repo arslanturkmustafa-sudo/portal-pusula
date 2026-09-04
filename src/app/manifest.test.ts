@@ -11,7 +11,7 @@ describe("PWA manifest", () => {
       name: "Portal Pusula",
       short_name: "Pusula",
       lang: "tr",
-      start_url: "/musteriler",
+      start_url: "/",
       scope: "/",
       display: "standalone",
     });

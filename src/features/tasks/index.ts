@@ -3,6 +3,7 @@ export type {
   TaskStatus,
   WorkTask,
 } from "./repository";
+export { changeTaskLifecycle } from "./lifecycle-service";
 export {
   createTask,
   listTasks,

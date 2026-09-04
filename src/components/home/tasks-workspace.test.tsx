@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { TasksWorkspace } from "@/components/home/tasks-workspace";
 
-type TaskStatus = "backlog" | "todo" | "in_progress" | "blocked" | "done";
+type TaskStatus = "backlog" | "todo" | "in_progress" | "blocked" | "done" | "cancelled";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -68,13 +68,14 @@ const project = {
 };
 
 describe("TasksWorkspace", () => {
-  it("loads tasks and customers into five accessible Kanban columns", async () => {
+  it("loads tasks and customers into six accessible Kanban columns", async () => {
     const statuses: TaskStatus[] = [
       "backlog",
       "todo",
       "in_progress",
       "blocked",
       "done",
+      "cancelled",
     ];
     const tasks = statuses.map((status, index) =>
       taskFixture(status, {
@@ -109,7 +110,9 @@ describe("TasksWorkspace", () => {
     expect(screen.getByRole("region", { name: "Beklemede" })).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Tamamlandı" }))
       .toBeInTheDocument();
-    expect(screen.getAllByRole("article")).toHaveLength(5);
+    expect(screen.getByRole("region", { name: "İptal" }))
+      .toBeInTheDocument();
+    expect(screen.getAllByRole("article")).toHaveLength(6);
     expect(screen.queryByText("Bağımlılıklar ve zaman takibi")).not
       .toBeInTheDocument();
 
@@ -131,6 +134,39 @@ describe("TasksWorkspace", () => {
       "/api/projects",
       expect.objectContaining({ cache: "no-store", credentials: "same-origin" }),
     );
+  });
+
+  it("keeps write controls but hides lifecycle and audit controls without exact capabilities", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async (input) => {
+        if (String(input) === "/api/tasks") {
+          return jsonResponse({ tasks: [taskFixture("todo", { title: "Yetki kontrollü görev" })] });
+        }
+        if (String(input) === "/api/customers") return jsonResponse({ customers: [customer] });
+        if (String(input) === "/api/projects") return jsonResponse({ projects: [project] });
+        throw new Error(`Unexpected request: ${String(input)}`);
+      }),
+    );
+
+    render(
+      <TasksWorkspace
+        capabilities={{
+          canExportReports: false,
+          canLifecycleTasks: false,
+          canReadAudit: false,
+          canReadCustomers: true,
+          canReadProjects: true,
+          canWriteTasks: true,
+        }}
+      />,
+    );
+
+    expect(await screen.findByRole("button", { name: "Yetki kontrollü görev görevini düzenle" }))
+      .toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Yetki kontrollü görev durumu" }))
+      .toBeInTheDocument();
+    expect(screen.queryByText("İşlemler")).not.toBeInTheDocument();
   });
 
   it("serializes initial reads for the deliberately small database pool", async () => {

@@ -327,7 +327,7 @@ export function analyzeIncrementalMigrationStatement(statement, migrationTag) {
   }
 
   if (migrationTag !== CUSTOMER_PROJECTS_PARTNERSHIP_MIGRATION_TAG) {
-    return analyzeMigrationStatement(statement);
+    return analyzeMigrationStatement(statement, migrationTag);
   }
 
   const analysis =
@@ -341,7 +341,7 @@ export function analyzeIncrementalMigrationStatement(statement, migrationTag) {
   if (/^\s*(?:INSERT|UPDATE|DELETE|REPLACE|DROP)\b/iu.test(statement)) {
     throw new PhpMyAdminIncrementalBundleError();
   }
-  return analyzeMigrationStatement(statement);
+  return analyzeMigrationStatement(statement, migrationTag);
 }
 
 function mysqlSessionPolicyPredicate() {
@@ -388,6 +388,40 @@ function constraintPredicate(tableName, constraintName, constraintType) {
                AND TABLE_NAME = ${sqlString(tableName)}
                AND CONSTRAINT_NAME = ${sqlString(constraintName)}
                AND CONSTRAINT_TYPE = ${sqlString(constraintType)}) = 1`;
+}
+
+function managedColumnVerificationPredicate(analysis) {
+  const spec = analysis.columnSpec;
+  const predicates = [
+    "TABLE_SCHEMA = DATABASE()",
+    `TABLE_NAME = ${sqlString(analysis.tableName)}`,
+    `COLUMN_NAME = ${sqlString(analysis.columnName)}`,
+    `DATA_TYPE = ${sqlString(spec.dataType)}`,
+    `IS_NULLABLE = ${sqlString(spec.nullable ? "YES" : "NO")}`,
+    "EXTRA = ''",
+  ];
+  if (spec.maxLength !== undefined) {
+    predicates.push(`CHARACTER_MAXIMUM_LENGTH = ${spec.maxLength}`);
+  }
+  if (spec.characterSet !== undefined) {
+    predicates.push(`CHARACTER_SET_NAME = ${sqlString(spec.characterSet)}`);
+  }
+  if (spec.collation !== undefined) {
+    predicates.push(`COLLATION_NAME = ${sqlString(spec.collation)}`);
+  }
+  if (spec.datetimePrecision !== undefined) {
+    predicates.push(`DATETIME_PRECISION = ${spec.datetimePrecision}`);
+  }
+  if (spec.unsigned === true) {
+    predicates.push("COLUMN_TYPE LIKE '%unsigned%'");
+  }
+  predicates.push(
+    spec.defaultValue === null
+      ? "(COLUMN_DEFAULT IS NULL OR BINARY COLUMN_DEFAULT = BINARY 'NULL')"
+      : `REPLACE(COLUMN_DEFAULT, '''', '') = ${sqlString(spec.defaultValue)}`,
+  );
+  return `(SELECT COUNT(*) FROM information_schema.COLUMNS
+             WHERE ${predicates.join("\n               AND ")}) = 1`;
 }
 
 function orderedIndexPredicate({
@@ -551,7 +585,62 @@ function dataBackfillPostflightPredicate(backfillKind) {
 }
 
 function statementVerificationPredicate(analysis) {
+  if (analysis.type === "drop-check") {
+    return `(SELECT COUNT(*) FROM information_schema.TABLE_CONSTRAINTS
+               WHERE CONSTRAINT_SCHEMA = DATABASE()
+                 AND TABLE_NAME = ${sqlString(analysis.tableName)}
+                 AND CONSTRAINT_NAME = ${sqlString(analysis.constraintName)}) = 0`;
+  }
+
+  if (analysis.type === "add-user-account-columns") {
+    return `(SELECT COUNT(*) FROM information_schema.COLUMNS
+               WHERE TABLE_SCHEMA = DATABASE()
+                 AND TABLE_NAME = 'user_account'
+                 AND COLUMN_NAME = 'display_name'
+                 AND DATA_TYPE = 'varchar'
+                 AND CHARACTER_MAXIMUM_LENGTH = 191
+                 AND IS_NULLABLE = 'NO'
+                 AND REPLACE(COLUMN_DEFAULT, '''', '') = 'Portal Yöneticisi') = 1
+            AND (SELECT COUNT(*) FROM information_schema.COLUMNS
+                   WHERE TABLE_SCHEMA = DATABASE()
+                     AND TABLE_NAME = 'user_account'
+                     AND COLUMN_NAME = 'role'
+                     AND DATA_TYPE = 'varchar'
+                     AND CHARACTER_MAXIMUM_LENGTH = 16
+                     AND CHARACTER_SET_NAME = 'ascii'
+                     AND COLLATION_NAME = 'ascii_bin'
+                     AND IS_NULLABLE = 'NO'
+                     AND REPLACE(COLUMN_DEFAULT, '''', '') = 'owner') = 1`;
+  }
+
+  if (analysis.type === "modify-user-account-columns") {
+    return `(SELECT COUNT(*) FROM information_schema.COLUMNS
+               WHERE TABLE_SCHEMA = DATABASE()
+                 AND TABLE_NAME = 'user_account'
+                 AND COLUMN_NAME = 'display_name'
+                 AND DATA_TYPE = 'varchar'
+                 AND CHARACTER_MAXIMUM_LENGTH = 191
+                 AND IS_NULLABLE = 'NO'
+                 AND COLUMN_DEFAULT IS NULL) = 1
+            AND (SELECT COUNT(*) FROM information_schema.COLUMNS
+                   WHERE TABLE_SCHEMA = DATABASE()
+                     AND TABLE_NAME = 'user_account'
+                     AND COLUMN_NAME = 'role'
+                     AND DATA_TYPE = 'varchar'
+                     AND CHARACTER_MAXIMUM_LENGTH = 16
+                     AND CHARACTER_SET_NAME = 'ascii'
+                     AND COLLATION_NAME = 'ascii_bin'
+                     AND IS_NULLABLE = 'NO'
+                     AND REPLACE(COLUMN_DEFAULT, '''', '') = 'member') = 1
+            AND (SELECT COUNT(*) FROM \`user_account\`
+                   WHERE BINARY \`role\` <> BINARY 'owner'
+                      OR CHAR_LENGTH(TRIM(\`display_name\`)) = 0) = 0`;
+  }
+
   if (analysis.type === "add-column") {
+    if (analysis.columnSpec !== undefined) {
+      return managedColumnVerificationPredicate(analysis);
+    }
     return `(SELECT COUNT(*) FROM information_schema.COLUMNS
                WHERE TABLE_SCHEMA = DATABASE()
                  AND TABLE_NAME = ${sqlString(analysis.tableName)}
@@ -671,6 +760,22 @@ function statementVerificationPredicate(analysis) {
 }
 
 function statementAbsentPredicate(analysis) {
+  if (analysis.type === "drop-check") {
+    return constraintPredicate(
+      analysis.tableName,
+      analysis.constraintName,
+      "CHECK",
+    );
+  }
+  if (
+    analysis.type === "add-user-account-columns" ||
+    analysis.type === "modify-user-account-columns"
+  ) {
+    return `(SELECT COUNT(*) FROM information_schema.COLUMNS
+               WHERE TABLE_SCHEMA = DATABASE()
+                 AND TABLE_NAME = 'user_account'
+                 AND COLUMN_NAME IN ('display_name', 'role')) = 0`;
+  }
   if (analysis.type === "create-table") {
     return `(SELECT COUNT(*) FROM information_schema.TABLES
                WHERE TABLE_SCHEMA = DATABASE()
@@ -716,6 +821,38 @@ function existingColumnPredicate(tableName, columnName) {
 }
 
 function statementPreflightPredicate(analysis) {
+  if (analysis.type === "drop-check") {
+    return [
+      existingTablePredicate(analysis.tableName),
+      constraintPredicate(analysis.tableName, analysis.constraintName, "CHECK"),
+    ].join(" AND ");
+  }
+  if (analysis.type === "add-user-account-columns") {
+    return [
+      existingTablePredicate(analysis.tableName),
+      statementAbsentPredicate(analysis),
+    ].join(" AND ");
+  }
+  if (analysis.type === "modify-user-account-columns") {
+    return `(SELECT COUNT(*) FROM information_schema.COLUMNS
+               WHERE TABLE_SCHEMA = DATABASE()
+                 AND TABLE_NAME = 'user_account'
+                 AND COLUMN_NAME = 'display_name'
+                 AND DATA_TYPE = 'varchar'
+                 AND CHARACTER_MAXIMUM_LENGTH = 191
+                 AND IS_NULLABLE = 'NO'
+                 AND REPLACE(COLUMN_DEFAULT, '''', '') = 'Portal Yöneticisi') = 1
+            AND (SELECT COUNT(*) FROM information_schema.COLUMNS
+                   WHERE TABLE_SCHEMA = DATABASE()
+                     AND TABLE_NAME = 'user_account'
+                     AND COLUMN_NAME = 'role'
+                     AND DATA_TYPE = 'varchar'
+                     AND CHARACTER_MAXIMUM_LENGTH = 16
+                     AND CHARACTER_SET_NAME = 'ascii'
+                     AND COLLATION_NAME = 'ascii_bin'
+                     AND IS_NULLABLE = 'NO'
+                     AND REPLACE(COLUMN_DEFAULT, '''', '') = 'owner') = 1`;
+  }
   if (analysis.type === "create-table") {
     return statementAbsentPredicate(analysis);
   }
@@ -766,12 +903,17 @@ function prerequisitePredicates(statements) {
       .map((item) => item.analysis.tableName),
   );
   const addedColumns = new Set(
-    statements
-      .filter((item) => item.analysis.type === "add-column")
-      .map(
-        (item) =>
-          `${item.analysis.tableName}:${item.analysis.columnName}`,
-      ),
+    statements.flatMap((item) => {
+      if (item.analysis.type === "add-column") {
+        return [`${item.analysis.tableName}:${item.analysis.columnName}`];
+      }
+      if (item.analysis.type === "add-user-account-columns") {
+        return item.analysis.columnNames.map(
+          (columnName) => `${item.analysis.tableName}:${columnName}`,
+        );
+      }
+      return [];
+    }),
   );
   const predicates = new Set();
 
@@ -810,7 +952,10 @@ function prerequisitePredicates(statements) {
     } else if (
       analysis.type === "check" ||
       analysis.type === "add-column" ||
-      analysis.type === "drop-index"
+      analysis.type === "drop-index" ||
+      analysis.type === "drop-check" ||
+      analysis.type === "add-user-account-columns" ||
+      analysis.type === "modify-user-account-columns"
     ) {
       requireTable(analysis.tableName);
     } else if (analysis.type === "data-backfill") {
@@ -939,7 +1084,37 @@ function buildSql({
   statements,
   targetDatabaseSha256,
 }) {
+  const recreatedChecks = new Set(
+    statements
+      .filter((item) => item.analysis.type === "drop-check")
+      .map(
+        (item) =>
+          `${item.analysis.tableName}:${item.analysis.constraintName}`,
+      ),
+  );
+  const recreatedIndexes = new Set(
+    statements
+      .filter((item) => item.analysis.type === "drop-index")
+      .map(
+        (item) => `${item.analysis.tableName}:${item.analysis.indexName}`,
+      ),
+  );
   const absentPredicate = statements
+    .filter(
+      (item) => {
+        if (item.analysis.type === "check") {
+          return !recreatedChecks.has(
+            `${item.analysis.tableName}:${item.analysis.constraintName}`,
+          );
+        }
+        if (item.analysis.type === "create-index") {
+          return !recreatedIndexes.has(
+            `${item.analysis.tableName}:${item.analysis.indexName}`,
+          );
+        }
+        return true;
+      },
+    )
     .map((item) => statementAbsentPredicate(item.analysis))
     .join(" AND ");
   const prerequisites = prerequisitePredicates(statements);
@@ -1048,9 +1223,20 @@ function buildSql({
     `SHA2(DATABASE(), 256) = ${sqlString(targetDatabaseSha256)}`,
     `SHA2(VERSION(), 256) = ${sqlString(serverVersionSha256)}`,
     `(${mysqlSessionPolicyPredicate()})`,
-    ...statements.map((item) =>
-      `(${statementVerificationPredicate(item.analysis)})`,
-    ),
+    ...statements
+      .filter(
+        (item) => {
+          if (item.analysis.type === "drop-check") return false;
+          if (item.analysis.type === "add-user-account-columns") return false;
+          if (item.analysis.type === "drop-index") {
+            return !recreatedIndexes.has(
+              `${item.analysis.tableName}:${item.analysis.indexName}`,
+            );
+          }
+          return true;
+        },
+      )
+      .map((item) => `(${statementVerificationPredicate(item.analysis)})`),
     `(${exactJournalPostflightPredicate(prefix, migration)})`,
   ].join(" AND ");
   const successQuery = `SELECT 'PORTAL_PUSULA_INCREMENTAL_MIGRATION_OK' AS portal_pusula_incremental_result, ${sqlString(migration.tag)} AS migration_tag`;
@@ -1166,6 +1352,9 @@ export async function buildPhpMyAdminIncrementalMigrationBundle({
           ? item.analysis.indexName
           : item.analysis.type === "add-column"
             ? item.analysis.columnName
+            : item.analysis.type === "add-user-account-columns" ||
+                item.analysis.type === "modify-user-account-columns"
+              ? item.analysis.columnNames.join(",")
             : item.analysis.type === "data-backfill"
               ? item.analysis.name
               : item.analysis.constraintName,

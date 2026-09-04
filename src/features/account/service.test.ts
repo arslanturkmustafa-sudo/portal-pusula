@@ -50,10 +50,12 @@ import {
 const account = {
   createdAtUtc: "2026-09-01 09:00:00.000000",
   credentialVersion: 1,
+  displayName: "Portal Yöneticisi",
   email: "yonetici@example.com",
   id: "11111111-1111-4111-8111-111111111111",
   passwordChangedAtUtc: "2026-09-01 09:00:00.000000",
   passwordHash: "stored-password-hash-sentinel",
+  role: "owner" as const,
   status: "active" as const,
   updatedAtUtc: "2026-09-01 09:00:00.000000",
 };

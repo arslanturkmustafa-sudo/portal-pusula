@@ -27,6 +27,7 @@ const monthlyVisitCommitmentTable = "monthly_visit_commitment";
 const receivableTable = "receivable";
 const receivableCollectionTable = "receivable_collection";
 const userAccountTable = "user_account";
+const userPermissionTable = "user_permission";
 const workTaskTable = "work_task";
 const projectTable = "project";
 const workTaskProjectTable = "work_task_project";
@@ -38,6 +39,7 @@ const partnershipCommissionTable = "partnership_commission";
 const partnershipContributionTable = "partnership_contribution";
 const partnershipContributionReceiptTable =
   "partnership_contribution_receipt";
+const loginAttemptThrottleTable = "login_attempt_throttle";
 const platformTables = [
   "audit_event",
   "job_run",
@@ -53,6 +55,7 @@ const allMigratedPlatformTables = [
   receivableTable,
   receivableCollectionTable,
   userAccountTable,
+  userPermissionTable,
   workTaskTable,
   projectTable,
   workTaskProjectTable,
@@ -63,6 +66,7 @@ const allMigratedPlatformTables = [
   partnershipCommissionTable,
   partnershipContributionTable,
   partnershipContributionReceiptTable,
+  loginAttemptThrottleTable,
 ] as const;
 const repositoryRoot = process.cwd();
 const migrationLockWaitTimeoutMs = 5_000;
@@ -334,6 +338,7 @@ async function waitForBlockedMigrationRunners(
 async function resetKnownMigrationArtifacts(pool: Pool): Promise<void> {
   // These identifiers are compile-time constants and this suite is enabled only
   // for the disposable MariaDB provisioned by scripts/test-mariadb.mjs.
+  await pool.query(`DROP TABLE IF EXISTS \`${loginAttemptThrottleTable}\``);
   await pool.query(
     `DROP TABLE IF EXISTS \`${partnershipContributionReceiptTable}\``,
   );
@@ -344,7 +349,6 @@ async function resetKnownMigrationArtifacts(pool: Pool): Promise<void> {
   await pool.query(`DROP TABLE IF EXISTS \`${creditCardTable}\``);
   await pool.query(`DROP TABLE IF EXISTS \`${workTaskProjectTable}\``);
   await pool.query(`DROP TABLE IF EXISTS \`${workTaskTable}\``);
-  await pool.query(`DROP TABLE IF EXISTS \`${userAccountTable}\``);
   await pool.query("DROP TABLE IF EXISTS `receivable_collection`");
   await pool.query("DROP TABLE IF EXISTS `receivable`");
   await pool.query("DROP TABLE IF EXISTS `monthly_visit_commitment`");
@@ -352,6 +356,8 @@ async function resetKnownMigrationArtifacts(pool: Pool): Promise<void> {
   await pool.query(`DROP TABLE IF EXISTS \`${customerProjectTable}\``);
   await pool.query(`DROP TABLE IF EXISTS \`${projectTable}\``);
   await pool.query("DROP TABLE IF EXISTS `customer`");
+  await pool.query(`DROP TABLE IF EXISTS \`${userPermissionTable}\``);
+  await pool.query(`DROP TABLE IF EXISTS \`${userAccountTable}\``);
   await pool.query("DROP TABLE IF EXISTS `cron_dispatch_gate`");
   await pool.query("DROP TABLE IF EXISTS `job_run`");
   await pool.query("DROP TABLE IF EXISTS `scheduled_job`");
@@ -564,16 +570,16 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
 
     it("creates the complete schema and preserves the core platform metadata contracts", async () => {
       const [tableRows] = await pool.query<RowDataPacket[]>("SHOW TABLES");
-      expect(tableRows).toHaveLength(23);
+      expect(tableRows).toHaveLength(25);
 
       const [statusRows] = await pool.execute<PlatformTableStatusRow[]>(
         `SELECT TABLE_NAME, ENGINE, TABLE_COLLATION
          FROM information_schema.TABLES
          WHERE TABLE_SCHEMA = DATABASE()
-           AND TABLE_NAME IN ('audit_event', 'job_run', 'outbox_event', 'scheduled_job')
+           AND TABLE_NAME IN ('audit_event', 'job_run', 'login_attempt_throttle', 'outbox_event', 'scheduled_job')
          ORDER BY TABLE_NAME`,
       );
-      expect(statusRows).toHaveLength(platformTables.length);
+      expect(statusRows).toHaveLength(platformTables.length + 1);
       for (const row of statusRows) {
         expect(row.ENGINE, row.TABLE_NAME).toBe("InnoDB");
         expect(row.TABLE_COLLATION, row.TABLE_NAME).toBe(
@@ -585,7 +591,7 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
         `SELECT TABLE_NAME, COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLLATION_NAME
          FROM information_schema.COLUMNS
          WHERE TABLE_SCHEMA = DATABASE()
-           AND TABLE_NAME IN ('audit_event', 'job_run', 'outbox_event', 'scheduled_job')
+           AND TABLE_NAME IN ('audit_event', 'job_run', 'login_attempt_throttle', 'outbox_event', 'scheduled_job')
          ORDER BY TABLE_NAME, ORDINAL_POSITION`,
       );
       const columnNamesByTable = Object.groupBy(
@@ -679,6 +685,8 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
         "job_run.outcome",
         "job_run.correlation_id",
         "job_run.error_code",
+        "login_attempt_throttle.bucket_key",
+        "login_attempt_throttle.bucket_type",
         "outbox_event.id",
         "outbox_event.event_type",
         "outbox_event.idempotency_key",
@@ -704,7 +712,7 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
       const utcDateTimeColumns = columnRows.filter((row) =>
         row.COLUMN_NAME.endsWith("_at_utc"),
       );
-      expect(utcDateTimeColumns).toHaveLength(13);
+      expect(utcDateTimeColumns).toHaveLength(15);
       for (const column of utcDateTimeColumns) {
         expect(
           column.COLUMN_TYPE,
@@ -937,7 +945,7 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
       ]);
     });
 
-    it("records the immutable 0000 through 0011 migration hash chain", async () => {
+    it("records the immutable 0000 through 0015 migration hash chain", async () => {
       const [rows] = await pool.query<MigrationRow[]>(
         `SELECT id, hash, created_at FROM \`${migrationTable}\` ORDER BY id`,
       );
@@ -1002,7 +1010,168 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
           hash: "b3abd1340be3a5f4c96c1a63348d44c134bdc907fc5a24e1b978093ad6708c81",
           id: 12,
         },
+        {
+          created_at: 1788457473182,
+          hash: "31e4ab2e12ae6596a042c912c32ea3e90e96f8160e670530ae00adca3d0c7872",
+          id: 13,
+        },
+        {
+          created_at: 1788504772177,
+          hash: "587449c0221adfc447216d95c3ee453d32a19457a93ae3f71e0d7f91b73f3d67",
+          id: 14,
+        },
+        {
+          created_at: 1788512254928,
+          hash: "616db5f1f8c62efce707f98febdf5a2d325f8fa8791811429aa20b374f96aba4",
+          id: 15,
+        },
+        {
+          created_at: 1788512602613,
+          hash: "cce0b24f60ec8a30ec99b985aa079c2de2e1d5dbcd60b1c1507f0794f3ec71be",
+          id: 16,
+        },
       ]);
+    });
+
+    it("enforces lifecycle and immutable financial reversal invariants", async () => {
+      const connection = await pool.getConnection();
+      const customerId = "91000000-0000-4000-8000-000000000001";
+      const receivableId = "92000000-0000-4000-8000-000000000002";
+      const collectionId = "93000000-0000-4000-8000-000000000003";
+      const collectionReversalId = "94000000-0000-4000-8000-000000000004";
+      const projectId = "95000000-0000-4000-8000-000000000005";
+      const contributionId = "96000000-0000-4000-8000-000000000006";
+      const receiptId = "97000000-0000-4000-8000-000000000007";
+      const receiptReversalId = "98000000-0000-4000-8000-000000000008";
+
+      try {
+        await connection.beginTransaction();
+        await expectDatabaseWriteRejected(
+          connection.execute(
+            `INSERT INTO customer
+               (id, display_name, short_code, status, archive_reason)
+             VALUES (?, 'Eksik arşiv şekli', 'BAD_ARCHIVE', 'inactive',
+                     'Zaman ve aktör yok')`,
+            [customerId],
+          ),
+        );
+        await connection.execute(
+          `INSERT INTO customer (id, display_name, short_code)
+           VALUES (?, 'Yaşam döngüsü testi', 'LIFECYCLE_TEST')`,
+          [customerId],
+        );
+        await connection.execute(
+          `INSERT INTO receivable
+             (id, client_operation_key, customer_id, source_type, due_on,
+              description, net_amount, vat_amount, total_amount)
+           VALUES (?, 'a1000000-0000-4000-8000-000000000001', ?,
+                   'opening_balance', '2026-09-10', 'Açılış alacağı',
+                   100.0000, 20.0000, 120.0000)`,
+          [receivableId, customerId],
+        );
+        await connection.execute(
+          `INSERT INTO receivable_collection
+             (id, client_operation_key, receivable_id, amount, collected_on)
+           VALUES (?, 'a2000000-0000-4000-8000-000000000002', ?,
+                   50.0000, '2026-09-04')`,
+          [collectionId, receivableId],
+        );
+        await expectDatabaseWriteRejected(
+          connection.execute(
+            `INSERT INTO receivable_collection
+               (id, client_operation_key, receivable_id, amount, collected_on,
+                entry_type, reversal_of_id)
+             VALUES ('a3000000-0000-4000-8000-000000000003',
+                     'a4000000-0000-4000-8000-000000000004', ?, 50.0000,
+                     '2026-09-05', 'reversal', ?)`,
+            [receivableId, collectionId],
+          ),
+        );
+        await connection.execute(
+          `INSERT INTO receivable_collection
+             (id, client_operation_key, receivable_id, amount, collected_on,
+              entry_type, reversal_of_id, reversal_reason)
+           VALUES (?, 'a5000000-0000-4000-8000-000000000005', ?, 50.0000,
+                   '2026-09-05', 'reversal', ?, 'Mükerrer tahsilat')`,
+          [collectionReversalId, receivableId, collectionId],
+        );
+        await expectDuplicateRejected(
+          connection.execute(
+            `INSERT INTO receivable_collection
+               (id, client_operation_key, receivable_id, amount, collected_on,
+                entry_type, reversal_of_id, reversal_reason)
+             VALUES ('a6000000-0000-4000-8000-000000000006',
+                     'a7000000-0000-4000-8000-000000000007', ?, 50.0000,
+                     '2026-09-05', 'reversal', ?, 'İkinci ters kayıt')`,
+            [receivableId, collectionId],
+          ),
+        );
+        await expectDatabaseWriteRejected(
+          connection.execute(
+            "DELETE FROM receivable_collection WHERE id = ?",
+            [collectionId],
+          ),
+        );
+        await connection.execute(
+          `UPDATE receivable
+              SET record_state = 'voided', void_reason = 'Hatalı alacak',
+                  voided_at_utc = UTC_TIMESTAMP(6),
+                  updated_at_utc = UTC_TIMESTAMP(6), version = version + 1
+            WHERE id = ?`,
+          [receivableId],
+        );
+        await expectDatabaseWriteRejected(
+          connection.execute(
+            "UPDATE receivable SET record_state = 'active' WHERE id = ?",
+            [receivableId],
+          ),
+        );
+
+        await connection.execute(
+          `INSERT INTO project
+             (id, display_name, short_code, project_type, status)
+           VALUES (?, 'Ortaklık ters kayıt testi', 'REVERSAL_TEST',
+                   'partnership', 'active')`,
+          [projectId],
+        );
+        await connection.execute(
+          `INSERT INTO partnership_contribution
+             (id, client_operation_key, project_id, contribution_month,
+              description, expected_amount, due_on)
+           VALUES (?, 'b1000000-0000-4000-8000-000000000001', ?,
+                   '2026-09-01', 'Aylık katkı', 1000.0000, '2026-09-10')`,
+          [contributionId, projectId],
+        );
+        await connection.execute(
+          `INSERT INTO partnership_contribution_receipt
+             (id, client_operation_key, contribution_id, amount, received_on)
+           VALUES (?, 'b2000000-0000-4000-8000-000000000002', ?,
+                   250.0000, '2026-09-04')`,
+          [receiptId, contributionId],
+        );
+        await connection.execute(
+          `INSERT INTO partnership_contribution_receipt
+             (id, client_operation_key, contribution_id, amount, received_on,
+              entry_type, reversal_of_id, reversal_reason)
+           VALUES (?, 'b3000000-0000-4000-8000-000000000003', ?,
+                   250.0000, '2026-09-05', 'reversal', ?, 'Yanlış tahsilat')`,
+          [receiptReversalId, contributionId, receiptId],
+        );
+        await expectDuplicateRejected(
+          connection.execute(
+            `INSERT INTO partnership_contribution_receipt
+               (id, client_operation_key, contribution_id, amount, received_on,
+                entry_type, reversal_of_id, reversal_reason)
+             VALUES ('b4000000-0000-4000-8000-000000000004',
+                     'b5000000-0000-4000-8000-000000000005', ?, 250.0000,
+                     '2026-09-05', 'reversal', ?, 'İkinci ters kayıt')`,
+            [contributionId, receiptId],
+          ),
+        );
+      } finally {
+        await connection.rollback();
+        connection.release();
+      }
     });
 
     it("enforces expense and materialized card-plan storage invariants", async () => {
@@ -1405,7 +1574,7 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
       const [before] = await pool.query<MigrationRow[]>(
         `SELECT id, hash, created_at FROM \`${migrationTable}\` ORDER BY id`,
       );
-      expect(before).toHaveLength(12);
+      expect(before).toHaveLength(16);
 
       await runMigration();
 
@@ -1419,7 +1588,7 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
       const [migrationRows] = await pool.query<MigrationRow[]>(
         `SELECT id, hash, created_at FROM \`${migrationTable}\` ORDER BY id`,
       );
-      expect(migrationRows).toHaveLength(12);
+      expect(migrationRows).toHaveLength(16);
       const migration = migrationRows[3];
       if (migration === undefined) {
         throw new Error("Expected the fourth applied migration journal row.");
@@ -1538,7 +1707,7 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
           const [journalRows] = await lockConnection.query<MigrationRow[]>(
             `SELECT id, hash, created_at FROM \`${migrationTable}\` ORDER BY id`,
           );
-          expect(journalRows).toHaveLength(12);
+          expect(journalRows).toHaveLength(16);
           expect(await tableExists(lockConnection, verificationTable)).toBe(
             true,
           );

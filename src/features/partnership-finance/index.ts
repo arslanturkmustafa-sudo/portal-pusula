@@ -16,6 +16,8 @@ export {
   PartnershipContributionMonthConflictError,
   PartnershipContributionClosedError,
   PartnershipContributionOverpaymentError,
+  PartnershipReceiptAlreadyReversedError,
+  PartnershipReceiptNotReversibleError,
   PartnershipIdempotencyConflictError,
   PartnershipFutureActualDateError,
   PartnershipProjectNotFoundError,
@@ -24,6 +26,7 @@ export {
   PartnershipRecordNotFoundError,
   PartnershipStatusTransitionError,
   PartnershipVersionConflictError,
+  reversePartnershipContributionReceipt,
   updatePartnershipCommission,
   updatePartnershipContribution,
 } from "./service";
@@ -36,6 +39,7 @@ export {
   createContributionInputSchema,
   createContributionReceiptInputSchema,
   partnershipListFilterSchema,
+  reverseContributionReceiptInputSchema,
   updateCommissionInputSchema,
   updateContributionInputSchema,
 } from "./validation";

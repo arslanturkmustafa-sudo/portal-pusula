@@ -23,6 +23,7 @@ import {
   updateCustomerProjectLinkStatus,
   updateCustomerRecord,
 } from "@/features/customers/repository";
+import { LifecycleArchivedRecordError } from "@/features/lifecycle";
 import {
   findProjectForUpdate,
   type Project,
@@ -74,7 +75,15 @@ export class CustomerProjectInUseError extends Error {
   }
 }
 
+export class CustomerVersionConflictError extends Error {
+  constructor() {
+    super("Customer was changed by another request.");
+    this.name = "CustomerVersionConflictError";
+  }
+}
+
 export type CustomerWriteContext = Readonly<{
+  actorId?: string;
   correlationId: string;
   now?: Date;
 }>;
@@ -90,18 +99,21 @@ function isDuplicateEntry(error: unknown): boolean {
 
 function auditSummary(customer: Customer) {
   return {
+    archivedAtUtc: customer.archivedAtUtc,
     displayName: customer.displayName,
     projectIds: customer.projects.map((project) => project.id),
     shortCode: customer.shortCode,
     status: customer.status,
+    version: customer.version,
   };
 }
 
 function canAcceptNewCustomer(project: Project): boolean {
   return (
-    project.status === "active" ||
-    project.status === "planned" ||
-    project.status === "on_hold"
+    project.archivedAtUtc === null &&
+    (project.status === "active" ||
+      project.status === "planned" ||
+      project.status === "on_hold")
   );
 }
 
@@ -216,8 +228,17 @@ async function replaceCustomerProjectLinks(
   }
 }
 
-export async function listCustomers(pool: Pool): Promise<readonly Customer[]> {
-  return withUtcTransaction(pool, listCustomerRecords);
+export async function listCustomers(
+  pool: Pool,
+  options: Readonly<{
+    includeBilling?: boolean;
+    includeContact?: boolean;
+    includeVisits?: boolean;
+  }> = {},
+): Promise<readonly Customer[]> {
+  return withUtcTransaction(pool, (connection) =>
+    listCustomerRecords(connection, options),
+  );
 }
 
 export async function createCustomer(
@@ -226,19 +247,25 @@ export async function createCustomer(
   context: CustomerWriteContext,
 ): Promise<Customer> {
   const input = createCustomerInputSchema.parse(rawInput);
+  if (context.actorId !== undefined) assertCanonicalUuid(context.actorId);
   const now = toUtcDateTime6(context.now ?? new Date());
   const { projectIds, ...customerInput } = input;
   const customer: Customer = {
+    archiveReason: null,
+    archivedAtUtc: null,
+    archivedByUserAccountId: null,
     contactNote: customerInput.contactNote,
     createdAtUtc: now,
     displayName: customerInput.displayName,
     email: customerInput.email,
     id: randomUUID(),
+    overview: { nextVisitOn: null },
     phone: customerInput.phone,
     projects: [],
     shortCode: customerInput.shortCode,
     status: customerInput.status,
     updatedAtUtc: now,
+    version: 1,
   };
 
   try {
@@ -261,6 +288,7 @@ export async function createCustomer(
       );
       await appendAuditEvent(connection, {
         action: "customer.created",
+        actorId: context.actorId,
         actorType: "user",
         afterSummary: auditSummary(persisted),
         correlationId: context.correlationId,
@@ -283,6 +311,7 @@ export async function updateCustomer(
   context: CustomerWriteContext,
 ): Promise<Customer> {
   assertCanonicalUuid(id);
+  if (context.actorId !== undefined) assertCanonicalUuid(context.actorId);
   const input = updateCustomerInputSchema.parse(rawInput);
   const now = toUtcDateTime6(context.now ?? new Date());
 
@@ -290,8 +319,14 @@ export async function updateCustomer(
     return await withUtcTransaction(pool, async (connection) => {
       const before = await findCustomerForUpdate(connection, id);
       if (!before) throw new CustomerNotFoundError();
+      if (before.archivedAtUtc !== null) {
+        throw new LifecycleArchivedRecordError();
+      }
+      if (before.version !== input.version) {
+        throw new CustomerVersionConflictError();
+      }
 
-      const { projectIds, ...customerChanges } = input;
+      const { projectIds, version: expectedVersion, ...customerChanges } = input;
       let projects = before.projects;
       if (projectIds !== undefined) {
         const selectedProjects = await requireProjectsForBinding(
@@ -307,13 +342,17 @@ export async function updateCustomer(
         ...customerChanges,
         projects,
         updatedAtUtc: now,
+        version: before.version + 1,
       };
-      await updateCustomerRecord(connection, after);
+      if (!(await updateCustomerRecord(connection, after, expectedVersion))) {
+        throw new CustomerVersionConflictError();
+      }
       if (projectIds !== undefined) {
         await replaceCustomerProjectLinks(connection, id, projectIds, now);
       }
       await appendAuditEvent(connection, {
         action: "customer.updated",
+        actorId: context.actorId,
         actorType: "user",
         afterSummary: auditSummary(after),
         beforeSummary: auditSummary(before),

@@ -189,6 +189,50 @@ describe("PartnershipWorkspace", () => {
     expect(screen.getByText(/16 Eyl 2026 · ₺3\.000,00/u)).toBeInTheDocument();
   });
 
+  it("hides receipt reversal when the exact partnership capability is absent", async () => {
+    const contribution = {
+      contributionMonth: "2026-09",
+      description: "Ofis kirası ortak katkısı",
+      dueOn: "2026-09-15",
+      expectedAmount: "7000.0000",
+      id: "contribution-1",
+      note: null,
+      projectId: partnershipProject.id,
+      projectName: partnershipProject.displayName,
+      projectShortCode: partnershipProject.shortCode,
+      receivedAmount: "2000.0000",
+      receivedOn: "2026-09-10",
+      receipts: [{
+        amount: "2000.0000",
+        contributionId: "contribution-1",
+        entryType: "receipt",
+        id: "receipt-1",
+        note: null,
+        receivedOn: "2026-09-10",
+        reversalOfId: null,
+      }],
+      status: "partial",
+      version: 2,
+    };
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>(async (input) => {
+      const url = String(input);
+      if (url === "/api/projects") return response({ projects: [partnershipProject] });
+      if (url.endsWith("/commissions")) return response({ commissions: [] });
+      if (url.endsWith("/contributions")) return response({ contributions: [contribution] });
+      throw new Error(`Unexpected request: ${url}`);
+    }));
+
+    render(
+      <PartnershipWorkspace
+        capabilities={{ canReadAudit: false, canReversePartnership: false }}
+      />,
+    );
+
+    expect(await screen.findByText(/10 Eyl 2026 · ₺2\.000,00/u)).toBeInTheDocument();
+    expect(screen.queryByText("Tahsilatı ters kaydet")).not.toBeInTheDocument();
+    expect(screen.queryByText("İşlemler")).not.toBeInTheDocument();
+  });
+
   it("does not offer an invalid backwards transition for a paid commission", async () => {
     const paidCommission = {
       agencyCollectedOn: "2026-09-10",

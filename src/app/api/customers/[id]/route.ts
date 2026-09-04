@@ -8,10 +8,13 @@ import {
   CustomerProjectUnavailableError,
   CustomerProjectVersionConflictError,
   CustomerShortCodeConflictError,
+  CustomerVersionConflictError,
   updateCustomer,
   updateCustomerInputSchema,
 } from "@/features/customers";
-import { isAdminAuthenticated } from "@/platform/auth/server-auth";
+import { LifecycleArchivedRecordError } from "@/features/lifecycle";
+import { hasPermission } from "@/platform/auth/permissions";
+import { authenticatePrincipalRequest } from "@/platform/auth/server-auth";
 import { getDatabaseProbeEnvironment } from "@/platform/config/readiness-env";
 import { getPlatformDatabasePool } from "@/platform/database/mysql-platform";
 import { correlationIdFromHeaders } from "@/platform/http/correlation-id";
@@ -42,8 +45,13 @@ export async function PATCH(
   request: NextRequest,
   context: CustomerRouteContext,
 ): Promise<NextResponse> {
-  if (!(await isAdminAuthenticated(request))) {
-    return json({ status: "unauthorized" }, 401);
+  const principal = await authenticatePrincipalRequest(request);
+  if (!principal) return json({ status: "unauthorized" }, 401);
+  if (
+    !hasPermission(principal, "customers.write") ||
+    !hasPermission(principal, "customers.contact.read")
+  ) {
+    return json({ status: "forbidden" }, 403);
   }
 
   if (!isSameOriginWriteRequest(request)) return json({ status: "forbidden" }, 403);
@@ -60,7 +68,10 @@ export async function PATCH(
       getPlatformDatabasePool(getDatabaseProbeEnvironment()),
       id,
       input,
-      { correlationId: correlationIdFromHeaders(request.headers) },
+      {
+        actorId: principal.kind === "account" ? principal.accountId : undefined,
+        correlationId: correlationIdFromHeaders(request.headers),
+      },
     );
     return json({ customer });
   } catch (error) {
@@ -88,6 +99,12 @@ export async function PATCH(
     }
     if (error instanceof CustomerProjectVersionConflictError) {
       return json({ status: "project_link_version_conflict" }, 409);
+    }
+    if (error instanceof CustomerVersionConflictError) {
+      return json({ status: "version_conflict" }, 409);
+    }
+    if (error instanceof LifecycleArchivedRecordError) {
+      return json({ status: "record_archived" }, 409);
     }
     return json({ status: "service_unavailable" }, 503);
   }

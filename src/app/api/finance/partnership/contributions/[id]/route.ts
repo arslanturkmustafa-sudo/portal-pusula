@@ -32,7 +32,7 @@ export const runtime = "nodejs";
 type Context = Readonly<{ params: Promise<{ id: string }> }>;
 
 export async function PATCH(request: NextRequest, context: Context): Promise<NextResponse> {
-  const principal = await authenticateAdminRequest(request);
+  const principal = await authenticateAdminRequest(request, "finance.partnership.write");
   if (!principal) return spendingJson({ status: "unauthorized" }, 401);
   if (!isSameOrigin(request)) return spendingJson({ status: "forbidden" }, 403);
   if (!isJsonRequest(request)) return spendingJson({ status: "unsupported_media_type" }, 415);

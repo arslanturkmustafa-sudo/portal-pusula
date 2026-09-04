@@ -33,6 +33,7 @@ const taskStatusSchema = z.enum([
   "in_progress",
   "blocked",
   "done",
+  "cancelled",
 ]);
 const taskPrioritySchema = z.enum(["low", "normal", "high", "urgent"]);
 const optionalUuidSchema = z.preprocess(

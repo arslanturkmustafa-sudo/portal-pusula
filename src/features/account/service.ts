@@ -9,13 +9,24 @@ import {
   passwordChangeInputSchema,
 } from "@/features/account/validation";
 import {
+  type CreateManagedUserInput,
+  createManagedUserInputSchema,
+  type UpdateManagedUserInput,
+  updateManagedUserInputSchema,
+} from "@/features/account/user-management-validation";
+import {
   countUserAccounts,
   findUserAccountByEmail,
   findUserAccountById,
   findUserAccountForUpdate,
   insertUserAccount,
+  listUserPermissionCodes,
+  listAllUserPermissions,
+  listUserAccounts,
+  replaceUserPermissions,
   type UserAccount,
   updateUserAccountPassword,
+  updateUserAccountStatus,
 } from "@/features/account/repository";
 import { appendAuditEvent } from "@/platform/audit/repository";
 import {
@@ -23,6 +34,7 @@ import {
   verifyAdminCredentials,
   verifyPassword,
 } from "@/platform/auth/password";
+import type { PermissionCode } from "@/platform/auth/permissions";
 import type { AuthEnvironment } from "@/platform/config/auth-env.schema";
 import { withUtcTransaction } from "@/platform/jobs/mysql-transaction";
 import { toUtcDateTime6 } from "@/platform/jobs/time";
@@ -49,15 +61,62 @@ export class AccountSessionInvalidError extends Error {
   }
 }
 
+export class ManagedUserEmailConflictError extends Error {
+  constructor() {
+    super("The user email is already in use.");
+    this.name = "ManagedUserEmailConflictError";
+  }
+}
+
+export class ManagedUserNotFoundError extends Error {
+  constructor() {
+    super("The managed user was not found.");
+    this.name = "ManagedUserNotFoundError";
+  }
+}
+
+export class ManagedUserOwnerProtectedError extends Error {
+  constructor() {
+    super("Owner access cannot be changed through member management.");
+    this.name = "ManagedUserOwnerProtectedError";
+  }
+}
+
+export class ManagedUserVersionConflictError extends Error {
+  constructor() {
+    super("The managed user changed in another request.");
+    this.name = "ManagedUserVersionConflictError";
+  }
+}
+
 export type AccountWriteContext = Readonly<{
   correlationId: string;
   now?: Date;
 }>;
 
 export type AccountSummary = Readonly<{
+  displayName: string;
   email: string;
   passwordChangedAtUtc: string | null;
   requiresCurrentPassword: boolean;
+  role: UserAccount["role"];
+}>;
+
+export type ValidatedAccountSession = Readonly<{
+  account: UserAccount;
+  permissions: readonly PermissionCode[];
+}>;
+
+export type ManagedUser = Readonly<{
+  createdAtUtc: string;
+  credentialVersion: number;
+  displayName: string;
+  email: string;
+  id: string;
+  permissions: readonly PermissionCode[];
+  role: UserAccount["role"];
+  status: UserAccount["status"];
+  updatedAtUtc: string;
 }>;
 
 function isDuplicateEntry(error: unknown): boolean {
@@ -82,6 +141,138 @@ function safeAuditSummary(account: UserAccount) {
   };
 }
 
+function managedUser(
+  account: UserAccount,
+  permissions: readonly PermissionCode[],
+): ManagedUser {
+  return {
+    createdAtUtc: account.createdAtUtc,
+    credentialVersion: account.credentialVersion,
+    displayName: account.displayName,
+    email: account.email,
+    id: account.id,
+    permissions,
+    role: account.role,
+    status: account.status,
+    updatedAtUtc: account.updatedAtUtc,
+  };
+}
+
+export async function listManagedUsers(pool: Pool): Promise<readonly ManagedUser[]> {
+  return withUtcTransaction(pool, async (connection) => {
+    const [accounts, permissions] = await Promise.all([
+      listUserAccounts(connection),
+      listAllUserPermissions(connection),
+    ]);
+    return accounts.map((account) =>
+      managedUser(account, permissions.get(account.id) ?? []),
+    );
+  });
+}
+
+export async function createManagedUser(
+  pool: Pool,
+  rawInput: CreateManagedUserInput,
+  context: AccountWriteContext & Readonly<{ actorId: string }>,
+): Promise<ManagedUser> {
+  const input = createManagedUserInputSchema.parse(rawInput);
+  const now = toUtcDateTime6(context.now ?? new Date());
+  const account: UserAccount = {
+    createdAtUtc: now,
+    credentialVersion: 1,
+    displayName: input.displayName,
+    email: input.email,
+    id: randomUUID(),
+    passwordChangedAtUtc: now,
+    passwordHash: await hashPassword(input.password),
+    role: "member",
+    status: "active",
+    updatedAtUtc: now,
+  };
+
+  try {
+    return await withUtcTransaction(pool, async (connection) => {
+      await insertUserAccount(connection, account);
+      await replaceUserPermissions(connection, account.id, input.permissions, now);
+      await appendAuditEvent(connection, {
+        action: "account.member_created",
+        actorId: context.actorId,
+        actorType: "user",
+        afterSummary: {
+          ...safeAuditSummary(account),
+          displayName: account.displayName,
+          permissions: input.permissions,
+          role: account.role,
+        },
+        correlationId: context.correlationId,
+        entityId: account.id,
+        entityType: "user_account",
+        occurredAtUtc: now,
+      });
+      return managedUser(account, input.permissions);
+    });
+  } catch (error) {
+    if (isDuplicateEntry(error)) throw new ManagedUserEmailConflictError();
+    throw error;
+  }
+}
+
+export async function updateManagedUser(
+  pool: Pool,
+  userAccountId: string,
+  rawInput: UpdateManagedUserInput,
+  context: AccountWriteContext & Readonly<{ actorId: string }>,
+): Promise<ManagedUser> {
+  assertCanonicalUuid(userAccountId);
+  const input = updateManagedUserInputSchema.parse(rawInput);
+  const now = toUtcDateTime6(context.now ?? new Date());
+
+  return withUtcTransaction(pool, async (connection) => {
+    const before = await findUserAccountForUpdate(connection, userAccountId);
+    if (!before) throw new ManagedUserNotFoundError();
+    if (before.role === "owner" || before.id === context.actorId) {
+      throw new ManagedUserOwnerProtectedError();
+    }
+    const after: UserAccount = {
+      ...before,
+      credentialVersion: before.credentialVersion + 1,
+      status: input.status,
+      updatedAtUtc: now,
+    };
+    if (
+      !(await updateUserAccountStatus(connection, {
+        credentialVersion: after.credentialVersion,
+        expectedCredentialVersion: before.credentialVersion,
+        id: after.id,
+        status: after.status,
+        updatedAtUtc: now,
+      }))
+    ) {
+      throw new ManagedUserVersionConflictError();
+    }
+    await replaceUserPermissions(connection, after.id, input.permissions, now);
+    await appendAuditEvent(connection, {
+      action: "account.member_access_updated",
+      actorId: context.actorId,
+      actorType: "user",
+      afterSummary: {
+        credentialVersion: after.credentialVersion,
+        permissions: input.permissions,
+        status: after.status,
+      },
+      beforeSummary: {
+        credentialVersion: before.credentialVersion,
+        status: before.status,
+      },
+      correlationId: context.correlationId,
+      entityId: after.id,
+      entityType: "user_account",
+      occurredAtUtc: now,
+    });
+    return managedUser(after, input.permissions);
+  });
+}
+
 async function accountSnapshot(
   pool: Pool,
   email: string,
@@ -101,10 +292,12 @@ async function createBootstrapAccount(
   const account: UserAccount = {
     createdAtUtc: now,
     credentialVersion: 1,
+    displayName: "Portal Yöneticisi",
     email: environment.ADMIN_EMAIL,
     id: randomUUID(),
     passwordChangedAtUtc: now,
     passwordHash: environment.ADMIN_PASSWORD_HASH,
+    role: "owner",
     status: "active",
     updatedAtUtc: now,
   };
@@ -187,6 +380,30 @@ export async function validateAccountSession(
     : null;
 }
 
+export async function validateAccountPrincipalSession(
+  pool: Pool,
+  accountId: string,
+  credentialVersion: number,
+): Promise<ValidatedAccountSession | null> {
+  assertCanonicalUuid(accountId);
+  if (!Number.isSafeInteger(credentialVersion) || credentialVersion < 1) {
+    return null;
+  }
+  return withUtcTransaction(pool, async (connection) => {
+    const account = await findUserAccountById(connection, accountId);
+    if (
+      account?.status !== "active" ||
+      account.credentialVersion !== credentialVersion
+    ) {
+      return null;
+    }
+    return {
+      account,
+      permissions: await listUserPermissionCodes(connection, account.id),
+    };
+  });
+}
+
 export async function canUseLegacySession(pool: Pool): Promise<boolean> {
   return withUtcTransaction(
     pool,
@@ -196,9 +413,11 @@ export async function canUseLegacySession(pool: Pool): Promise<boolean> {
 
 export function accountSummary(account: UserAccount): AccountSummary {
   return {
+    displayName: account.displayName,
     email: account.email,
     passwordChangedAtUtc: account.passwordChangedAtUtc,
     requiresCurrentPassword: true,
+    role: account.role,
   };
 }
 
@@ -206,9 +425,11 @@ export function legacyAccountSummary(
   environment: AuthEnvironment,
 ): AccountSummary {
   return {
+    displayName: "Portal Yöneticisi",
     email: environment.ADMIN_EMAIL,
     passwordChangedAtUtc: null,
     requiresCurrentPassword: false,
+    role: "owner",
   };
 }
 
@@ -224,10 +445,12 @@ export async function initializeAccountFromLegacySession(
   const account: UserAccount = {
     createdAtUtc: now,
     credentialVersion: 1,
+    displayName: "Portal Yöneticisi",
     email: environment.ADMIN_EMAIL,
     id: randomUUID(),
     passwordChangedAtUtc: now,
     passwordHash,
+    role: "owner",
     status: "active",
     updatedAtUtc: now,
   };

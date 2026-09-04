@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { scryptSync } from "node:crypto";
+import { randomBytes, scryptSync } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { createServer } from "node:net";
 import path from "node:path";
@@ -13,6 +13,26 @@ const startupTimeoutMs = 120_000;
 const shutdownTimeoutMs = 5_000;
 const healthAttemptTimeoutMs = 2_000;
 const startupOutputLimit = 8_192;
+const composeFile = path.join(projectRoot, "compose.mariadb-test.yml");
+const databaseServiceName = "mariadb-test";
+const databaseProjectName = `portal-pusula-e2e-${process.pid}-${randomBytes(4).toString("hex")}`;
+const disposableDatabase = Object.freeze({
+  DB_HOST: "127.0.0.1",
+  DB_NAME: "portal_pusula_migration_test",
+  DB_PASSWORD: "portal-pusula-local-test-only",
+  DB_USER: "portal_pusula_test",
+  PORTAL_PUSULA_DISPOSABLE_MARIADB: "1",
+});
+const safeAuthDiagnosticCategories = new Set([
+  "auth_database_unavailable",
+  "auth_env_invalid",
+  "auth_scrypt_runtime_error",
+  "credentials_rejected",
+  "request_body_rejected",
+  "request_content_type_rejected",
+  "request_origin_rejected",
+]);
+const observedAuthDiagnosticCategories = new Set();
 const e2eAdminEmail = "e2e-admin@example.test";
 const e2eAdminPassword = "fake-e2e-password";
 const e2eSalt = Buffer.alloc(16, 11);
@@ -82,6 +102,115 @@ function trackedChild(command, args, environment, stdio = "inherit") {
     completion,
     getOutcome: () => outcome,
   };
+}
+
+function runOneShot(command, args, environment, capture = false) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      cwd: projectRoot,
+      env: environment,
+      shell: false,
+      stdio: capture ? ["ignore", "pipe", "pipe"] : "inherit",
+      windowsHide: true,
+    });
+    let stdout = "";
+
+    if (capture) {
+      child.stdout.setEncoding("utf8");
+      child.stdout.on("data", (chunk) => {
+        stdout += chunk;
+      });
+      child.stderr.resume();
+    }
+
+    child.once("error", () => {
+      reject(new Error(`Could not start ${command}.`));
+    });
+    child.once("exit", (code, signal) => {
+      if (code === 0) {
+        resolve(stdout.trim());
+        return;
+      }
+      reject(
+        new Error(
+          `${command} failed with ${signal ? `signal ${signal}` : `exit code ${code}`}.`,
+        ),
+      );
+    });
+  });
+}
+
+function dockerComposeArguments(...args) {
+  return [
+    "--context",
+    "default",
+    "compose",
+    "--file",
+    composeFile,
+    "--project-name",
+    databaseProjectName,
+    ...args,
+  ];
+}
+
+function parseLoopbackDatabasePort(value) {
+  const lines = value.split(/\r?\n/u).filter(Boolean);
+  const match = lines.length === 1 ? /^127\.0\.0\.1:(\d{1,5})$/u.exec(lines[0]) : null;
+  const port = match ? Number.parseInt(match[1], 10) : Number.NaN;
+  if (!Number.isInteger(port) || port < 1 || port > 65_535) {
+    throw new Error("Disposable E2E database port is invalid.");
+  }
+  return String(port);
+}
+
+const dockerEnvironment = sanitizedEnvironment({
+  COMPOSE_DISABLE_ENV_FILE: "true",
+});
+let databaseStarted = false;
+
+async function startDisposableDatabase() {
+  databaseStarted = true;
+  console.info("Starting isolated MariaDB for production-mode E2E...");
+  await runOneShot(
+    "docker",
+    dockerComposeArguments("up", "--detach", "--wait", "--wait-timeout", "120"),
+    dockerEnvironment,
+  );
+  const port = parseLoopbackDatabasePort(
+    await runOneShot(
+      "docker",
+      dockerComposeArguments("port", databaseServiceName, "3306"),
+      dockerEnvironment,
+      true,
+    ),
+  );
+  const databaseEnvironment = sanitizedEnvironment({
+    ...disposableDatabase,
+    DB_PORT: port,
+  });
+  await runOneShot(
+    process.execPath,
+    [path.join("scripts", "migrate.mjs")],
+    databaseEnvironment,
+  );
+  return { ...disposableDatabase, DB_PORT: port };
+}
+
+async function stopDisposableDatabase() {
+  if (!databaseStarted) return;
+  await runOneShot(
+    "docker",
+    dockerComposeArguments(
+      "down",
+      "--volumes",
+      "--remove-orphans",
+      "--timeout",
+      "10",
+    ),
+    dockerEnvironment,
+    true,
+  );
+  databaseStarted = false;
 }
 
 function requestedPort() {
@@ -156,6 +285,11 @@ function waitForOwnedReadySignal(server) {
       startupOutput = `${startupOutput}${String(chunk)}`.slice(
         -startupOutputLimit,
       );
+      for (const match of String(chunk).matchAll(/"category":"([a-z_]+)"/gu)) {
+        if (safeAuthDiagnosticCategories.has(match[1])) {
+          observedAuthDiagnosticCategories.add(match[1]);
+        }
+      }
       if (/\bReady in\b/u.test(startupOutput)) {
         if (server.getOutcome() === undefined) {
           finish();
@@ -199,6 +333,28 @@ async function waitForOwnedHealth(server, healthUrl) {
   }
 
   throw new Error("E2E server health verification timed out.");
+}
+
+async function bootstrapE2eOwner(baseUrl) {
+  const response = await fetch(`${baseUrl}/api/auth/login`, {
+    body: new URLSearchParams({
+      email: e2eAdminEmail,
+      next: "/",
+      password: e2eAdminPassword,
+    }),
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      Origin: baseUrl,
+    },
+    method: "POST",
+    redirect: "manual",
+    signal: AbortSignal.timeout(healthAttemptTimeoutMs * 5),
+  });
+  const location = response.headers.get("location");
+  await response.body?.cancel();
+  if (response.status !== 303 || location !== "/") {
+    throw new Error("E2E owner bootstrap failed.");
+  }
 }
 
 async function terminateChild(trackedProcess) {
@@ -249,16 +405,19 @@ async function main() {
     "test",
     "cli.js",
   );
-  const baseEnvironment = sanitizedEnvironment({
-    ADMIN_EMAIL: e2eAdminEmail,
-    ADMIN_PASSWORD_HASH: e2ePasswordHash,
-    FORCE_COLOR: "0",
-    PORTAL_PUSULA_AUTH_STORAGE_MODE: "environment",
-    SESSION_SECRET: "FakeSessionKey01",
-  });
+  let exitCode = 1;
 
   try {
     const port = await reserveLoopbackPort(requestedPort());
+    const databaseEnvironment = await startDisposableDatabase();
+    const baseEnvironment = sanitizedEnvironment({
+      ...databaseEnvironment,
+      ADMIN_EMAIL: e2eAdminEmail,
+      ADMIN_PASSWORD_HASH: e2ePasswordHash,
+      FORCE_COLOR: "0",
+      PORTAL_PUSULA_AUTH_STORAGE_MODE: "database",
+      SESSION_SECRET: "FakeSessionKey01",
+    });
     const baseUrl = `http://${host}:${port}`;
     const healthUrl = `${baseUrl}/api/health/live`;
 
@@ -270,9 +429,11 @@ async function main() {
     );
     await waitForOwnedReadySignal(server);
     await waitForOwnedHealth(server, healthUrl);
+    await bootstrapE2eOwner(baseUrl);
 
     if (interruptedSignal !== undefined || server.getOutcome() !== undefined) {
-      return 1;
+      exitCode = 1;
+      return exitCode;
     }
 
     console.info(`Owned E2E server ready on loopback port ${port}.`);
@@ -282,25 +443,39 @@ async function main() {
       PORTAL_PUSULA_E2E_EXTERNAL_SERVER: "1",
     });
     const result = await playwright.completion;
+    if (result.code !== 0 && observedAuthDiagnosticCategories.size > 0) {
+      console.error(
+        `E2E auth diagnostic categories: ${[...observedAuthDiagnosticCategories].sort().join(", ")}`,
+      );
+    }
 
     if (
       interruptedSignal !== undefined ||
       result.signal !== null ||
       result.spawnError
     ) {
-      return 1;
+      exitCode = 1;
+      return exitCode;
     }
 
-    return result.code ?? 1;
+    exitCode = result.code ?? 1;
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "E2E runner failed.";
     console.error(message);
-    return 1;
+    exitCode = 1;
   } finally {
     await terminateChild(playwright);
     await terminateChild(server);
+    try {
+      await stopDisposableDatabase();
+    } catch {
+      console.error("Disposable E2E database cleanup failed.");
+      exitCode = 1;
+    }
   }
+
+  return exitCode;
 }
 
 process.exitCode = await main();

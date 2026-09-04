@@ -31,7 +31,7 @@ export async function PATCH(
   request: NextRequest,
   context: RouteContext,
 ): Promise<NextResponse> {
-  const principal = await authenticateAdminRequest(request);
+  const principal = await authenticateAdminRequest(request, "finance.cards.write");
   if (!principal) return spendingJson({ status: "unauthorized" }, 401);
   if (!isSameOrigin(request)) return spendingJson({ status: "forbidden" }, 403);
   if (!isJsonRequest(request)) {

@@ -2,7 +2,14 @@ import { ExpensesWorkspace } from "@/components/home/expenses-workspace";
 import { FinanceSubnavigation } from "@/components/home/finance-subnavigation";
 import { PortalPageHeader } from "@/components/portal/portal-page-header";
 
-export function ExpensesPageWorkspace() {
+type ExpensesPageWorkspaceProps = Readonly<{
+  capabilities: Readonly<{
+    canReadAudit: boolean;
+    canReverseExpenses: boolean;
+  }>;
+}>;
+
+export function ExpensesPageWorkspace({ capabilities }: ExpensesPageWorkspaceProps) {
   return (
     <>
       <PortalPageHeader
@@ -11,7 +18,7 @@ export function ExpensesPageWorkspace() {
         title="Finans"
       />
       <FinanceSubnavigation />
-      <ExpensesWorkspace />
+      <ExpensesWorkspace capabilities={capabilities} />
     </>
   );
 }

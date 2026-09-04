@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { legacyAccountSummary } from "@/features/account";
-import { authenticateAdminRequest } from "@/platform/auth/server-auth";
+import { authenticatePrincipalRequest } from "@/platform/auth/server-auth";
 import { getAuthEnvironment } from "@/platform/config/auth-env";
 import { getAuthStorageMode } from "@/platform/config/auth-storage-mode";
 
@@ -18,16 +18,18 @@ function json(body: unknown, status = 200): NextResponse {
 }
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  const principal = await authenticateAdminRequest(request);
+  const principal = await authenticatePrincipalRequest(request);
   if (!principal) return json({ status: "unauthorized" }, 401);
 
   if (principal.kind === "development") {
     return json({
       account: {
+        displayName: "Yerel geliştirici",
         email: "Yerel geliştirme oturumu",
         passwordChangedAtUtc: null,
         passwordManagementAvailable: false,
         requiresCurrentPassword: false,
+        role: "owner",
       },
     });
   }
@@ -49,10 +51,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   return json({
     account: {
+      displayName: principal.displayName,
       email: principal.email,
       passwordChangedAtUtc: principal.passwordChangedAtUtc,
       passwordManagementAvailable: true,
       requiresCurrentPassword: true,
+      role: principal.role,
     },
   });
 }

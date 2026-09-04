@@ -12,7 +12,10 @@ const mocks = vi.hoisted(() => ({
   findContributionByOperationKeyForUpdate: vi.fn(),
   findContributionByProjectMonthForUpdate: vi.fn(),
   findContributionReceiptByOperationKeyForUpdate: vi.fn(),
+  findContributionReceiptForUpdate: vi.fn(),
+  findContributionReceiptReversalForUpdate: vi.fn(),
   findContributionForUpdate: vi.fn(),
+  findLatestActiveContributionReceiptDate: vi.fn(),
   findProjectForUpdate: vi.fn(),
   insertCommissionRecordIdempotently: vi.fn(),
   insertContributionRecordIdempotently: vi.fn(),
@@ -34,7 +37,10 @@ vi.mock("./repository", () => ({
   findContributionByOperationKeyForUpdate: mocks.findContributionByOperationKeyForUpdate,
   findContributionByProjectMonthForUpdate: mocks.findContributionByProjectMonthForUpdate,
   findContributionReceiptByOperationKeyForUpdate: mocks.findContributionReceiptByOperationKeyForUpdate,
+  findContributionReceiptForUpdate: mocks.findContributionReceiptForUpdate,
+  findContributionReceiptReversalForUpdate: mocks.findContributionReceiptReversalForUpdate,
   findContributionForUpdate: mocks.findContributionForUpdate,
+  findLatestActiveContributionReceiptDate: mocks.findLatestActiveContributionReceiptDate,
   insertCommissionRecordIdempotently: mocks.insertCommissionRecordIdempotently,
   insertContributionRecordIdempotently: mocks.insertContributionRecordIdempotently,
   insertContributionReceiptIdempotently: mocks.insertContributionReceiptIdempotently,
@@ -59,7 +65,9 @@ import {
   PartnershipFutureActualDateError,
   PartnershipIdempotencyConflictError,
   PartnershipProjectTypeError,
+  PartnershipReceiptAlreadyReversedError,
   PartnershipRecordLockedError,
+  reversePartnershipContributionReceipt,
   updatePartnershipCommission,
   updatePartnershipContribution,
 } from "./service";
@@ -69,7 +77,11 @@ const operationKey = "30000000-0000-4000-8000-000000000001";
 const commissionId = "40000000-0000-4000-8000-000000000001";
 const now = new Date("2026-09-30T08:00:00.000Z");
 const nowSql = "2026-09-30 08:00:00.000000";
-const context = { correlationId: "partnership-service-test", now };
+const context = {
+  actorId: "70000000-0000-4000-8000-000000000001",
+  correlationId: "partnership-service-test",
+  now,
+};
 
 const baseCommission = {
   agencyCollectedOn: null,
@@ -105,6 +117,8 @@ describe("partnership finance service", () => {
     mocks.findContributionByOperationKeyForUpdate.mockResolvedValue(null);
     mocks.findContributionByProjectMonthForUpdate.mockResolvedValue(null);
     mocks.findContributionReceiptByOperationKeyForUpdate.mockResolvedValue(null);
+    mocks.findContributionReceiptReversalForUpdate.mockResolvedValue(null);
+    mocks.findLatestActiveContributionReceiptDate.mockResolvedValue(null);
     mocks.insertCommissionRecordIdempotently.mockImplementation(async (_connection, value) => value);
     mocks.insertContributionRecordIdempotently.mockImplementation(async (_connection, value) => value);
     mocks.insertContributionReceiptIdempotently.mockImplementation(async (_connection, value) => value);
@@ -357,9 +371,12 @@ describe("partnership finance service", () => {
       clientOperationKey: "50000000-0000-4000-8000-000000000001",
       contributionId: commissionId,
       createdAtUtc: nowSql,
+      entryType: "receipt" as const,
       id: "60000000-0000-4000-8000-000000000001",
       note: null,
       receivedOn: "2026-09-16",
+      reversalOfId: null,
+      reversalReason: null,
     };
     mocks.findContributionReceiptByOperationKeyForUpdate.mockResolvedValue(receipt);
     mocks.findContributionForUpdate.mockResolvedValue({
@@ -388,5 +405,153 @@ describe("partnership finance service", () => {
       receivedOn: "2026-10-01",
     }, context)).rejects.toBeInstanceOf(PartnershipFutureActualDateError);
     expect(mocks.findContributionForUpdate).not.toHaveBeenCalled();
+  });
+
+  it("reverses a contribution receipt once and restores exact Decimal aggregates", async () => {
+    const original = {
+      amount: "3000.0000",
+      clientOperationKey: "50000000-0000-4000-8000-000000000001",
+      contributionId: commissionId,
+      createdAtUtc: nowSql,
+      entryType: "receipt" as const,
+      id: "60000000-0000-4000-8000-000000000001",
+      note: null,
+      receivedOn: "2026-09-16",
+      reversalOfId: null,
+      reversalReason: null,
+    };
+    mocks.findContributionReceiptForUpdate.mockResolvedValue(original);
+    mocks.findContributionForUpdate.mockResolvedValue({
+      clientOperationKey: operationKey,
+      contributionMonth: "2026-09",
+      createdAtUtc: nowSql,
+      description: "Ofis kirası ortak katkısı",
+      dueOn: "2026-09-15",
+      expectedAmount: "7000.0000",
+      id: commissionId,
+      note: null,
+      projectId,
+      projectName: "7 Emlak Ajansı",
+      projectShortCode: "7EMLAK",
+      receivedAmount: "3000.0000",
+      receivedOn: "2026-09-16",
+      status: "partial",
+      updatedAtUtc: nowSql,
+      version: 2,
+    });
+    mocks.insertContributionReceiptIdempotently.mockImplementation(
+      async (_connection, value) => value,
+    );
+
+    const result = await reversePartnershipContributionReceipt(
+      {} as Pool,
+      original.id,
+      {
+        clientOperationKey: "90000000-0000-4000-8000-000000000001",
+        reason: "Yanlış hesaba işlenen tahsilat",
+      },
+      context,
+    );
+
+    expect(result).toMatchObject({
+      contribution: {
+        receivedAmount: "0.0000",
+        receivedOn: null,
+        status: "expected",
+        version: 3,
+      },
+      created: true,
+      reversal: {
+        amount: "3000.0000",
+        entryType: "reversal",
+        reversalOfId: original.id,
+        reversalReason: "Yanlış hesaba işlenen tahsilat",
+      },
+    });
+    expect(mocks.appendAuditEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        action: "partnership_contribution.receipt_reversed",
+        actorId: context.actorId,
+      }),
+    );
+  });
+
+  it("blocks a second reversal of a contribution receipt", async () => {
+    mocks.findContributionReceiptForUpdate.mockResolvedValue({
+      amount: "3000.0000",
+      contributionId: commissionId,
+      entryType: "receipt",
+      id: "60000000-0000-4000-8000-000000000001",
+      reversalOfId: null,
+      reversalReason: null,
+    });
+    mocks.findContributionForUpdate.mockResolvedValue({
+      id: commissionId,
+      receivedAmount: "3000.0000",
+    });
+    mocks.findContributionReceiptReversalForUpdate.mockResolvedValue({
+      id: "already-reversed",
+    });
+
+    await expect(
+      reversePartnershipContributionReceipt(
+        {} as Pool,
+        "60000000-0000-4000-8000-000000000001",
+        {
+          clientOperationKey: "90000000-0000-4000-8000-000000000001",
+          reason: "Yanlış hesaba işlenen tahsilat",
+        },
+        context,
+      ),
+    ).rejects.toBeInstanceOf(PartnershipReceiptAlreadyReversedError);
+    expect(mocks.insertContributionReceiptIdempotently).not.toHaveBeenCalled();
+  });
+
+  it("replays the same receipt reversal without changing the aggregate twice", async () => {
+    const receiptId = "60000000-0000-4000-8000-000000000001";
+    const reversalOperationKey = "90000000-0000-4000-8000-000000000001";
+    const original = {
+      amount: "3000.0000",
+      contributionId: commissionId,
+      entryType: "receipt" as const,
+      id: receiptId,
+      reversalOfId: null,
+      reversalReason: null,
+    };
+    const reversal = {
+      amount: original.amount,
+      clientOperationKey: reversalOperationKey,
+      contributionId: commissionId,
+      createdAtUtc: nowSql,
+      entryType: "reversal" as const,
+      id: "a0000000-0000-4000-8000-000000000001",
+      note: null,
+      receivedOn: "2026-09-30",
+      reversalOfId: receiptId,
+      reversalReason: "Yanlış hesaba işlenen tahsilat",
+    };
+    mocks.findContributionReceiptByOperationKeyForUpdate.mockResolvedValue(reversal);
+    mocks.findContributionReceiptForUpdate.mockResolvedValue(original);
+    mocks.findContributionForUpdate.mockResolvedValue({
+      id: commissionId,
+      receivedAmount: "0.0000",
+      status: "expected",
+    });
+
+    const result = await reversePartnershipContributionReceipt(
+      {} as Pool,
+      receiptId,
+      {
+        clientOperationKey: reversalOperationKey,
+        reason: reversal.reversalReason,
+      },
+      context,
+    );
+
+    expect(result).toMatchObject({ created: false, reversal });
+    expect(mocks.insertContributionReceiptIdempotently).not.toHaveBeenCalled();
+    expect(mocks.updateContributionRecord).not.toHaveBeenCalled();
+    expect(mocks.appendAuditEvent).not.toHaveBeenCalled();
   });
 });

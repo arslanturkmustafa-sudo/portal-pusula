@@ -9,7 +9,7 @@ import {
   updateVisitResolutionInputSchema,
   VisitLockedError,
 } from "@/features/contracts";
-import { isAdminAuthenticated } from "@/platform/auth/server-auth";
+import { authenticateAdminRequest } from "@/platform/auth/server-auth";
 import { getDatabaseProbeEnvironment } from "@/platform/config/readiness-env";
 import { getPlatformDatabasePool } from "@/platform/database/mysql-platform";
 import { correlationIdFromHeaders } from "@/platform/http/correlation-id";
@@ -44,7 +44,8 @@ export async function PATCH(
   request: NextRequest,
   context: VisitRouteContext,
 ): Promise<NextResponse> {
-  if (!(await isAdminAuthenticated(request))) {
+  const principal = await authenticateAdminRequest(request, "visits.write");
+  if (!principal) {
     return json({ status: "unauthorized" }, 401);
   }
 
@@ -64,7 +65,10 @@ export async function PATCH(
       contractId,
       visitId,
       input,
-      { correlationId: correlationIdFromHeaders(request.headers) },
+      {
+        actorId: principal.kind === "account" ? principal.accountId : undefined,
+        correlationId: correlationIdFromHeaders(request.headers),
+      },
     );
     return json({ visit });
   } catch (error) {

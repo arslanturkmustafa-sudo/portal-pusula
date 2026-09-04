@@ -62,6 +62,9 @@ const contractId = "20000000-0000-4000-8000-000000000001";
 const projectId = "30000000-0000-4000-8000-000000000001";
 const otherProjectId = "30000000-0000-4000-8000-000000000002";
 const before = {
+  archiveReason: null,
+  archivedAtUtc: null,
+  archivedByUserAccountId: null,
   createdAtUtc: "2026-09-01 09:00:00.000000",
   currency: "TRY" as const,
   customerId,
@@ -76,6 +79,7 @@ const before = {
   updatedAtUtc: "2026-09-01 09:00:00.000000",
   vatMode: "exclusive" as const,
   vatRate: "20.00",
+  version: 1,
 };
 const input = {
   endsOn: "2026-12-31",
@@ -88,7 +92,9 @@ const input = {
   vatMode: "exempt" as const,
   vatRate: "0",
 };
+const updateInput = { ...input, version: 1 };
 const context = {
+  actorId: "80000000-0000-4000-8000-000000000001",
   correlationId: "contract-edit-test",
   now: new Date("2026-09-01T12:00:00.000Z"),
 };
@@ -108,7 +114,7 @@ describe("contract write service", () => {
     mocks.findOverlappingContract.mockResolvedValue(null);
     mocks.contractHasReceivable.mockResolvedValue(false);
     mocks.contractHasVisitOutsideRange.mockResolvedValue(false);
-    mocks.updateContractRecord.mockResolvedValue(undefined);
+    mocks.updateContractRecord.mockResolvedValue(true);
   });
 
   it("updates the owned contract transactionally and appends before/after audit", async () => {
@@ -116,7 +122,7 @@ describe("contract write service", () => {
       {} as Pool,
       customerId,
       contractId,
-      input,
+      updateInput,
       context,
     );
 
@@ -139,11 +145,13 @@ describe("contract write service", () => {
     expect(mocks.updateContractRecord).toHaveBeenCalledWith(
       expect.anything(),
       result,
+      1,
     );
     expect(mocks.appendAuditEvent).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
         action: "consulting_contract.updated",
+        actorId: context.actorId,
         beforeSummary: expect.objectContaining({ startsOn: "2026-09-01" }),
         afterSummary: expect.objectContaining({ startsOn: "2026-02-01" }),
       }),
@@ -179,6 +187,7 @@ describe("contract write service", () => {
       expect.anything(),
       expect.objectContaining({
         action: "consulting_contract.created",
+        actorId: context.actorId,
         afterSummary: expect.objectContaining({ projectId }),
       }),
     );
@@ -210,7 +219,7 @@ describe("contract write service", () => {
         {} as Pool,
         customerId,
         contractId,
-        input,
+        updateInput,
         context,
       ),
     ).rejects.toBeInstanceOf(ContractPeriodConflictError);
@@ -226,7 +235,7 @@ describe("contract write service", () => {
         {} as Pool,
         customerId,
         contractId,
-        input,
+        updateInput,
         context,
       ),
     ).rejects.toBeInstanceOf(ContractPeriodConflictError);
@@ -240,7 +249,7 @@ describe("contract write service", () => {
         {} as Pool,
         customerId,
         contractId,
-        input,
+        updateInput,
         context,
       ),
     ).rejects.toBeInstanceOf(ContractVisitRangeConflictError);
@@ -255,7 +264,7 @@ describe("contract write service", () => {
         {} as Pool,
         customerId,
         contractId,
-        { ...input, projectId: otherProjectId },
+        { ...updateInput, projectId: otherProjectId },
         context,
       ),
     ).rejects.toBeInstanceOf(ContractProjectUnavailableError);
@@ -273,7 +282,7 @@ describe("contract write service", () => {
       {} as Pool,
       customerId,
       contractId,
-      { ...input, projectId, status: "closed" },
+      { ...updateInput, projectId, status: "closed" },
       context,
     );
 
@@ -287,6 +296,7 @@ describe("contract write service", () => {
     expect(mocks.updateContractRecord).toHaveBeenCalledWith(
       expect.anything(),
       result,
+      1,
     );
   });
 
@@ -302,7 +312,7 @@ describe("contract write service", () => {
         {} as Pool,
         customerId,
         contractId,
-        { ...input, projectId, status: "active" },
+        { ...updateInput, projectId, status: "active" },
         context,
       ),
     ).rejects.toBeInstanceOf(ContractProjectUnavailableError);
@@ -322,7 +332,7 @@ describe("contract write service", () => {
         {} as Pool,
         customerId,
         contractId,
-        { ...input, projectId: otherProjectId },
+        { ...updateInput, projectId: otherProjectId },
         context,
       ),
     ).rejects.toBeInstanceOf(ContractProjectLockedError);

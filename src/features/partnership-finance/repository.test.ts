@@ -89,9 +89,12 @@ describe("partnership finance repository", () => {
       client_operation_key: "50000000-0000-4000-8000-000000000001",
       contribution_id: contributionRow.id,
       created_at_utc: contributionRow.created_at_utc,
+      entry_type: "receipt",
       id: "60000000-0000-4000-8000-000000000001",
       note: null,
       received_on: "2026-09-16",
+      reversal_of_id: null,
+      reversal_reason: null,
     };
     const execute = vi.fn()
       .mockResolvedValueOnce([{ affectedRows: 1 }, []])
@@ -103,9 +106,12 @@ describe("partnership finance repository", () => {
         clientOperationKey: receiptRow.client_operation_key,
         contributionId: receiptRow.contribution_id,
         createdAtUtc: receiptRow.created_at_utc,
+        entryType: "receipt",
         id: receiptRow.id,
         note: null,
         receivedOn: receiptRow.received_on,
+        reversalOfId: null,
+        reversalReason: null,
       },
     );
     expect(String(execute.mock.calls[0]?.[0])).toContain(

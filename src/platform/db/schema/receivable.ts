@@ -7,7 +7,9 @@ import {
   decimal,
   foreignKey,
   index,
+  int,
   mysqlTable,
+  type MySqlTableExtraConfigValue,
   uniqueIndex,
   varchar,
 } from "drizzle-orm/mysql-core";
@@ -35,6 +37,12 @@ export const receivable = mysqlTable(
       scale: 4,
     }).notNull(),
     currency: char("currency", { length: 3 }).default("TRY").notNull(),
+    recordState: varchar("record_state", { length: 16 })
+      .default("active")
+      .notNull(),
+    voidReason: varchar("void_reason", { length: 2000 }),
+    voidedAtUtc: datetime("voided_at_utc", { fsp: 6, mode: "string" }),
+    version: int("version", { unsigned: true }).default(1).notNull(),
     createdAtUtc: datetime("created_at_utc", {
       fsp: 6,
       mode: "string",
@@ -93,8 +101,34 @@ export const receivable = mysqlTable(
         AND ${table.description} = TRIM(${table.description})`,
     ),
     check(
+      "chk_receivable_record_state",
+      sql`BINARY ${table.recordState} IN (BINARY 'active', BINARY 'voided')`,
+    ),
+    check(
+      "chk_receivable_void_shape",
+      sql`(
+          BINARY ${table.recordState} = BINARY 'active'
+          AND ${table.voidReason} IS NULL
+          AND ${table.voidedAtUtc} IS NULL
+        ) OR (
+          BINARY ${table.recordState} = BINARY 'voided'
+          AND ${table.voidReason} IS NOT NULL
+          AND CHAR_LENGTH(${table.voidReason}) BETWEEN 1 AND 2000
+          AND ${table.voidReason} = TRIM(${table.voidReason})
+          AND ${table.voidedAtUtc} IS NOT NULL
+        )`,
+    ),
+    check("chk_receivable_version", sql`${table.version} >= 1`),
+    check(
       "chk_receivable_timeline",
-      sql`${table.createdAtUtc} <= ${table.updatedAtUtc}`,
+      sql`${table.createdAtUtc} <= ${table.updatedAtUtc}
+        AND (
+          ${table.voidedAtUtc} IS NULL
+          OR (
+            ${table.createdAtUtc} <= ${table.voidedAtUtc}
+            AND ${table.voidedAtUtc} <= ${table.updatedAtUtc}
+          )
+        )`,
     ),
     foreignKey({
       name: "fk_receivable_customer",
@@ -126,6 +160,11 @@ export const receivable = mysqlTable(
       table.clientOperationKey,
     ),
     index("idx_receivable_due_on").on(table.dueOn, table.customerId),
+    index("idx_receivable_state_due").on(
+      table.recordState,
+      table.dueOn,
+      table.customerId,
+    ),
     index("idx_receivable_customer_created").on(
       table.customerId,
       table.createdAtUtc,
@@ -150,6 +189,11 @@ export const receivableCollection = mysqlTable(
     receivableId: char("receivable_id", { length: 36 }).notNull(),
     amount: decimal("amount", { precision: 19, scale: 4 }).notNull(),
     collectedOn: date("collected_on", { mode: "string" }).notNull(),
+    entryType: varchar("entry_type", { length: 16 })
+      .default("collection")
+      .notNull(),
+    reversalOfId: char("reversal_of_id", { length: 36 }),
+    reversalReason: varchar("reversal_reason", { length: 2000 }),
     note: varchar("note", { length: 2000 }),
     createdAtUtc: datetime("created_at_utc", {
       fsp: 6,
@@ -158,7 +202,7 @@ export const receivableCollection = mysqlTable(
       .default(sql`CURRENT_TIMESTAMP(6)`)
       .notNull(),
   },
-  (table) => [
+  (table): MySqlTableExtraConfigValue[] => [
     check(
       "chk_receivable_collection_identity",
       sql`OCTET_LENGTH(${table.id}) = 36
@@ -166,7 +210,11 @@ export const receivableCollection = mysqlTable(
         AND OCTET_LENGTH(${table.clientOperationKey}) = 36
         AND BINARY ${table.clientOperationKey} REGEXP '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
         AND OCTET_LENGTH(${table.receivableId}) = 36
-        AND BINARY ${table.receivableId} REGEXP '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'`,
+        AND BINARY ${table.receivableId} REGEXP '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+        AND (${table.reversalOfId} IS NULL OR (
+          OCTET_LENGTH(${table.reversalOfId}) = 36
+          AND BINARY ${table.reversalOfId} REGEXP '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+        ))`,
     ),
     check(
       "chk_receivable_collection_amount",
@@ -176,6 +224,20 @@ export const receivableCollection = mysqlTable(
       "chk_receivable_collection_optional_fields",
       sql`${table.note} IS NULL OR CHAR_LENGTH(${table.note}) BETWEEN 1 AND 2000`,
     ),
+    check(
+      "chk_receivable_collection_entry",
+      sql`(
+          BINARY ${table.entryType} = BINARY 'collection'
+          AND ${table.reversalOfId} IS NULL
+          AND ${table.reversalReason} IS NULL
+        ) OR (
+          BINARY ${table.entryType} = BINARY 'reversal'
+          AND ${table.reversalOfId} IS NOT NULL
+          AND ${table.reversalReason} IS NOT NULL
+          AND CHAR_LENGTH(${table.reversalReason}) BETWEEN 1 AND 2000
+          AND ${table.reversalReason} = TRIM(${table.reversalReason})
+        )`,
+    ),
     foreignKey({
       name: "fk_receivable_collection_receivable",
       columns: [table.receivableId],
@@ -183,9 +245,17 @@ export const receivableCollection = mysqlTable(
     })
       .onDelete("restrict")
       .onUpdate("restrict"),
+    foreignKey({
+      name: "fk_receivable_collection_reversal",
+      columns: [table.reversalOfId],
+      foreignColumns: [receivableCollection.id],
+    })
+      .onDelete("restrict")
+      .onUpdate("restrict"),
     uniqueIndex("uq_receivable_collection_operation").on(
       table.clientOperationKey,
     ),
+    uniqueIndex("uq_receivable_collection_reversal").on(table.reversalOfId),
     index("idx_receivable_collection_receivable_date").on(
       table.receivableId,
       table.collectedOn,

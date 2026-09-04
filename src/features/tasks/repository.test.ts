@@ -11,6 +11,9 @@ import {
 } from "@/features/tasks/repository";
 
 const taskRow = {
+  archive_reason: null,
+  archived_at_utc: null,
+  archived_by_user_account_id: null,
   assignee_email: "yonetici@example.com",
   assignee_user_account_id: "10000000-0000-4000-8000-000000000001",
   completed_at_utc: null,
@@ -57,6 +60,9 @@ describe("task repository", () => {
   it("fences an update with the caller's expected version", async () => {
     const execute = vi.fn().mockResolvedValue([{ affectedRows: 1 }, []]);
     const task = {
+      archiveReason: null,
+      archivedAtUtc: null,
+      archivedByUserAccountId: null,
       assigneeUserAccountId: taskRow.assignee_user_account_id,
       completedAtUtc: null,
       createdAtUtc: taskRow.created_at_utc,

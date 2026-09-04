@@ -36,6 +36,7 @@ const customer = {
   name: "Zevahir Home",
   phone: "+90 555 000 00 00",
   projects: [project],
+  version: 4,
 };
 const otherCustomer = {
   contactNote: null,
@@ -59,6 +60,7 @@ const contract = {
   status: "active" as const,
   vatMode: "exempt" as const,
   vatRate: "0.00",
+  version: 6,
 };
 const nextContractId = "20000000-0000-4000-8000-000000000002";
 const nextContract = {
@@ -148,7 +150,7 @@ describe("CustomerWorkspace reliable date writes", () => {
     );
 
     await waitFor(() => expect(requests).toEqual([
-      { displayName: "Zevahir Home Mobilya" },
+      { displayName: "Zevahir Home Mobilya", version: 4 },
     ]));
     expect(onCustomerSaved).toHaveBeenCalledWith(
       expect.objectContaining({ displayName: "Zevahir Home Mobilya" }),
@@ -207,7 +209,7 @@ describe("CustomerWorkspace reliable date writes", () => {
     );
 
     await waitFor(() =>
-      expect(requests).toEqual([{ projectIds: [projectId, otherProjectId] }]),
+      expect(requests).toEqual([{ projectIds: [projectId, otherProjectId], version: 4 }]),
     );
     expect(onCustomerSaved).toHaveBeenCalledWith(
       expect.objectContaining({ projects: [project, otherProject] }),
@@ -574,6 +576,7 @@ describe("CustomerWorkspace reliable date writes", () => {
       body: expect.objectContaining({
         endsOn: "2026-11-30",
         startsOn: "2026-03-01",
+        version: 6,
       }),
       method: "PATCH",
       url: `/api/customers/${customerId}/contracts/${contractId}`,
@@ -1025,5 +1028,36 @@ describe("CustomerWorkspace reliable date writes", () => {
         },
       ],
     });
+  });
+
+  it("keeps editing available but hides lifecycle and audit controls without exact capabilities", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/contracts")) return jsonResponse({ contracts: [contract] });
+      if (url.includes("/month-plans/")) {
+        return jsonResponse({ monthPlan: { visits: [] } });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    }));
+
+    render(
+      <CustomerWorkspace
+        capabilities={{
+          canLifecycleContracts: false,
+          canLifecycleCustomers: false,
+          canReadAudit: false,
+        }}
+        customer={customer}
+        live
+        onContractSaved={vi.fn()}
+        onVisitsSaved={vi.fn()}
+      />,
+    );
+
+    expect(await screen.findByRole("button", { name: "Sözleşmeyi düzenle" }))
+      .toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Müşteri bilgilerini düzenle" }))
+      .toBeInTheDocument();
+    expect(screen.queryByText("İşlemler")).not.toBeInTheDocument();
   });
 });

@@ -5,8 +5,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   createCustomer: vi.fn(),
-  isAdminAuthenticated: vi.fn(),
+  authenticatePrincipalRequest: vi.fn(),
   parseCustomer: vi.fn(),
+  listCustomers: vi.fn(),
   requestLogger: vi.fn(),
   error: vi.fn(),
 }));
@@ -17,11 +18,11 @@ vi.mock("@/features/customers", () => ({
   CustomerProjectNotFoundError: class CustomerProjectNotFoundError extends Error {},
   CustomerProjectUnavailableError: class CustomerProjectUnavailableError extends Error {},
   CustomerShortCodeConflictError: class CustomerShortCodeConflictError extends Error {},
-  listCustomers: vi.fn(),
+  listCustomers: mocks.listCustomers,
 }));
 
 vi.mock("@/platform/auth/server-auth", () => ({
-  isAdminAuthenticated: mocks.isAdminAuthenticated,
+  authenticatePrincipalRequest: mocks.authenticatePrincipalRequest,
 }));
 
 vi.mock("@/platform/config/readiness-env", () => ({
@@ -36,9 +37,10 @@ vi.mock("@/platform/logging/logger", () => ({
   requestLogger: mocks.requestLogger,
 }));
 
-import { POST } from "@/app/api/customers/route";
+import { GET, POST } from "@/app/api/customers/route";
 
 const correlationId = "22222222-2222-4222-8222-222222222222";
+const accountId = "80000000-0000-4000-8000-000000000001";
 const input = {
   contactNote: null,
   displayName: "Staging Customer",
@@ -64,8 +66,16 @@ function customerRequest(): NextRequest {
 describe("customer API database diagnostics", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.isAdminAuthenticated.mockReturnValue(true);
+    mocks.authenticatePrincipalRequest.mockResolvedValue({
+      accountId,
+      displayName: "Operasyon",
+      email: "operasyon@example.com",
+      kind: "account",
+      permissions: ["customers.write", "customers.contact.read"],
+      role: "member",
+    });
     mocks.parseCustomer.mockReturnValue(input);
+    mocks.listCustomers.mockResolvedValue([]);
     mocks.requestLogger.mockReturnValue({ error: mocks.error });
   });
 
@@ -83,6 +93,11 @@ describe("customer API database diagnostics", () => {
       status: "service_unavailable",
     });
     expect(mocks.requestLogger).toHaveBeenCalledWith(correlationId);
+    expect(mocks.createCustomer).toHaveBeenCalledWith(
+      {},
+      input,
+      expect.objectContaining({ actorId: accountId, correlationId }),
+    );
     expect(mocks.error).toHaveBeenCalledWith(
       {
         event: "customer.api.database_failed",
@@ -95,5 +110,41 @@ describe("customer API database diagnostics", () => {
     const serializedLog = JSON.stringify(mocks.error.mock.calls);
     expect(serializedLog).not.toContain("database-message-sentinel");
     expect(serializedLog).not.toContain("database-sql-sentinel");
+  });
+
+  it("requests contact, visit and billing projections only for exact grants", async () => {
+    mocks.authenticatePrincipalRequest.mockResolvedValueOnce({
+      displayName: "Operasyon",
+      email: "operasyon@example.com",
+      kind: "account",
+      permissions: ["customers.read"],
+      role: "member",
+    });
+    const restricted = await GET(
+      new NextRequest("https://portal.example.test/api/customers"),
+    );
+    expect(restricted.status).toBe(200);
+    expect(mocks.listCustomers).toHaveBeenLastCalledWith({}, {
+      includeBilling: false,
+      includeContact: false,
+      includeVisits: false,
+    });
+
+    mocks.authenticatePrincipalRequest.mockResolvedValueOnce({
+      displayName: "Yönetici",
+      email: "yonetici@example.com",
+      kind: "development",
+      permissions: [],
+      role: "owner",
+    });
+    const ownerResponse = await GET(
+      new NextRequest("https://portal.example.test/api/customers"),
+    );
+    expect(ownerResponse.status).toBe(200);
+    expect(mocks.listCustomers).toHaveBeenLastCalledWith({}, {
+      includeBilling: true,
+      includeContact: true,
+      includeVisits: true,
+    });
   });
 });

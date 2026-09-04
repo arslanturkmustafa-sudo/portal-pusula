@@ -6,6 +6,11 @@ import type {
   RowDataPacket,
 } from "mysql2/promise";
 
+import {
+  mapArchiveMetadata,
+  type ArchiveMetadata,
+} from "@/features/lifecycle";
+
 export type ContractStatus = "draft" | "active" | "closed";
 export type VatMode = "exempt" | "exclusive" | "inclusive";
 export type VisitResolutionStatus =
@@ -14,7 +19,7 @@ export type VisitResolutionStatus =
   | "makeup_pending"
   | "cancelled_by_agreement";
 
-export type ConsultingContract = Readonly<{
+export type ConsultingContract = ArchiveMetadata & Readonly<{
   createdAtUtc: string;
   currency: "TRY";
   customerId: string;
@@ -45,6 +50,9 @@ export type MonthlyVisit = Readonly<{
 }>;
 
 type ContractRow = RowDataPacket & {
+  archive_reason: string | null;
+  archived_at_utc: string | Date | null;
+  archived_by_user_account_id: string | null;
   created_at_utc: string | Date;
   currency: string;
   customer_id: string;
@@ -59,6 +67,11 @@ type ContractRow = RowDataPacket & {
   updated_at_utc: string | Date;
   vat_mode: string;
   vat_rate: string;
+  version: number;
+};
+
+type ContractLifecycleDependencyRow = RowDataPacket & {
+  has_dependencies: number | string;
 };
 
 type VisitRow = RowDataPacket & {
@@ -104,6 +117,7 @@ function mapContract(row: ContractRow): ConsultingContract {
   if (row.currency !== "TRY") throw new Error("Contract currency is invalid.");
 
   return {
+    ...mapArchiveMetadata(row),
     createdAtUtc: canonicalDateTime(row.created_at_utc),
     currency: "TRY",
     customerId: row.customer_id,
@@ -152,7 +166,8 @@ function mapVisit(row: VisitRow): MonthlyVisit {
 const CONTRACT_COLUMNS = `
   id, customer_id, project_id, status, starts_on, ends_on, monthly_fee_amount,
   currency, vat_mode, vat_rate, payment_day, internal_note,
-  created_at_utc, updated_at_utc`;
+  archive_reason, archived_at_utc, archived_by_user_account_id,
+  version, created_at_utc, updated_at_utc`;
 
 const VISIT_COLUMNS = `
   id, contract_id, committed_on, resolution_status,
@@ -167,7 +182,8 @@ export async function listContractRecords(
     `SELECT ${CONTRACT_COLUMNS}
        FROM consulting_contract
       WHERE customer_id = ?
-      ORDER BY status = 'active' DESC, starts_on DESC, id ASC`,
+      ORDER BY archived_at_utc IS NULL DESC,
+               status = 'active' DESC, starts_on DESC, id ASC`,
     [customerId],
   );
   return rows.map(mapContract);
@@ -250,6 +266,43 @@ export async function contractHasVisitOutsideRange(
   return rows.length > 0;
 }
 
+export async function contractHasLifecycleDependencies(
+  connection: PoolConnection,
+  contractId: string,
+): Promise<boolean> {
+  const [rows] = await connection.execute<ContractLifecycleDependencyRow[]>(
+    `SELECT (
+       EXISTS(
+         SELECT 1
+           FROM monthly_visit_commitment
+          WHERE contract_id = ?
+            AND resolution_status IN ('planned', 'makeup_pending')
+       ) OR EXISTS(
+         SELECT 1
+           FROM receivable r
+           LEFT JOIN (
+             SELECT receivable_id,
+                    SUM(CASE
+                          WHEN entry_type = 'reversal' THEN -amount
+                          ELSE amount
+                        END) AS collected_amount
+               FROM receivable_collection
+              GROUP BY receivable_id
+           ) rc ON rc.receivable_id = r.id
+          WHERE r.contract_id = ?
+            AND r.record_state = 'active'
+            AND r.total_amount > COALESCE(rc.collected_amount, 0.0000)
+       )
+     ) AS has_dependencies`,
+    [contractId, contractId],
+  );
+  const value = Number(rows[0]?.has_dependencies ?? -1);
+  if (value !== 0 && value !== 1) {
+    throw new Error("Contract lifecycle dependency query is invalid.");
+  }
+  return value === 1;
+}
+
 export async function insertContractRecord(
   connection: PoolConnection,
   contract: ConsultingContract,
@@ -258,8 +311,9 @@ export async function insertContractRecord(
     `INSERT INTO consulting_contract
        (id, customer_id, project_id, status, starts_on, ends_on, monthly_fee_amount,
         currency, vat_mode, vat_rate, payment_day, internal_note,
+        archive_reason, archived_at_utc, archived_by_user_account_id, version,
         created_at_utc, updated_at_utc)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       contract.id,
       contract.customerId,
@@ -273,6 +327,10 @@ export async function insertContractRecord(
       contract.vatRate,
       contract.paymentDay,
       contract.internalNote,
+      contract.archiveReason,
+      contract.archivedAtUtc,
+      contract.archivedByUserAccountId,
+      contract.version,
       contract.createdAtUtc,
       contract.updatedAtUtc,
     ],
@@ -283,13 +341,15 @@ export async function insertContractRecord(
 export async function updateContractRecord(
   connection: PoolConnection,
   contract: ConsultingContract,
-): Promise<void> {
+  expectedVersion: number,
+): Promise<boolean> {
   const [result] = await connection.execute<ResultSetHeader>(
     `UPDATE consulting_contract
         SET project_id = ?, status = ?, starts_on = ?, ends_on = ?, monthly_fee_amount = ?,
             vat_mode = ?, vat_rate = ?, payment_day = ?, internal_note = ?,
-            updated_at_utc = ?
-      WHERE id = ? AND customer_id = ?`,
+            archive_reason = ?, archived_at_utc = ?,
+            archived_by_user_account_id = ?, version = ?, updated_at_utc = ?
+      WHERE id = ? AND customer_id = ? AND version = ?`,
     [
       contract.projectId,
       contract.status,
@@ -300,12 +360,17 @@ export async function updateContractRecord(
       contract.vatRate,
       contract.paymentDay,
       contract.internalNote,
+      contract.archiveReason,
+      contract.archivedAtUtc,
+      contract.archivedByUserAccountId,
+      contract.version,
       contract.updatedAtUtc,
       contract.id,
       contract.customerId,
+      expectedVersion,
     ],
   );
-  if (result.affectedRows !== 1) throw new Error("Contract update failed.");
+  return result.affectedRows === 1;
 }
 
 export async function listMonthVisitRecords(

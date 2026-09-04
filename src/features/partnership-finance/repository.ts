@@ -30,6 +30,7 @@ export type ContributionStatus =
   | "partial"
   | "received"
   | "cancelled";
+export type ContributionReceiptEntryType = "receipt" | "reversal";
 
 export type PartnershipCommission = Readonly<{
   agencyCollectedOn: string | null;
@@ -77,9 +78,12 @@ export type PartnershipContributionReceipt = Readonly<{
   clientOperationKey: string;
   contributionId: string;
   createdAtUtc: string;
+  entryType: ContributionReceiptEntryType;
   id: string;
   note: string | null;
   receivedOn: string;
+  reversalOfId: string | null;
+  reversalReason: string | null;
 }>;
 
 type CommissionRow = RowDataPacket & {
@@ -128,9 +132,16 @@ type ContributionReceiptRow = RowDataPacket & {
   client_operation_key: string;
   contribution_id: string;
   created_at_utc: string | Date;
+  entry_type: string;
   id: string;
   note: string | null;
   received_on: string | Date;
+  reversal_of_id: string | null;
+  reversal_reason: string | null;
+};
+
+type LatestReceiptDateRow = RowDataPacket & {
+  latest_received_on: string | Date | null;
 };
 
 function canonicalDate(value: string | Date): string {
@@ -169,6 +180,15 @@ function commissionStatus(value: string): CommissionStatus {
 function contributionStatus(value: string): ContributionStatus {
   if (value !== "expected" && value !== "partial" && value !== "received" && value !== "cancelled") {
     throw new Error("Partnership contribution status is invalid.");
+  }
+  return value;
+}
+
+function contributionReceiptEntryType(
+  value: string,
+): ContributionReceiptEntryType {
+  if (value !== "receipt" && value !== "reversal") {
+    throw new Error("Partnership contribution receipt entry type is invalid.");
   }
   return value;
 }
@@ -231,9 +251,12 @@ function mapContributionReceipt(
     clientOperationKey: row.client_operation_key,
     contributionId: row.contribution_id,
     createdAtUtc: canonicalDateTime(row.created_at_utc),
+    entryType: contributionReceiptEntryType(row.entry_type),
     id: row.id,
     note: row.note,
     receivedOn: canonicalDate(row.received_on),
+    reversalOfId: row.reversal_of_id,
+    reversalReason: row.reversal_reason,
   };
 }
 
@@ -254,7 +277,8 @@ const CONTRIBUTION_COLUMNS = `
 
 const CONTRIBUTION_RECEIPT_COLUMNS = `
   pcr.id, pcr.client_operation_key, pcr.contribution_id, pcr.amount,
-  pcr.received_on, pcr.note, pcr.created_at_utc`;
+  pcr.received_on, pcr.note, pcr.entry_type, pcr.reversal_of_id,
+  pcr.reversal_reason, pcr.created_at_utc`;
 
 function monthBounds(month: string): Readonly<{ start: string; next: string }> {
   const year = Number(month.slice(0, 4));
@@ -477,6 +501,53 @@ export async function findContributionReceiptByOperationKeyForUpdate(
   return rows[0] ? mapContributionReceipt(rows[0]) : null;
 }
 
+export async function findContributionReceiptForUpdate(
+  connection: PoolConnection,
+  id: string,
+): Promise<PartnershipContributionReceipt | null> {
+  const [rows] = await connection.execute<ContributionReceiptRow[]>(
+    `SELECT ${CONTRIBUTION_RECEIPT_COLUMNS}
+       FROM partnership_contribution_receipt pcr
+      WHERE pcr.id = ?
+      FOR UPDATE`,
+    [id],
+  );
+  return rows[0] ? mapContributionReceipt(rows[0]) : null;
+}
+
+export async function findContributionReceiptReversalForUpdate(
+  connection: PoolConnection,
+  originalReceiptId: string,
+): Promise<PartnershipContributionReceipt | null> {
+  const [rows] = await connection.execute<ContributionReceiptRow[]>(
+    `SELECT ${CONTRIBUTION_RECEIPT_COLUMNS}
+       FROM partnership_contribution_receipt pcr
+      WHERE pcr.entry_type = 'reversal' AND pcr.reversal_of_id = ?
+      FOR UPDATE`,
+    [originalReceiptId],
+  );
+  return rows[0] ? mapContributionReceipt(rows[0]) : null;
+}
+
+export async function findLatestActiveContributionReceiptDate(
+  connection: PoolConnection,
+  contributionId: string,
+): Promise<string | null> {
+  const [rows] = await connection.execute<LatestReceiptDateRow[]>(
+    `SELECT MAX(original_receipt.received_on) AS latest_received_on
+       FROM partnership_contribution_receipt original_receipt
+       LEFT JOIN partnership_contribution_receipt reversal
+         ON reversal.entry_type = 'reversal'
+        AND reversal.reversal_of_id = original_receipt.id
+      WHERE original_receipt.contribution_id = ?
+        AND original_receipt.entry_type = 'receipt'
+        AND reversal.id IS NULL`,
+    [contributionId],
+  );
+  const value = rows[0]?.latest_received_on ?? null;
+  return value === null ? null : canonicalDate(value);
+}
+
 export async function insertContributionReceiptIdempotently(
   connection: PoolConnection,
   receipt: PartnershipContributionReceipt,
@@ -484,8 +555,8 @@ export async function insertContributionReceiptIdempotently(
   await connection.execute<ResultSetHeader>(
     `INSERT INTO partnership_contribution_receipt
        (id, client_operation_key, contribution_id, amount, received_on, note,
-        created_at_utc)
-     VALUES (?, ?, ?, ?, ?, ?, ?)
+        entry_type, reversal_of_id, reversal_reason, created_at_utc)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON DUPLICATE KEY UPDATE id = id`,
     [
       receipt.id,
@@ -494,6 +565,9 @@ export async function insertContributionReceiptIdempotently(
       receipt.amount,
       receipt.receivedOn,
       receipt.note,
+      receipt.entryType,
+      receipt.reversalOfId,
+      receipt.reversalReason,
       receipt.createdAtUtc,
     ],
   );

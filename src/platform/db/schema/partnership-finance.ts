@@ -9,6 +9,7 @@ import {
   index,
   int,
   mysqlTable,
+  type MySqlTableExtraConfigValue,
   uniqueIndex,
   varchar,
 } from "drizzle-orm/mysql-core";
@@ -246,12 +247,17 @@ export const partnershipContributionReceipt = mysqlTable(
     contributionId: char("contribution_id", { length: 36 }).notNull(),
     amount: decimal("amount", { precision: 19, scale: 4 }).notNull(),
     receivedOn: date("received_on", { mode: "string" }).notNull(),
+    entryType: varchar("entry_type", { length: 16 })
+      .default("receipt")
+      .notNull(),
+    reversalOfId: char("reversal_of_id", { length: 36 }),
+    reversalReason: varchar("reversal_reason", { length: 2000 }),
     note: varchar("note", { length: 2000 }),
     createdAtUtc: datetime("created_at_utc", { fsp: 6, mode: "string" })
       .default(sql`CURRENT_TIMESTAMP(6)`)
       .notNull(),
   },
-  (table) => [
+  (table): MySqlTableExtraConfigValue[] => [
     check(
       "chk_partnership_contribution_receipt_identity",
       sql`OCTET_LENGTH(${table.id}) = 36
@@ -259,7 +265,11 @@ export const partnershipContributionReceipt = mysqlTable(
         AND OCTET_LENGTH(${table.clientOperationKey}) = 36
         AND BINARY ${table.clientOperationKey} REGEXP '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
         AND OCTET_LENGTH(${table.contributionId}) = 36
-        AND BINARY ${table.contributionId} REGEXP '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'`,
+        AND BINARY ${table.contributionId} REGEXP '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+        AND (${table.reversalOfId} IS NULL OR (
+          OCTET_LENGTH(${table.reversalOfId}) = 36
+          AND BINARY ${table.reversalOfId} REGEXP '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+        ))`,
     ),
     check(
       "chk_partnership_contribution_receipt_amount",
@@ -269,6 +279,20 @@ export const partnershipContributionReceipt = mysqlTable(
       "chk_partnership_contribution_receipt_note",
       sql`${table.note} IS NULL OR CHAR_LENGTH(${table.note}) BETWEEN 1 AND 2000`,
     ),
+    check(
+      "chk_partnership_contribution_receipt_entry",
+      sql`(
+          BINARY ${table.entryType} = BINARY 'receipt'
+          AND ${table.reversalOfId} IS NULL
+          AND ${table.reversalReason} IS NULL
+        ) OR (
+          BINARY ${table.entryType} = BINARY 'reversal'
+          AND ${table.reversalOfId} IS NOT NULL
+          AND ${table.reversalReason} IS NOT NULL
+          AND CHAR_LENGTH(${table.reversalReason}) BETWEEN 1 AND 2000
+          AND ${table.reversalReason} = TRIM(${table.reversalReason})
+        )`,
+    ),
     foreignKey({
       name: "fk_partnership_contribution_receipt_contribution",
       columns: [table.contributionId],
@@ -276,8 +300,18 @@ export const partnershipContributionReceipt = mysqlTable(
     })
       .onDelete("restrict")
       .onUpdate("restrict"),
+    foreignKey({
+      name: "fk_partnership_contribution_receipt_reversal",
+      columns: [table.reversalOfId],
+      foreignColumns: [partnershipContributionReceipt.id],
+    })
+      .onDelete("restrict")
+      .onUpdate("restrict"),
     uniqueIndex("uq_partnership_contribution_receipt_operation").on(
       table.clientOperationKey,
+    ),
+    uniqueIndex("uq_partnership_contribution_receipt_reversal").on(
+      table.reversalOfId,
     ),
     index("idx_partnership_contribution_receipt_parent_date").on(
       table.contributionId,

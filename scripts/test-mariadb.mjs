@@ -187,11 +187,32 @@ try {
     publishedPort,
   );
 
+  console.log("Running 0011 to 0012 user-permission migration tests...");
+  await runIntegrationFile(
+    "mariadb-phpmyadmin-user-permissions-incremental.test.ts",
+    publishedPort,
+  );
+
+  console.log("Running 0012 to 0013 login-throttle migration tests...");
+  await runIntegrationFile(
+    "mariadb-phpmyadmin-login-throttle-incremental.test.ts",
+    publishedPort,
+  );
+
+  console.log("Running 0013 through 0015 lifecycle and financial incremental migrations...");
+  await runIntegrationFile(
+    "mariadb-phpmyadmin-current-incremental.test.ts",
+    publishedPort,
+  );
+
   console.log("Running migration runner correctness tests against disposable MariaDB...");
   await runIntegrationFile(
     "mariadb-migrations.test.ts",
     publishedPort,
   );
+
+  console.log("Running durable login-throttle behavior tests...");
+  await runIntegrationFile("mariadb-login-throttle.test.ts", publishedPort);
 
   // These suites intentionally share the same disposable database and mutate
   // the same platform tables, so they must remain separate, serial processes.

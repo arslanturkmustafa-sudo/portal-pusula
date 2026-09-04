@@ -127,6 +127,7 @@ export const updateContractInputSchema = z
     status: contractStatusSchema,
     vatMode: vatModeSchema,
     vatRate: rateSchema,
+    version: z.number().int().min(1).max(4_294_967_294),
   })
   .strict()
   .superRefine(validateContractTerms);

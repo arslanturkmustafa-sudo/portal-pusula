@@ -31,7 +31,7 @@ export const runtime = "nodejs";
 const FILTERS = new Set(["month", "projectId"]);
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  if (!(await authenticateAdminRequest(request))) return spendingJson({ status: "unauthorized" }, 401);
+  if (!(await authenticateAdminRequest(request, "finance.partnership.read"))) return spendingJson({ status: "unauthorized" }, 401);
   try {
     const filters = partnershipListFilterSchema.parse(uniqueQuery(request, FILTERS));
     return spendingJson(await listPartnershipContributions(spendingDatabasePool(), filters));
@@ -42,7 +42,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  const principal = await authenticateAdminRequest(request);
+  const principal = await authenticateAdminRequest(request, "finance.partnership.write");
   if (!principal) return spendingJson({ status: "unauthorized" }, 401);
   if (!isSameOrigin(request)) return spendingJson({ status: "forbidden" }, 403);
   if (!isJsonRequest(request)) return spendingJson({ status: "unsupported_media_type" }, 415);

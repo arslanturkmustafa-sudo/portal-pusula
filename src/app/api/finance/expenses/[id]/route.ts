@@ -18,6 +18,7 @@ import {
   spendingDatabasePool,
   spendingJson,
 } from "@/features/finance/spending-route-support";
+import { hasPermission } from "@/platform/auth/permissions";
 import { authenticateAdminRequest } from "@/platform/auth/server-auth";
 import { correlationIdFromHeaders } from "@/platform/http/correlation-id";
 import { requestLogger } from "@/platform/logging/logger";
@@ -33,7 +34,7 @@ export async function PATCH(
   request: NextRequest,
   context: RouteContext,
 ): Promise<NextResponse> {
-  const principal = await authenticateAdminRequest(request);
+  const principal = await authenticateAdminRequest(request, "finance.expenses.write");
   if (!principal) return spendingJson({ status: "unauthorized" }, 401);
   if (!isSameOrigin(request)) return spendingJson({ status: "forbidden" }, 403);
   if (!isJsonRequest(request)) {
@@ -43,6 +44,12 @@ export async function PATCH(
   try {
     const { id } = await context.params;
     const input = updateExpenseInputSchema.parse(await readSpendingBody(request));
+    if (
+      input.status === "voided" &&
+      !hasPermission(principal, "finance.expenses.reverse")
+    ) {
+      return spendingJson({ status: "forbidden" }, 403);
+    }
     const expense = await updateExpense(spendingDatabasePool(), id, input, {
       actorId: spendingActorId(principal),
       correlationId,

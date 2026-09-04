@@ -57,6 +57,7 @@ const optionalNoteSchema = z.preprocess(
   emptyToNull,
   z.union([z.string().min(1).max(2000), z.null()]).default(null),
 );
+const correctionReasonSchema = z.string().trim().min(3).max(2000);
 
 export const generateReceivableInputSchema = z
   .object({
@@ -110,6 +111,21 @@ export const createCollectionInputSchema = z
   })
   .strict();
 
+export const receivableLifecycleInputSchema = z
+  .object({
+    action: z.literal("void"),
+    reason: correctionReasonSchema,
+    version: z.number().int().min(1).max(4_294_967_294),
+  })
+  .strict();
+
+export const reverseCollectionInputSchema = z
+  .object({
+    clientOperationKey: canonicalUuidSchema,
+    reason: correctionReasonSchema,
+  })
+  .strict();
+
 export type GenerateReceivableInput = z.infer<
   typeof generateReceivableInputSchema
 >;
@@ -119,4 +135,10 @@ export type FinanceReceivableListFilter = z.infer<
 export type OpeningBalanceInput = z.infer<typeof openingBalanceInputSchema>;
 export type CreateCollectionInput = z.infer<
   typeof createCollectionInputSchema
+>;
+export type ReceivableLifecycleInput = z.infer<
+  typeof receivableLifecycleInputSchema
+>;
+export type ReverseCollectionInput = z.infer<
+  typeof reverseCollectionInputSchema
 >;

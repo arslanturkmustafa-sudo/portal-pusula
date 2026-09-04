@@ -6,15 +6,21 @@ import type {
   RowDataPacket,
 } from "mysql2/promise";
 
+import {
+  mapArchiveMetadata,
+  type ArchiveMetadata,
+} from "@/features/lifecycle";
+
 export type TaskStatus =
   | "backlog"
   | "todo"
   | "in_progress"
   | "blocked"
-  | "done";
+  | "done"
+  | "cancelled";
 export type TaskPriority = "low" | "normal" | "high" | "urgent";
 
-export type WorkTaskState = Readonly<{
+export type WorkTaskState = ArchiveMetadata & Readonly<{
   assigneeUserAccountId: string | null;
   completedAtUtc: string | null;
   createdAtUtc: string;
@@ -40,6 +46,9 @@ export type WorkTask = WorkTaskState &
   }>;
 
 type WorkTaskStateRow = RowDataPacket & {
+  archive_reason: string | null;
+  archived_at_utc: string | Date | null;
+  archived_by_user_account_id: string | null;
   assignee_user_account_id: string | null;
   completed_at_utc: string | Date | null;
   created_at_utc: string | Date;
@@ -81,7 +90,8 @@ function taskStatus(value: string): TaskStatus {
     value !== "todo" &&
     value !== "in_progress" &&
     value !== "blocked" &&
-    value !== "done"
+    value !== "done" &&
+    value !== "cancelled"
   ) {
     throw new Error("Task status is invalid.");
   }
@@ -101,11 +111,8 @@ function taskPriority(value: string): TaskPriority {
 }
 
 function mapTaskState(row: WorkTaskStateRow): WorkTaskState {
-  if (!Number.isSafeInteger(row.version) || row.version < 1) {
-    throw new Error("Task version is invalid.");
-  }
-
   return {
+    ...mapArchiveMetadata(row),
     assigneeUserAccountId: row.assignee_user_account_id,
     completedAtUtc:
       row.completed_at_utc === null
@@ -121,7 +128,6 @@ function mapTaskState(row: WorkTaskStateRow): WorkTaskState {
     status: taskStatus(row.status),
     title: row.title,
     updatedAtUtc: canonicalDateTime(row.updated_at_utc),
-    version: row.version,
   };
 }
 
@@ -160,7 +166,8 @@ const TASK_STATE_COLUMNS = `
   task.id, task.customer_id, task.assignee_user_account_id,
   task_link.project_id,
   task.title, task.description, task.status, task.priority, task.due_on,
-  task.completed_at_utc, task.version, task.created_at_utc,
+  task.completed_at_utc, task.archive_reason, task.archived_at_utc,
+  task.archived_by_user_account_id, task.version, task.created_at_utc,
   task.updated_at_utc`;
 
 const TASK_PROJECTION_COLUMNS = `${TASK_STATE_COLUMNS},
@@ -184,7 +191,8 @@ export async function listTaskRecords(
   const [rows] = await connection.execute<WorkTaskRow[]>(
     `SELECT ${TASK_PROJECTION_COLUMNS}
        ${TASK_PROJECTION_JOIN}
-      ORDER BY FIELD(task.status, 'backlog', 'todo', 'in_progress', 'blocked', 'done'),
+      ORDER BY task.archived_at_utc IS NULL DESC,
+               FIELD(task.status, 'backlog', 'todo', 'in_progress', 'blocked', 'done', 'cancelled'),
                FIELD(task.priority, 'urgent', 'high', 'normal', 'low'),
                task.due_on IS NULL ASC,
                task.due_on ASC,
@@ -231,8 +239,9 @@ export async function insertTaskRecord(
     `INSERT INTO work_task
        (id, customer_id, assignee_user_account_id, title, description,
         status, priority, due_on, completed_at_utc, version,
+        archive_reason, archived_at_utc, archived_by_user_account_id,
         created_at_utc, updated_at_utc)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       task.id,
       task.customerId,
@@ -244,6 +253,9 @@ export async function insertTaskRecord(
       task.dueOn,
       task.completedAtUtc,
       task.version,
+      task.archiveReason,
+      task.archivedAtUtc,
+      task.archivedByUserAccountId,
       task.createdAtUtc,
       task.updatedAtUtc,
     ],
@@ -260,7 +272,8 @@ export async function updateTaskRecord(
     `UPDATE work_task
         SET customer_id = ?, assignee_user_account_id = ?, title = ?,
             description = ?, status = ?, priority = ?, due_on = ?,
-            completed_at_utc = ?, version = ?, updated_at_utc = ?
+            completed_at_utc = ?, archive_reason = ?, archived_at_utc = ?,
+            archived_by_user_account_id = ?, version = ?, updated_at_utc = ?
       WHERE id = ? AND version = ?`,
     [
       task.customerId,
@@ -271,6 +284,9 @@ export async function updateTaskRecord(
       task.priority,
       task.dueOn,
       task.completedAtUtc,
+      task.archiveReason,
+      task.archivedAtUtc,
+      task.archivedByUserAccountId,
       task.version,
       task.updatedAtUtc,
       task.id,

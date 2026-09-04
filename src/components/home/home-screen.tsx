@@ -12,6 +12,8 @@ import { CustomerWorkspace } from "@/components/home/customer-workspace";
 import { PortalPageHeader } from "@/components/portal/portal-page-header";
 
 type CustomerView = Readonly<{
+  archiveReason?: string | null;
+  archivedAtUtc?: string | null;
   code: string;
   contact: string;
   contactNote?: string | null;
@@ -25,6 +27,7 @@ type CustomerView = Readonly<{
   status: string;
   tone: "active" | "inactive" | "late" | "paid" | "waiting";
   visit: string;
+  version?: number;
 }>;
 
 type ProjectStatus =
@@ -42,14 +45,27 @@ type ProjectSummary = Readonly<{
 }>;
 
 type StoredCustomer = Readonly<{
+  archiveReason?: string | null;
+  archivedAtUtc?: string | null;
   contactNote: string | null;
   displayName: string;
   email: string | null;
   id: string;
+  overview: Readonly<{
+    billing?: Readonly<{
+      activeContractCount: number;
+      currency: "TRY";
+      monthlyFeeAmount: string;
+      paymentDays: readonly number[];
+      vatMode: "exempt" | "exclusive" | "inclusive" | "mixed";
+    }>;
+    nextVisitOn: string | null;
+  }>;
   phone: string | null;
   projects: readonly ProjectSummary[];
   shortCode: string;
   status: "active" | "inactive";
+  version?: number;
 }>;
 
 function canAcceptNewCustomerLink(status: ProjectStatus): boolean {
@@ -146,33 +162,52 @@ function generatedCustomerCode(displayName: FormDataEntryValue | null): string {
   return `${base}_${suffix}`;
 }
 
-function storedCustomerView(customer: StoredCustomer): CustomerView {
+function storedCustomerView(
+  customer: StoredCustomer,
+  capabilities: NonNullable<HomeScreenProps["capabilities"]> = fullCapabilities,
+): CustomerView {
+  const billing = customer.overview.billing;
   return {
+    archiveReason: customer.archiveReason ?? null,
+    archivedAtUtc: customer.archivedAtUtc ?? null,
     code: customer.shortCode,
     contact: customer.email ?? customer.phone ?? "İletişim bilgisi yok",
     contactNote: customer.contactNote,
     email: customer.email,
-    fee: "—",
+    fee:
+      capabilities.canReadBilling && billing
+        ? contractFeeLabel(billing)
+        : "Erişim kısıtlı",
     id: customer.id,
     name: customer.displayName,
-    payment: "—",
+    payment: capabilities.canReadBilling && billing
+      ? billing.paymentDays.length === 1
+        ? `Ayın ${billing.paymentDays[0]}. günü`
+        : `Ayın ${billing.paymentDays.join(", ")}. günleri`
+      : "Erişim kısıtlı",
     phone: customer.phone,
     projects: customer.projects,
     status: customer.status === "active" ? "Aktif" : "Pasif",
     tone: customer.status,
-    visit: "Planlanmadı",
+    visit: !capabilities.canReadVisits
+      ? "Erişim kısıtlı"
+      : customer.overview.nextVisitOn
+        ? shortVisitDate(customer.overview.nextVisitOn)
+        : "Planlanmadı",
+    version: customer.version,
   };
 }
 
 function contractFeeLabel(contract: {
   monthlyFeeAmount: string;
-  vatMode: "exempt" | "exclusive" | "inclusive";
+  vatMode: "exempt" | "exclusive" | "inclusive" | "mixed";
 }): string {
   const amount = new Intl.NumberFormat("tr-TR", {
     maximumFractionDigits: 2,
   }).format(Number(contract.monthlyFeeAmount));
   if (contract.vatMode === "exclusive") return `${amount} ₺ + KDV`;
   if (contract.vatMode === "inclusive") return `${amount} ₺ (KDV dahil)`;
+  if (contract.vatMode === "mixed") return `${amount} ₺ (karma KDV)`;
   return `${amount} ₺`;
 }
 
@@ -186,10 +221,34 @@ function shortVisitDate(value: string): string {
 }
 
 type HomeScreenProps = Readonly<{
+  capabilities?: Readonly<{
+    canOpenCustomerDetails: boolean;
+    canReadBilling: boolean;
+    canReadProjects: boolean;
+    canReadVisits: boolean;
+    canReadAudit: boolean;
+    canLifecycleContracts: boolean;
+    canLifecycleCustomers: boolean;
+    canWriteCustomers: boolean;
+  }>;
   live?: boolean;
 }>;
 
-export function HomeScreen({ live = false }: HomeScreenProps) {
+const fullCapabilities: NonNullable<HomeScreenProps["capabilities"]> = {
+  canOpenCustomerDetails: true,
+  canReadBilling: true,
+  canReadProjects: true,
+  canReadVisits: true,
+  canReadAudit: true,
+  canLifecycleContracts: true,
+  canLifecycleCustomers: true,
+  canWriteCustomers: true,
+};
+
+export function HomeScreen({
+  capabilities = fullCapabilities,
+  live = false,
+}: HomeScreenProps) {
   const [customerRows, setCustomerRows] =
     useState<readonly CustomerView[]>(() => (live ? [] : sampleCustomers));
   const [projects, setProjects] = useState<readonly ProjectSummary[]>(() =>
@@ -217,36 +276,43 @@ export function HomeScreen({ live = false }: HomeScreenProps) {
         credentials: "same-origin",
         signal: controller.signal,
       }),
-      fetch("/api/projects", {
-        cache: "no-store",
-        credentials: "same-origin",
-        signal: controller.signal,
-      }),
+      capabilities.canReadProjects
+        ? fetch("/api/projects", {
+            cache: "no-store",
+            credentials: "same-origin",
+            signal: controller.signal,
+          })
+        : Promise.resolve(null),
     ])
       .then(async ([customersResponse, projectsResponse]) => {
-        if (!customersResponse.ok || !projectsResponse.ok) {
+        if (!customersResponse.ok || (projectsResponse && !projectsResponse.ok)) {
           throw new Error("Customer workspace is unavailable.");
         }
-        const [customerPayload, projectPayload] = (await Promise.all([
-          customersResponse.json(),
-          projectsResponse.json(),
-        ])) as [
-          { customers?: StoredCustomer[] },
-          { projects?: ProjectSummary[] },
-        ];
+        const customerPayload = (await customersResponse.json()) as {
+          customers?: StoredCustomer[];
+        };
+        const projectPayload = projectsResponse
+          ? ((await projectsResponse.json()) as { projects?: ProjectSummary[] })
+          : null;
         if (
           !Array.isArray(customerPayload.customers) ||
-          !Array.isArray(projectPayload.projects)
+          (projectPayload !== null && !Array.isArray(projectPayload.projects))
         ) {
           throw new Error("Customer workspace response is invalid.");
         }
+        const projectedProjects = new Map<string, ProjectSummary>();
+        for (const customer of customerPayload.customers) {
+          for (const project of customer.projects) projectedProjects.set(project.id, project);
+        }
         return {
-          customers: customerPayload.customers,
-          projects: projectPayload.projects,
+          customers: customerPayload.customers.map((customer) =>
+            storedCustomerView(customer, capabilities),
+          ),
+          projects: projectPayload?.projects ?? [...projectedProjects.values()],
         };
       })
       .then((payload) => {
-        setCustomerRows(payload.customers.map(storedCustomerView));
+        setCustomerRows(payload.customers);
         setProjects(payload.projects);
         const requestedProjectId = new URLSearchParams(window.location.search).get(
           "projectId",
@@ -266,7 +332,7 @@ export function HomeScreen({ live = false }: HomeScreenProps) {
       });
 
     return () => controller.abort();
-  }, [live]);
+  }, [capabilities, live]);
 
   const visibleCustomers = useMemo(() => {
     const canonicalQuery = query.trim().toLocaleLowerCase("tr-TR");
@@ -329,6 +395,10 @@ export function HomeScreen({ live = false }: HomeScreenProps) {
       id: string;
       phone: string | null;
       projects: readonly ProjectSummary[];
+      archiveReason?: string | null;
+      archivedAtUtc?: string | null;
+      status?: "active" | "inactive";
+      version?: number;
     }) => {
       setCustomerRows((current) =>
         current.map((row) =>
@@ -341,6 +411,19 @@ export function HomeScreen({ live = false }: HomeScreenProps) {
                 name: customer.displayName,
                 phone: customer.phone,
                 projects: customer.projects,
+                archiveReason: customer.archiveReason === undefined
+                  ? row.archiveReason
+                  : customer.archiveReason,
+                archivedAtUtc: customer.archivedAtUtc === undefined
+                  ? row.archivedAtUtc
+                  : customer.archivedAtUtc,
+                status: customer.status === undefined
+                  ? row.status
+                  : customer.status === "active"
+                    ? "Aktif"
+                    : "Pasif",
+                tone: customer.status ?? row.tone,
+                version: customer.version ?? row.version,
               }
             : row,
         ),
@@ -445,7 +528,7 @@ export function HomeScreen({ live = false }: HomeScreenProps) {
   return (
     <div className="customer-page-workspace">
       <PortalPageHeader
-        actions={(
+        actions={capabilities.canWriteCustomers ? (
           <button
             className="primary-action"
             type="button"
@@ -459,13 +542,13 @@ export function HomeScreen({ live = false }: HomeScreenProps) {
           >
             + Müşteri ekle
           </button>
-        )}
+        ) : undefined}
         context="Müşteri masası"
         note="Sözleşme, ziyaret ve tahsilat durumuna tek bakış."
         title="Müşteriler"
       />
 
-          {formOpen ? (
+          {formOpen && capabilities.canWriteCustomers ? (
             <section className="customer-entry" aria-labelledby="customer-entry-title">
               <div>
                 <p className="section-kicker">Yeni kayıt</p>
@@ -718,24 +801,38 @@ export function HomeScreen({ live = false }: HomeScreenProps) {
 
           </div>
 
-          {selectedCustomer ? (
+          {selectedCustomer && capabilities.canOpenCustomerDetails ? (
             <CustomerWorkspace
               key={selectedCustomer.id}
               customer={{
                 contactNote: selectedCustomer.contactNote ?? null,
+                archiveReason: selectedCustomer.archiveReason ?? null,
+                archivedAtUtc: selectedCustomer.archivedAtUtc ?? null,
                 displayName: selectedCustomer.name,
                 email: selectedCustomer.email ?? null,
                 id: selectedCustomer.id,
                 name: selectedCustomer.name,
                 phone: selectedCustomer.phone ?? null,
                 projects: selectedCustomer.projects,
+                status: selectedCustomer.tone === "inactive" ? "inactive" : "active",
+                version: selectedCustomer.version,
               }}
               availableProjects={projects}
+              capabilities={{
+                canLifecycleContracts: capabilities.canLifecycleContracts,
+                canLifecycleCustomers: capabilities.canLifecycleCustomers,
+                canReadAudit: capabilities.canReadAudit,
+              }}
               live={live}
               onContractSaved={handleContractSaved}
               onCustomerSaved={handleCustomerSaved}
               onVisitsSaved={handleVisitsSaved}
             />
+          ) : selectedCustomer ? (
+            <p className="workspace-selector-note" role="note">
+              Bu müşteri için iletişim, sözleşme ve ziyaret ayrıntıları hesabınıza
+              verilen modül izinleriyle sınırlandırılmıştır.
+            </p>
           ) : (
             <p className="workspace-selector-note">
               Sözleşme ve ziyaret planını açmak için müşteri adını seçin.

@@ -35,6 +35,82 @@ const migrationBreakpoint = /--> statement-breakpoint\s*/gu;
 const safeIdentifier = /^[A-Za-z0-9_]{1,64}$/u;
 const CUSTOMER_PROJECTS_PARTNERSHIP_MIGRATION_TAG =
   "0011_customer_projects_partnership";
+const USER_PERMISSIONS_MIGRATION_TAG = "0012_user_permissions";
+const RECORD_LIFECYCLE_MIGRATION_TAG = "0014_record_lifecycle";
+const FINANCIAL_REVERSALS_MIGRATION_TAG = "0015_financial_reversals";
+
+const managedForwardColumns = new Map([
+  ...[
+    ["consulting_contract", "archive_reason", "varchar(500)"],
+    ["consulting_contract", "archived_at_utc", "datetime(6)"],
+    ["consulting_contract", "archived_by_user_account_id", "char(36) CHARACTER SET ascii COLLATE ascii_bin"],
+    ["consulting_contract", "version", "int unsigned DEFAULT 1 NOT NULL"],
+    ["customer", "archive_reason", "varchar(500)"],
+    ["customer", "archived_at_utc", "datetime(6)"],
+    ["customer", "archived_by_user_account_id", "char(36) CHARACTER SET ascii COLLATE ascii_bin"],
+    ["customer", "version", "int unsigned DEFAULT 1 NOT NULL"],
+    ["project", "archive_reason", "varchar(500)"],
+    ["project", "archived_at_utc", "datetime(6)"],
+    ["project", "archived_by_user_account_id", "char(36) CHARACTER SET ascii COLLATE ascii_bin"],
+    ["work_task", "archive_reason", "varchar(500)"],
+    ["work_task", "archived_at_utc", "datetime(6)"],
+    ["work_task", "archived_by_user_account_id", "char(36) CHARACTER SET ascii COLLATE ascii_bin"],
+  ].map(([tableName, columnName, definition]) => [
+    `${RECORD_LIFECYCLE_MIGRATION_TAG}:${tableName}:${columnName}`,
+    { columnName, definition, tableName },
+  ]),
+  ...[
+    ["partnership_contribution_receipt", "entry_type", "varchar(16) DEFAULT 'receipt' NOT NULL"],
+    ["partnership_contribution_receipt", "reversal_of_id", "char(36) CHARACTER SET ascii COLLATE ascii_bin"],
+    ["partnership_contribution_receipt", "reversal_reason", "varchar(2000)"],
+    ["receivable", "record_state", "varchar(16) DEFAULT 'active' NOT NULL"],
+    ["receivable", "void_reason", "varchar(2000)"],
+    ["receivable", "voided_at_utc", "datetime(6)"],
+    ["receivable", "version", "int unsigned DEFAULT 1 NOT NULL"],
+    ["receivable_collection", "entry_type", "varchar(16) DEFAULT 'collection' NOT NULL"],
+    ["receivable_collection", "reversal_of_id", "char(36) CHARACTER SET ascii COLLATE ascii_bin"],
+    ["receivable_collection", "reversal_reason", "varchar(2000)"],
+  ].map(([tableName, columnName, definition]) => [
+    `${FINANCIAL_REVERSALS_MIGRATION_TAG}:${tableName}:${columnName}`,
+    { columnName, definition, tableName },
+  ]),
+]);
+
+const managedDroppedChecks = new Set([
+  `${RECORD_LIFECYCLE_MIGRATION_TAG}:consulting_contract:chk_consulting_contract_timeline`,
+  `${RECORD_LIFECYCLE_MIGRATION_TAG}:customer:chk_customer_timeline`,
+  `${RECORD_LIFECYCLE_MIGRATION_TAG}:project:chk_project_timeline`,
+  `${RECORD_LIFECYCLE_MIGRATION_TAG}:user_permission:chk_user_permission_code`,
+  `${RECORD_LIFECYCLE_MIGRATION_TAG}:work_task:chk_work_task_status`,
+  `${RECORD_LIFECYCLE_MIGRATION_TAG}:work_task:chk_work_task_timeline`,
+  `${FINANCIAL_REVERSALS_MIGRATION_TAG}:partnership_contribution_receipt:chk_partnership_contribution_receipt_identity`,
+  `${FINANCIAL_REVERSALS_MIGRATION_TAG}:receivable:chk_receivable_timeline`,
+  `${FINANCIAL_REVERSALS_MIGRATION_TAG}:receivable_collection:chk_receivable_collection_identity`,
+]);
+
+const managedDroppedIndexes = new Map([
+  [
+    `${RECORD_LIFECYCLE_MIGRATION_TAG}:consulting_contract:idx_consulting_contract_customer_status`,
+    ["customer_id", "status", "ends_on"],
+  ],
+  [
+    `${RECORD_LIFECYCLE_MIGRATION_TAG}:customer:idx_customer_status_name`,
+    ["status", "display_name"],
+  ],
+  [
+    `${RECORD_LIFECYCLE_MIGRATION_TAG}:project:idx_project_status_name`,
+    ["status", "display_name"],
+  ],
+  [
+    `${RECORD_LIFECYCLE_MIGRATION_TAG}:work_task:idx_work_task_board`,
+    ["status", "due_on", "updated_at_utc"],
+  ],
+]);
+
+const managedUniqueConstraints = new Set([
+  `${FINANCIAL_REVERSALS_MIGRATION_TAG}:partnership_contribution_receipt:uq_partnership_contribution_receipt_reversal:reversal_of_id`,
+  `${FINANCIAL_REVERSALS_MIGRATION_TAG}:receivable_collection:uq_receivable_collection_reversal:reversal_of_id`,
+]);
 const CUSTOMER_PROJECT_BACKFILL_SQL = `INSERT INTO \`customer_project\` (\`customer_id\`, \`project_id\`, \`status\`, \`version\`, \`created_at_utc\`, \`updated_at_utc\`) SELECT \`seed\`.\`customer_id\`, \`seed\`.\`project_id\`, 'active', 1, CURRENT_TIMESTAMP(6), CURRENT_TIMESTAMP(6) FROM (SELECT \`customer\`.\`id\` AS \`customer_id\`, \`project\`.\`id\` AS \`project_id\` FROM \`customer\` CROSS JOIN \`project\` WHERE BINARY \`project\`.\`short_code\` = BINARY 'MUHENDIS_KAFASI' UNION DISTINCT SELECT \`work_task\`.\`customer_id\` AS \`customer_id\`, \`work_task_project\`.\`project_id\` AS \`project_id\` FROM \`work_task\` JOIN \`work_task_project\` ON \`work_task_project\`.\`task_id\` = \`work_task\`.\`id\` WHERE \`work_task\`.\`customer_id\` IS NOT NULL) AS \`seed\``;
 const CONSULTING_CONTRACT_BACKFILL_SQL = `UPDATE \`consulting_contract\` JOIN \`project\` ON BINARY \`project\`.\`short_code\` = BINARY 'MUHENDIS_KAFASI' SET \`consulting_contract\`.\`project_id\` = \`project\`.\`id\` WHERE \`consulting_contract\`.\`project_id\` IS NULL`;
 const RECEIVABLE_BACKFILL_SQL = `UPDATE \`receivable\` LEFT JOIN \`consulting_contract\` ON \`consulting_contract\`.\`id\` = \`receivable\`.\`contract_id\` JOIN \`project\` ON BINARY \`project\`.\`short_code\` = BINARY 'MUHENDIS_KAFASI' SET \`receivable\`.\`project_id\` = COALESCE(\`consulting_contract\`.\`project_id\`, \`project\`.\`id\`) WHERE \`receivable\`.\`project_id\` IS NULL`;
@@ -368,6 +444,165 @@ function parseCustomerProjectsPartnershipStatement(statement) {
   return null;
 }
 
+function parseUserPermissionsStatement(statement) {
+  const normalized = statement.replaceAll(/\s+/gu, " ").trim();
+
+  if (
+    normalized ===
+    "ALTER TABLE `user_account` DROP CONSTRAINT `chk_user_account_state`"
+  ) {
+    return {
+      constraintName: "chk_user_account_state",
+      tableName: "user_account",
+      type: "drop-check",
+    };
+  }
+
+  if (
+    normalized ===
+    "ALTER TABLE `user_account` ADD `display_name` varchar(191) NOT NULL DEFAULT 'Portal Yöneticisi' AFTER `email`, ADD `role` varchar(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT 'owner' AFTER `credential_version`"
+  ) {
+    return {
+      columnNames: ["display_name", "role"],
+      tableName: "user_account",
+      type: "add-user-account-columns",
+    };
+  }
+
+  if (
+    normalized ===
+    "ALTER TABLE `user_account` MODIFY `display_name` varchar(191) NOT NULL, MODIFY `role` varchar(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT 'member'"
+  ) {
+    return {
+      columnNames: ["display_name", "role"],
+      tableName: "user_account",
+      type: "modify-user-account-columns",
+    };
+  }
+
+  return null;
+}
+
+function managedColumnSpec(definition) {
+  const varchar = /^varchar\((\d+)\)(?: DEFAULT '([^']+)')?( NOT NULL)?$/u.exec(
+    definition,
+  );
+  if (varchar) {
+    return {
+      dataType: "varchar",
+      defaultValue: varchar[2] ?? null,
+      maxLength: Number(varchar[1]),
+      nullable: varchar[3] === undefined,
+    };
+  }
+
+  const char = /^char\((\d+)\)( CHARACTER SET ascii COLLATE ascii_bin)?$/u.exec(
+    definition,
+  );
+  if (char) {
+    return {
+      characterSet: char[2] === undefined ? undefined : "ascii",
+      collation: char[2] === undefined ? undefined : "ascii_bin",
+      dataType: "char",
+      defaultValue: null,
+      maxLength: Number(char[1]),
+      nullable: true,
+    };
+  }
+
+  const datetime = /^datetime\((\d+)\)$/u.exec(definition);
+  if (datetime) {
+    return {
+      dataType: "datetime",
+      datetimePrecision: Number(datetime[1]),
+      defaultValue: null,
+      nullable: true,
+    };
+  }
+
+  if (definition === "int unsigned DEFAULT 1 NOT NULL") {
+    return {
+      dataType: "int",
+      defaultValue: "1",
+      nullable: false,
+      unsigned: true,
+    };
+  }
+
+  throw new PhpMyAdminBundleError();
+}
+
+function parseManagedForwardStatement(statement, migrationTag) {
+  if (
+    migrationTag !== RECORD_LIFECYCLE_MIGRATION_TAG &&
+    migrationTag !== FINANCIAL_REVERSALS_MIGRATION_TAG
+  ) {
+    return null;
+  }
+
+  const normalized = statement.replaceAll(/\s+/gu, " ").trim();
+  const dropCheck = /^ALTER TABLE `([^`]+)` DROP CONSTRAINT `([^`]+)`$/u.exec(
+    normalized,
+  );
+  if (dropCheck) {
+    const key = `${migrationTag}:${dropCheck[1]}:${dropCheck[2]}`;
+    if (!managedDroppedChecks.has(key)) throw new PhpMyAdminBundleError();
+    return {
+      constraintName: dropCheck[2],
+      tableName: dropCheck[1],
+      type: "drop-check",
+    };
+  }
+
+  const dropIndex = /^DROP INDEX `([^`]+)` ON `([^`]+)`$/u.exec(normalized);
+  if (dropIndex) {
+    const key = `${migrationTag}:${dropIndex[2]}:${dropIndex[1]}`;
+    const columnNames = managedDroppedIndexes.get(key);
+    if (!columnNames) throw new PhpMyAdminBundleError();
+    return {
+      columnNames,
+      indexName: dropIndex[1],
+      tableName: dropIndex[2],
+      type: "drop-index",
+      unique: false,
+    };
+  }
+
+  const addColumn = /^ALTER TABLE `([^`]+)` ADD `([^`]+)` (.+)$/u.exec(
+    normalized,
+  );
+  if (addColumn) {
+    const key = `${migrationTag}:${addColumn[1]}:${addColumn[2]}`;
+    const allowed = managedForwardColumns.get(key);
+    if (!allowed || addColumn[3] !== allowed.definition) {
+      throw new PhpMyAdminBundleError();
+    }
+    return {
+      columnName: allowed.columnName,
+      columnSpec: managedColumnSpec(allowed.definition),
+      tableName: allowed.tableName,
+      type: "add-column",
+    };
+  }
+
+  const uniqueConstraint = /^ALTER TABLE `([^`]+)` ADD CONSTRAINT `([^`]+)` UNIQUE\(`([^`]+)`\)$/u.exec(
+    normalized,
+  );
+  if (uniqueConstraint) {
+    const key = `${migrationTag}:${uniqueConstraint[1]}:${uniqueConstraint[2]}:${uniqueConstraint[3]}`;
+    if (!managedUniqueConstraints.has(key)) throw new PhpMyAdminBundleError();
+    return {
+      columnNames: [uniqueConstraint[3]],
+      indexName: uniqueConstraint[2],
+      tableName: uniqueConstraint[1],
+      type: "create-index",
+      unique: true,
+    };
+  }
+
+  return null;
+}
+
 function hasUnquotedSemicolon(statement) {
   let quote = null;
   for (let index = 0; index < statement.length; index += 1) {
@@ -416,6 +651,20 @@ export function analyzeMigrationStatement(statement, migrationTag) {
     return customerProjectsPartnershipAnalysis;
   }
 
+  const userPermissionsAnalysis =
+    migrationTag === USER_PERMISSIONS_MIGRATION_TAG
+      ? parseUserPermissionsStatement(statement)
+      : null;
+  if (userPermissionsAnalysis) {
+    return userPermissionsAnalysis;
+  }
+
+  const managedForwardAnalysis = parseManagedForwardStatement(
+    statement,
+    migrationTag,
+  );
+  if (managedForwardAnalysis) return managedForwardAnalysis;
+
   if (
     /^\s*(?:DROP|TRUNCATE|RENAME|REPLACE|DELETE|UPDATE)\s/iu.test(
       statement,
@@ -440,8 +689,92 @@ function constraintPredicate(tableName, constraintName, constraintType) {
                AND CONSTRAINT_TYPE = ${sqlString(constraintType)}) = 1`;
 }
 
+function managedColumnVerificationPredicate(analysis) {
+  const spec = analysis.columnSpec;
+  const predicates = [
+    `TABLE_SCHEMA = DATABASE()`,
+    `TABLE_NAME = ${sqlString(analysis.tableName)}`,
+    `COLUMN_NAME = ${sqlString(analysis.columnName)}`,
+    `DATA_TYPE = ${sqlString(spec.dataType)}`,
+    `IS_NULLABLE = ${sqlString(spec.nullable ? "YES" : "NO")}`,
+    "EXTRA = ''",
+  ];
+  if (spec.maxLength !== undefined) {
+    predicates.push(`CHARACTER_MAXIMUM_LENGTH = ${spec.maxLength}`);
+  }
+  if (spec.characterSet !== undefined) {
+    predicates.push(`CHARACTER_SET_NAME = ${sqlString(spec.characterSet)}`);
+  }
+  if (spec.collation !== undefined) {
+    predicates.push(`COLLATION_NAME = ${sqlString(spec.collation)}`);
+  }
+  if (spec.datetimePrecision !== undefined) {
+    predicates.push(`DATETIME_PRECISION = ${spec.datetimePrecision}`);
+  }
+  if (spec.unsigned === true) {
+    predicates.push("COLUMN_TYPE LIKE '%unsigned%'");
+  }
+  predicates.push(
+    spec.defaultValue === null
+      ? "(COLUMN_DEFAULT IS NULL OR BINARY COLUMN_DEFAULT = BINARY 'NULL')"
+      : `REPLACE(COLUMN_DEFAULT, '''', '') = ${sqlString(spec.defaultValue)}`,
+  );
+  return `(SELECT COUNT(*) FROM information_schema.COLUMNS
+             WHERE ${predicates.join("\n               AND ")}) = 1`;
+}
+
 function statementVerificationPredicate(analysis) {
+  if (analysis.type === "drop-check") {
+    return `(SELECT COUNT(*) FROM information_schema.TABLE_CONSTRAINTS
+               WHERE CONSTRAINT_SCHEMA = DATABASE()
+                 AND TABLE_NAME = ${sqlString(analysis.tableName)}
+                 AND CONSTRAINT_NAME = ${sqlString(analysis.constraintName)}) = 0`;
+  }
+
+  if (analysis.type === "add-user-account-columns") {
+    return `(SELECT COUNT(*) FROM information_schema.COLUMNS
+               WHERE TABLE_SCHEMA = DATABASE()
+                 AND TABLE_NAME = 'user_account'
+                 AND COLUMN_NAME = 'display_name'
+                 AND DATA_TYPE = 'varchar'
+                 AND CHARACTER_MAXIMUM_LENGTH = 191
+                 AND IS_NULLABLE = 'NO') = 1
+            AND (SELECT COUNT(*) FROM information_schema.COLUMNS
+                   WHERE TABLE_SCHEMA = DATABASE()
+                     AND TABLE_NAME = 'user_account'
+                     AND COLUMN_NAME = 'role'
+                     AND DATA_TYPE = 'varchar'
+                     AND CHARACTER_MAXIMUM_LENGTH = 16
+                     AND CHARACTER_SET_NAME = 'ascii'
+                     AND COLLATION_NAME = 'ascii_bin'
+                     AND IS_NULLABLE = 'NO') = 1`;
+  }
+
+  if (analysis.type === "modify-user-account-columns") {
+    return `(SELECT COUNT(*) FROM information_schema.COLUMNS
+               WHERE TABLE_SCHEMA = DATABASE()
+                 AND TABLE_NAME = 'user_account'
+                 AND COLUMN_NAME = 'display_name'
+                 AND DATA_TYPE = 'varchar'
+                 AND CHARACTER_MAXIMUM_LENGTH = 191
+                 AND IS_NULLABLE = 'NO'
+                 AND COLUMN_DEFAULT IS NULL) = 1
+            AND (SELECT COUNT(*) FROM information_schema.COLUMNS
+                   WHERE TABLE_SCHEMA = DATABASE()
+                     AND TABLE_NAME = 'user_account'
+                     AND COLUMN_NAME = 'role'
+                     AND DATA_TYPE = 'varchar'
+                     AND CHARACTER_MAXIMUM_LENGTH = 16
+                     AND CHARACTER_SET_NAME = 'ascii'
+                     AND COLLATION_NAME = 'ascii_bin'
+                     AND IS_NULLABLE = 'NO'
+                     AND REPLACE(COLUMN_DEFAULT, '''', '') = 'member') = 1`;
+  }
+
   if (analysis.type === "add-column") {
+    if (analysis.columnSpec !== undefined) {
+      return managedColumnVerificationPredicate(analysis);
+    }
     return `(SELECT COUNT(*) FROM information_schema.COLUMNS
                WHERE TABLE_SCHEMA = DATABASE()
                  AND TABLE_NAME = ${sqlString(analysis.tableName)}
@@ -473,6 +806,8 @@ function statementVerificationPredicate(analysis) {
           ? "UNIQUE"
           : constraint.type === "CHECK"
             ? "CHECK"
+            : constraint.type === "FOREIGN KEY"
+              ? "FOREIGN KEY"
             : "PRIMARY KEY";
       return constraintPredicate(analysis.tableName, constraint.name, type);
     });
@@ -650,6 +985,11 @@ function expectedSchema(migrations) {
         for (const constraint of analysis.constraintNames) {
           if (constraint.type === "CHECK") {
             checks.push({ name: constraint.name, tableName: analysis.tableName });
+          } else if (constraint.type === "FOREIGN KEY") {
+            foreignKeys.push({
+              name: constraint.name,
+              tableName: analysis.tableName,
+            });
           } else if (constraint.type === "UNIQUE") {
             indexes.push({ name: constraint.name, tableName: analysis.tableName });
           } else if (constraint.type === "PRIMARY KEY") {
@@ -672,6 +1012,31 @@ function expectedSchema(migrations) {
           throw new PhpMyAdminBundleError();
         }
         columns.push(analysis.columnName);
+      } else if (analysis.type === "add-user-account-columns") {
+        const columns = tables.get(analysis.tableName);
+        if (
+          !columns ||
+          analysis.columnNames.some((columnName) => columns.includes(columnName))
+        ) {
+          throw new PhpMyAdminBundleError();
+        }
+        columns.push(...analysis.columnNames);
+      } else if (analysis.type === "modify-user-account-columns") {
+        const columns = tables.get(analysis.tableName);
+        if (
+          !columns ||
+          analysis.columnNames.some((columnName) => !columns.includes(columnName))
+        ) {
+          throw new PhpMyAdminBundleError();
+        }
+      } else if (analysis.type === "drop-check") {
+        const check = checks.findIndex(
+          (candidate) =>
+            candidate.name === analysis.constraintName &&
+            candidate.tableName === analysis.tableName,
+        );
+        if (check < 0) throw new PhpMyAdminBundleError();
+        checks.splice(check, 1);
       } else if (analysis.type === "drop-index") {
         const index = indexes.findIndex(
           (candidate) =>

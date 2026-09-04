@@ -3,6 +3,7 @@ export type {
   ProjectStatus,
   ProjectType,
 } from "./repository";
+export { changeProjectLifecycle } from "./lifecycle-service";
 export {
   createProject,
   listProjects,

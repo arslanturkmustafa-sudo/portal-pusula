@@ -1,8 +1,8 @@
-# Portal Pusula teknik mimarisi — Komut 3C sınırı
+# Portal Pusula teknik mimarisi
 
 ## Durum ve kapsam
 
-Portal Pusula, Hostinger Business Node.js Web App üzerinde çalışmak üzere tasarlanan Next.js App Router tabanlı bir modüler monolittir. Bu belge Komut 3C sonunda yerelde bulunan platform temelini tarif eder; güncel kaynak/ZIP'in Hostinger'a dağıtıldığı, migration'ların canlı DB'ye uygulandığı veya cron'un canlı etkinleştirildiği anlamına gelmez.
+Portal Pusula, Hostinger Business Node.js Web App üzerinde çalışmak üzere tasarlanan Next.js App Router tabanlı bir modüler monolittir. Bu belge güncel yerel kaynak mimarisini tarif eder; güncel ZIP'in Hostinger'a dağıtıldığı, `0011`/`0012`/`0013` migration'larının canlı DB'ye uygulandığı veya cron'un canlı etkinleştirildiği anlamına gelmez.
 
 Mevcut kapsam şunlarla sınırlıdır:
 
@@ -11,8 +11,11 @@ Mevcut kapsam şunlarla sınırlıdır:
 - kısa ve bounded job, transactional outbox ve uygulama katmanı audit temeli;
 - varsayılan kapalı, machine-to-machine cron dispatch adayı;
 - deterministik production ZIP ve secretsız kaynak checkpoint'i.
+- müşteri/sözleşme/ziyaret, proje, görev, finans ve günlük plan domain modülleri;
+- DB tabanlı owner/member hesapları, dayanıklı account/global giriş sınırlaması, modül izinleri ve alan bazlı finansal veri redaksiyonu;
+- firma görev raporu/yazdırma görünümü ve aylık nakit akışı raporu.
 
-Müşteri, proje, görev, finans, takvim, kullanıcı/auth, organization/workspace ve RBAC domain'leri henüz yoktur. Production job registry ile dış sistem adapter registry'si boştur. Komut 4/auth ve arayüz yeniden tasarımı bu belgenin kapsamı dışındadır.
+Organization/workspace çoklu-tenant izolasyonu, production job registry ve dış sistem adapter registry'si henüz yoktur.
 
 ## Çalışma zamanı ve dağıtım sınırı
 
@@ -32,10 +35,11 @@ Node 24.x ve webpack yolu önceki canlı spike'ta kanıtlandı. Güncel Komut 3C
 | --- | --- | --- |
 | `src/app` ve `src/components` | Next route handler'ları, PWA shell'i ve iç endpoint adaptörleri | Route içinde iş kuralı, raw SQL, secret veya uzun iş yürütme |
 | `src/platform/config` | Server-only environment parse ve fail-closed sözleşmeler | Client bundle'a env/secret taşıma; connection string |
+| `src/platform/auth` | İmzalı oturum, scrypt doğrulama ve MariaDB'de dayanıklı account/global login sınırlaması | Production'da environment auth fallback'i; yalnız process belleğine veya kanıtsız proxy header'ına dayalı limit |
 | `src/platform/health` ve `database` | Liveness/readiness sınırı, sabit `SELECT 1`, küçük havuz ve timeout | Kullanıcı girdisinden SQL/identifier; ayrıntılı DB hatası |
 | `src/platform/cron` | Exact request doğrulaması, iç yanıt politikası, bounded dispatch ve eşzamanlılık/frekans kapıları | Query/path/body token, sürekli worker, process-içi güvenilir scheduler varsayımı |
 | `src/platform/jobs`, `outbox`, `audit` | Claim/lease/fencing, retry/dead-letter, transaction ve at-least-once teslim sözleşmesi | Exactly-once iddiası, transaction içinden dış servis çağrısı, keyfi job type çalıştırma |
-| `src/platform/db/schema` ve `drizzle` | Sürümlü platform şeması ve forward-only migration | Domain/auth tablosu; uygulanmış migration'ı değiştirme; destructive DDL |
+| `src/platform/db/schema` ve `drizzle` | Sürümlü platform/domain şeması ve forward-only migration | Uygulanmış migration'ı değiştirme; onaysız destructive DDL |
 | `scripts` | Migration, paketleme, yerel test ve güvenli operasyon yardımcıları | Secret'ı CLI argümanı/log/dosyaya alma; canlı işlemi kullanıcı onayı olmadan başlatma |
 
 Bağımlılık akışı giriş adaptöründen platform uygulama servisine, oradan repository/DB adaptörüne doğrudur. Repository ve platform servisleri React bileşenlerine veya Next request nesnelerine bağımlı olmaz. Dış sistem çağrısı gerektiğinde domain transaction'ı önce outbox kaydını commit eder; gerçek adapter daha sonra idempotent teslim yapar.
@@ -48,12 +52,16 @@ Bağımlılık akışı giriş adaptöründen platform uygulama servisine, orada
 | `GET /api/internal/readiness` | Exact Bearer; yetkisiz generic 404, DB hazır 200, altyapı sorunu generic 503 | Önceki canlı spike'ta gerçek `SELECT 1` PASS |
 | `POST /api/internal/cron/dispatch` | Exact Bearer; kapalı/yetkisiz generic 404; güvenli kabul veya suppression generic 202; altyapı arızası generic 503 | Yalnız yerel aday, varsayılan kapalı; canlı cron UNKNOWN |
 | `GET /sw.js` | Node Route Handler, JS MIME, `private, no-store`, scope `/` | Önceki canlı spike'ta PASS |
+| `POST /api/auth/login` | Production DB auth; account 5/15 dk + global 100/15 dk dayanıklı limiter; invalid/block/altyapı hatası generic `303` + no-store | Yerel unit/MariaDB kapısı; canlı `0013` ve smoke UNKNOWN |
+| İş API'leri | DB oturumu + allowlist permission; write isteklerinde same-origin, media type, bounded body | Yerel unit/integration adayında mevcut; canlı güncel build UNKNOWN |
+| `GET /api/reports/tasks` | Firma bazlı, 1.000 kayıt sınırı, `tasks.reports.export`, finans alanı yok | Yerel PASS |
+| `GET /api/finance/cash-flow` | `finance.reports.read`, aggregate hareketler, açılış/kapanış bakiyesi yok | Yerel PASS |
 
 Machine-to-machine response davranışı [ADR-0002](./adr/0002-internal-endpoint-response-policy.md) ile bağlıdır. Bu politika gelecekteki kullanıcı auth/UI semantiği değildir.
 
 ## Veri ve iş yürütme modeli
 
-Migration'lar yalnız teknik doğrulama ile platform job/outbox/audit nesnelerini oluşturur. Gerçek müşteri/finans/domain verisi yoktur. Para hassasiyeti için sentetik `DECIMAL(19,4)` doğrulaması yapılır; JavaScript `number` dönüşümü kullanılmaz. Operasyon zamanları UTC, kimlik ve idempotency alanları binary-exact/canonical sözleşmelidir.
+Migration'lar teknik platform nesnelerine ek olarak müşteri, sözleşme/ziyaret, alacak/tahsilat, hesap/izin, digest anahtarlı login throttle, görev, proje, gider/kart ve ortaklık tablolarını oluşturur. Para alanları `DECIMAL(19,4)` ve uygulamada string/Decimal ile taşınır; JavaScript `number` finans hesabında kullanılmaz. Operasyon zamanları UTC, kimlik ve idempotency alanları binary-exact/canonical sözleşmelidir.
 
 Job yürütme kısa ve tekrar çalıştırılabilir batch'lere ayrılır:
 
@@ -68,6 +76,7 @@ Sabit process belleği, `setInterval`, `node-cron`, Redis veya sürekli worker v
 ## Güvenlik ve operasyonel sınırlar
 
 - Secret değerleri yalnız server-side environment'ta tutulur; adlar [security runbook'unda](./security.md) kayıtlıdır.
+- Production auth yalnız DB modudur. Account/global limiter MariaDB'de transaction ve satır kilidiyle dayanıklıdır; opsiyonel network sinyali, Hostinger header güven zinciri kanıtlanmadığı için yalnız ek savunmadır. Limiter/DB arızası fail-closed kalır; response/log parola, e-posta/PII, secret veya bucket digest'i taşımaz.
 - Dynamic/internal yanıtlar `private, no-store` ve correlation ID taşır; cache ve PWA allowlist'i iş/auth verisini saklamaz.
 - Production ZIP ve kaynak checkpoint sabit allowlist ile oluşturulur; test/build çıktısı ve secret-benzeri dosya yolları dışlanır veya fail-closed reddedilir.
 - Migration forward-only'dir. Uygulama rollback'i ile DB restore aynı işlem değildir.
@@ -86,6 +95,8 @@ Sabit process belleği, `setInterval`, `node-cron`, Redis veya sürekli worker v
 | Yerel şifreli recovery kopyası ve ciphertext checksum | AES-256-GCM/ayrı DPAPI anahtarı | PASS — aynı Windows makinesi/kullanıcı sınırıyla |
 | Komut 3C şema/journal/veri restore'u | Runbook mevcut | UNKNOWN |
 | Güvenli application rollback | Tasarım sınırı mevcut | BLOCKED |
-| Kullanıcı auth/RBAC ve domain izolasyonu | Yok | Yok |
+| Owner/member auth, RBAC ve alan redaksiyonu | Unit/integration PASS adayı | UNKNOWN — `0012` uygulanmadı |
+| Kalıcı login brute-force sınırlaması | DB tabanlı account/global limiter ve `0013` migration kaynakta mevcut | UNKNOWN — `0013` uygulanmadı, canlı 303/no-store/fail-closed smoke yok |
+| Organization/workspace izolasyonu | Yok | Yok |
 
-Komut 4 / auth için henüz HAZIR DEĞİL; Dilim 0 GO değildir.
+Güncel yerel kapıların geçmesi canlı deploy veya Dilim 0 GO anlamına gelmez.

@@ -26,16 +26,21 @@ import {
 } from "@/features/finance/period";
 import {
   findCollectionByClientOperationKeyForUpdate,
+  findCollectionForUpdate,
+  findCollectionReversalForUpdate,
   findFinanceContractForUpdate,
   findGeneratedReceivableForUpdate,
   findReceivableForUpdate,
   insertCollectionRecordIdempotently,
   insertOpeningBalanceRecordIdempotently,
   insertReceivableRecord,
+  listReceivableCollectionMovements,
   listReceivableRecords,
   type NewReceivableRecord,
   type ReceivableCollection,
+  type ReceivableCollectionMovement,
   type ReceivableRecord,
+  updateReceivableLifecycleRecord,
 } from "@/features/finance/repository";
 import {
   type CreateCollectionInput,
@@ -46,10 +51,15 @@ import {
   generateReceivableInputSchema,
   type OpeningBalanceInput,
   openingBalanceInputSchema,
+  type ReceivableLifecycleInput,
+  receivableLifecycleInputSchema,
+  type ReverseCollectionInput,
+  reverseCollectionInputSchema,
 } from "@/features/finance/validation";
 import { appendAuditEvent } from "@/platform/audit/repository";
 import { withUtcTransaction } from "@/platform/jobs/mysql-transaction";
 import { toUtcDateTime6 } from "@/platform/jobs/time";
+import { assertCanonicalUuid } from "@/platform/validation/canonical-identifiers";
 
 export class FinanceResourceNotFoundError extends Error {
   constructor() {
@@ -107,7 +117,43 @@ export class FinanceIdempotencyConflictError extends Error {
   }
 }
 
+export class ReceivableAlreadyVoidedError extends Error {
+  constructor() {
+    super("The receivable is already voided.");
+    this.name = "ReceivableAlreadyVoidedError";
+  }
+}
+
+export class ReceivableHasCollectionsError extends Error {
+  constructor() {
+    super("A receivable with net collections cannot be voided.");
+    this.name = "ReceivableHasCollectionsError";
+  }
+}
+
+export class FinanceVersionConflictError extends Error {
+  constructor() {
+    super("The finance record was changed by another request.");
+    this.name = "FinanceVersionConflictError";
+  }
+}
+
+export class CollectionNotReversibleError extends Error {
+  constructor() {
+    super("The selected entry is not an original collection.");
+    this.name = "CollectionNotReversibleError";
+  }
+}
+
+export class CollectionAlreadyReversedError extends Error {
+  constructor() {
+    super("The collection already has a reversal entry.");
+    this.name = "CollectionAlreadyReversedError";
+  }
+}
+
 export type FinanceWriteContext = Readonly<{
+  actorId?: string;
   correlationId: string;
   now?: Date;
 }>;
@@ -115,7 +161,7 @@ export type FinanceWriteContext = Readonly<{
 export type ReceivableView = ReceivableRecord &
   Readonly<{
     outstandingAmount: string;
-    status: ReceivableStatus;
+    status: ReceivableStatus | "voided";
   }>;
 
 export type FinanceSummary = Readonly<{
@@ -128,7 +174,13 @@ export type FinanceSummary = Readonly<{
 }>;
 
 export type FinanceReceivables = Readonly<{
-  receivables: readonly ReceivableView[];
+  receivables: readonly (ReceivableView &
+    Readonly<{
+      collections: readonly Omit<
+        ReceivableCollectionMovement,
+        "receivableId"
+      >[];
+    }>)[];
   summary: FinanceSummary;
 }>;
 
@@ -136,6 +188,9 @@ function receivableView(
   record: ReceivableRecord,
   today: string,
 ): ReceivableView {
+  if (record.recordState === "voided") {
+    return { ...record, outstandingAmount: "0.0000", status: "voided" };
+  }
   return {
     ...record,
     outstandingAmount: remainingAmount(
@@ -159,9 +214,11 @@ function receivableAuditSummary(receivable: ReceivableRecord) {
     netAmount: receivable.netAmount,
     periodMonth: receivable.periodMonth,
     projectId: receivable.projectId,
+    recordState: receivable.recordState,
     sourceType: receivable.sourceType,
     totalAmount: receivable.totalAmount,
     vatAmount: receivable.vatAmount,
+    version: receivable.version,
   };
 }
 
@@ -192,8 +249,24 @@ function collectionMatches(
     persisted.amount === input.amount &&
     persisted.clientOperationKey === input.clientOperationKey &&
     persisted.collectedOn === input.collectedOn &&
+    persisted.entryType === "collection" &&
     persisted.note === input.note &&
-    persisted.receivableId === input.receivableId
+    persisted.receivableId === input.receivableId &&
+    persisted.reversalOfId === null &&
+    persisted.reversalReason === null
+  );
+}
+
+function reversalMatches(
+  persisted: ReceivableCollection,
+  originalCollectionId: string,
+  input: ReverseCollectionInput,
+): boolean {
+  return (
+    persisted.clientOperationKey === input.clientOperationKey &&
+    persisted.entryType === "reversal" &&
+    persisted.reversalOfId === originalCollectionId &&
+    persisted.reversalReason === input.reason
   );
 }
 
@@ -227,9 +300,24 @@ export async function listFinanceReceivables(
       nextMonthStart,
       filters.projectId,
     );
-    const receivables = snapshot.receivables.map((record) =>
-      receivableView(record, today),
+    const movements = await listReceivableCollectionMovements(
+      connection,
+      filters.projectId,
     );
+    const movementsByReceivable = new Map<
+      string,
+      Omit<ReceivableCollectionMovement, "receivableId">[]
+    >();
+    for (const movement of movements) {
+      const { receivableId, ...view } = movement;
+      const grouped = movementsByReceivable.get(receivableId) ?? [];
+      grouped.push(view);
+      movementsByReceivable.set(receivableId, grouped);
+    }
+    const receivables = snapshot.receivables.map((record) => ({
+      ...receivableView(record, today),
+      collections: movementsByReceivable.get(record.id) ?? [],
+    }));
     let totalReceivable = "0.0000";
     let totalCollected = "0.0000";
     let outstanding = "0.0000";
@@ -237,6 +325,7 @@ export async function listFinanceReceivables(
     let dueThisMonth = "0.0000";
 
     for (const receivable of receivables) {
+      if (receivable.recordState === "voided") continue;
       totalReceivable = addMoney(totalReceivable, receivable.totalAmount);
       totalCollected = addMoney(totalCollected, receivable.collectedAmount);
       outstanding = addMoney(outstanding, receivable.outstandingAmount);
@@ -273,6 +362,7 @@ export async function generateContractMonthReceivable(
   context: FinanceWriteContext,
 ): Promise<Readonly<{ created: boolean; receivable: ReceivableView }>> {
   const input = generateReceivableInputSchema.parse(rawInput);
+  if (context.actorId !== undefined) assertCanonicalUuid(context.actorId);
   const nowDate = context.now ?? new Date();
   const now = toUtcDateTime6(nowDate);
   const today = istanbulDate(nowDate);
@@ -335,6 +425,7 @@ export async function generateContractMonthReceivable(
     if (!created) throw new Error("Created receivable could not be read.");
     await appendAuditEvent(connection, {
       action: "receivable.contract_month_generated",
+      actorId: context.actorId,
       actorType: "user",
       afterSummary: receivableAuditSummary(created),
       correlationId: context.correlationId,
@@ -352,6 +443,7 @@ export async function createOpeningBalance(
   context: FinanceWriteContext,
 ): Promise<Readonly<{ created: boolean; receivable: ReceivableView }>> {
   const input = openingBalanceInputSchema.parse(rawInput);
+  if (context.actorId !== undefined) assertCanonicalUuid(context.actorId);
   const nowDate = context.now ?? new Date();
   const now = toUtcDateTime6(nowDate);
   const today = istanbulDate(nowDate);
@@ -359,6 +451,9 @@ export async function createOpeningBalance(
   return withUtcTransaction(pool, async (connection) => {
     const customer = await findCustomerForUpdate(connection, input.customerId);
     if (!customer) throw new FinanceResourceNotFoundError();
+    if (customer.status !== "active" || customer.archivedAtUtc !== null) {
+      throw new FinanceCustomerProjectUnavailableError();
+    }
     if (
       !(await findActiveCustomerProjectForUpdate(
         connection,
@@ -398,6 +493,7 @@ export async function createOpeningBalance(
     if (created) {
       await appendAuditEvent(connection, {
         action: "receivable.opening_balance_created",
+        actorId: context.actorId,
         actorType: "user",
         afterSummary: receivableAuditSummary(persisted),
         correlationId: context.correlationId,
@@ -422,6 +518,7 @@ export async function createReceivableCollection(
   }>
 > {
   const input = createCollectionInputSchema.parse(rawInput);
+  if (context.actorId !== undefined) assertCanonicalUuid(context.actorId);
   const nowDate = context.now ?? new Date();
   const now = toUtcDateTime6(nowDate);
   const today = istanbulDate(nowDate);
@@ -453,6 +550,7 @@ export async function createReceivableCollection(
       input.receivableId,
     );
     if (!before) throw new FinanceResourceNotFoundError();
+    if (before.recordState !== "active") throw new ReceivableAlreadyVoidedError();
     const replayAfterReceivableLock =
       await findCollectionByClientOperationKeyForUpdate(
         connection,
@@ -483,9 +581,12 @@ export async function createReceivableCollection(
       clientOperationKey: input.clientOperationKey,
       collectedOn: input.collectedOn,
       createdAtUtc: now,
+      entryType: "collection",
       id: randomUUID(),
       note: input.note,
       receivableId: before.id,
+      reversalOfId: null,
+      reversalReason: null,
     };
     const persisted = await insertCollectionRecordIdempotently(
       connection,
@@ -509,6 +610,7 @@ export async function createReceivableCollection(
     const after: ReceivableRecord = { ...before, collectedAmount };
     await appendAuditEvent(connection, {
       action: "receivable.collection_created",
+      actorId: context.actorId,
       actorType: "user",
       afterSummary: {
         amount: persisted.amount,
@@ -534,6 +636,182 @@ export async function createReceivableCollection(
       collection: persisted,
       created: true,
       receivable: receivableView(after, today),
+    };
+  });
+}
+
+export async function voidReceivable(
+  pool: Pool,
+  id: string,
+  rawInput: ReceivableLifecycleInput,
+  context: FinanceWriteContext,
+): Promise<ReceivableView> {
+  assertCanonicalUuid(id);
+  if (context.actorId !== undefined) assertCanonicalUuid(context.actorId);
+  const input = receivableLifecycleInputSchema.parse(rawInput);
+  const nowDate = context.now ?? new Date();
+  const now = toUtcDateTime6(nowDate);
+  const today = istanbulDate(nowDate);
+
+  return withUtcTransaction(pool, async (connection) => {
+    const before = await findReceivableForUpdate(connection, id);
+    if (!before) throw new FinanceResourceNotFoundError();
+    if (before.recordState === "voided") throw new ReceivableAlreadyVoidedError();
+    if (before.version !== input.version) throw new FinanceVersionConflictError();
+    if (!new Decimal(before.collectedAmount).isZero()) {
+      throw new ReceivableHasCollectionsError();
+    }
+
+    const after: ReceivableRecord = {
+      ...before,
+      recordState: "voided",
+      updatedAtUtc: now,
+      version: before.version + 1,
+      voidedAtUtc: now,
+      voidReason: input.reason,
+    };
+    if (!(await updateReceivableLifecycleRecord(connection, after, before.version))) {
+      throw new FinanceVersionConflictError();
+    }
+    await appendAuditEvent(connection, {
+      action: "receivable.voided",
+      actorId: context.actorId,
+      actorType: "user",
+      afterSummary: { ...receivableAuditSummary(after), reason: input.reason },
+      beforeSummary: receivableAuditSummary(before),
+      correlationId: context.correlationId,
+      entityId: id,
+      entityType: "receivable",
+      occurredAtUtc: now,
+    });
+    return receivableView(after, today);
+  });
+}
+
+export async function reverseReceivableCollection(
+  pool: Pool,
+  collectionId: string,
+  rawInput: ReverseCollectionInput,
+  context: FinanceWriteContext,
+): Promise<Readonly<{
+  created: boolean;
+  receivable: ReceivableView;
+  reversal: ReceivableCollection;
+}>> {
+  assertCanonicalUuid(collectionId);
+  if (context.actorId !== undefined) assertCanonicalUuid(context.actorId);
+  const input = reverseCollectionInputSchema.parse(rawInput);
+  const nowDate = context.now ?? new Date();
+  const now = toUtcDateTime6(nowDate);
+  const today = istanbulDate(nowDate);
+
+  return withUtcTransaction(pool, async (connection) => {
+    const replay = await findCollectionByClientOperationKeyForUpdate(
+      connection,
+      input.clientOperationKey,
+    );
+    if (replay) {
+      if (!reversalMatches(replay, collectionId, input)) {
+        throw new FinanceIdempotencyConflictError();
+      }
+      const receivable = await findReceivableForUpdate(
+        connection,
+        replay.receivableId,
+      );
+      if (!receivable) throw new FinanceResourceNotFoundError();
+      return {
+        created: false,
+        receivable: receivableView(receivable, today),
+        reversal: replay,
+      };
+    }
+
+    const original = await findCollectionForUpdate(connection, collectionId);
+    if (!original) throw new FinanceResourceNotFoundError();
+    if (original.entryType !== "collection") throw new CollectionNotReversibleError();
+    const receivable = await findReceivableForUpdate(
+      connection,
+      original.receivableId,
+    );
+    if (!receivable) throw new FinanceResourceNotFoundError();
+    if (receivable.recordState !== "active") throw new ReceivableAlreadyVoidedError();
+    if (await findCollectionReversalForUpdate(connection, original.id)) {
+      throw new CollectionAlreadyReversedError();
+    }
+
+    const afterCollected = new Decimal(receivable.collectedAmount).minus(
+      original.amount,
+    );
+    if (afterCollected.isNegative()) {
+      throw new Error("Collection reversal would make the aggregate negative.");
+    }
+    const pending: ReceivableCollection = {
+      amount: original.amount,
+      clientOperationKey: input.clientOperationKey,
+      collectedOn: today,
+      createdAtUtc: now,
+      entryType: "reversal",
+      id: randomUUID(),
+      note: null,
+      receivableId: original.receivableId,
+      reversalOfId: original.id,
+      reversalReason: input.reason,
+    };
+    const reversal = await insertCollectionRecordIdempotently(
+      connection,
+      pending,
+    );
+    if (!reversalMatches(reversal, collectionId, input)) {
+      throw new FinanceIdempotencyConflictError();
+    }
+    if (reversal.id !== pending.id) {
+      const current = await findReceivableForUpdate(
+        connection,
+        reversal.receivableId,
+      );
+      if (!current) throw new FinanceResourceNotFoundError();
+      return {
+        created: false,
+        receivable: receivableView(current, today),
+        reversal,
+      };
+    }
+
+    const after: ReceivableRecord = {
+      ...receivable,
+      collectedAmount: afterCollected.toFixed(4),
+    };
+    await appendAuditEvent(connection, {
+      action: "receivable.collection_reversed",
+      actorId: context.actorId,
+      actorType: "user",
+      afterSummary: {
+        collectedAmount: after.collectedAmount,
+        originalCollectionId: original.id,
+        outstandingAmount: remainingAmount(
+          after.totalAmount,
+          after.collectedAmount,
+        ),
+        reason: input.reason,
+        receivableId: after.id,
+      },
+      beforeSummary: {
+        collectedAmount: receivable.collectedAmount,
+        outstandingAmount: remainingAmount(
+          receivable.totalAmount,
+          receivable.collectedAmount,
+        ),
+        receivableId: receivable.id,
+      },
+      correlationId: context.correlationId,
+      entityId: reversal.id,
+      entityType: "receivable_collection",
+      occurredAtUtc: now,
+    });
+    return {
+      created: true,
+      receivable: receivableView(after, today),
+      reversal,
     };
   });
 }

@@ -90,6 +90,30 @@ describe("ExpensesWorkspace", () => {
     expect(screen.getAllByText("₺16.500,00").length).toBeGreaterThan(0);
   });
 
+  it("does not expose void or audit controls without their exact capabilities", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async (input) => {
+        const url = String(input);
+        if (url === "/api/projects") return jsonResponse({ projects: [project] });
+        if (url === "/api/finance/cards") return jsonResponse({ cards: [card] });
+        if (url === "/api/finance/expenses") return jsonResponse({ expenses: [expense] });
+        throw new Error(`Unexpected request: ${url}`);
+      }),
+    );
+
+    render(
+      <ExpensesWorkspace
+        capabilities={{ canReadAudit: false, canReverseExpenses: false }}
+      />,
+    );
+
+    expect(await screen.findByRole("button", { name: "Ofis kirası giderini düzenle" }))
+      .toBeInTheDocument();
+    expect(screen.queryByText("Geçersiz kıl")).not.toBeInTheDocument();
+    expect(screen.queryByText("İşlemler")).not.toBeInTheDocument();
+  });
+
   it("creates a project-linked card expense and sends the selected installment count", async () => {
     const operationKey = "40000000-0000-4000-8000-000000000001";
     vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue(operationKey);

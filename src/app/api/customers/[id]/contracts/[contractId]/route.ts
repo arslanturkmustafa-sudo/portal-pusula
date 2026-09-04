@@ -7,10 +7,13 @@ import {
   ContractProjectUnavailableError,
   ContractResourceNotFoundError,
   ContractVisitRangeConflictError,
+  ContractVersionConflictError,
   updateContractInputSchema,
   updateCustomerContract,
 } from "@/features/contracts";
-import { isAdminAuthenticated } from "@/platform/auth/server-auth";
+import { LifecycleArchivedRecordError } from "@/features/lifecycle";
+import { hasPermission } from "@/platform/auth/permissions";
+import { authenticatePrincipalRequest } from "@/platform/auth/server-auth";
 import { getDatabaseProbeEnvironment } from "@/platform/config/readiness-env";
 import { getPlatformDatabasePool } from "@/platform/database/mysql-platform";
 import { correlationIdFromHeaders } from "@/platform/http/correlation-id";
@@ -45,8 +48,15 @@ export async function PATCH(
   request: NextRequest,
   context: ContractDetailRouteContext,
 ): Promise<NextResponse> {
-  if (!(await isAdminAuthenticated(request))) {
+  const principal = await authenticatePrincipalRequest(request);
+  if (!principal) {
     return json({ status: "unauthorized" }, 401);
+  }
+  if (
+    !hasPermission(principal, "contracts.write") ||
+    !hasPermission(principal, "contracts.billing.write")
+  ) {
+    return json({ status: "forbidden" }, 403);
   }
 
   if (!isSameOriginWriteRequest(request)) return json({ status: "forbidden" }, 403);
@@ -64,7 +74,10 @@ export async function PATCH(
       id,
       contractId,
       input,
-      { correlationId: correlationIdFromHeaders(request.headers) },
+      {
+        actorId: principal.kind === "account" ? principal.accountId : undefined,
+        correlationId: correlationIdFromHeaders(request.headers),
+      },
     );
     return json({ contract });
   } catch (error) {
@@ -89,6 +102,12 @@ export async function PATCH(
     }
     if (error instanceof ContractProjectLockedError) {
       return json({ status: "contract_project_locked" }, 409);
+    }
+    if (error instanceof ContractVersionConflictError) {
+      return json({ status: "version_conflict" }, 409);
+    }
+    if (error instanceof LifecycleArchivedRecordError) {
+      return json({ status: "record_archived" }, 409);
     }
     return json({ status: "service_unavailable" }, 503);
   }

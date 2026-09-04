@@ -11,6 +11,8 @@ import {
 } from "react";
 
 import styles from "./partnership-workspace.module.css";
+import { redirectToPortalLogin as redirectToLogin } from "@/platform/navigation/portal-return-path";
+import { RecordLifecycleControls } from "@/components/portal/record-lifecycle-controls";
 
 type ProjectDto = Readonly<{
   displayName: string;
@@ -46,6 +48,8 @@ type ContributionReceiptDto = Readonly<{
   id: string;
   note: string | null;
   receivedOn: string;
+  entryType?: "receipt" | "reversal";
+  reversalOfId?: string | null;
 }>;
 type ContributionDto = Readonly<{
   contributionMonth: string;
@@ -163,10 +167,6 @@ function nullable(value: string): string | null {
   return trimmed === "" ? null : trimmed;
 }
 
-function redirectToLogin(): void {
-  window.location.assign(new URL("/giris", window.location.origin).toString());
-}
-
 function defaultProjectId(projects: readonly ProjectDto[]): string {
   return projects.length === 1 ? projects[0]?.id ?? "" : "";
 }
@@ -248,7 +248,21 @@ function errorMessage(status: string | undefined, kind: "commission" | "contribu
   return messages[status ?? ""] ?? `${kind === "commission" ? "Komisyon" : "Katkı"} kaydedilemedi. Yeniden deneyin.`;
 }
 
-export function PartnershipWorkspace() {
+type PartnershipWorkspaceProps = Readonly<{
+  capabilities?: Readonly<{
+    canReadAudit: boolean;
+    canReversePartnership: boolean;
+  }>;
+}>;
+
+const fullPartnershipCapabilities: NonNullable<PartnershipWorkspaceProps["capabilities"]> = {
+  canReadAudit: true,
+  canReversePartnership: true,
+};
+
+export function PartnershipWorkspace({
+  capabilities = fullPartnershipCapabilities,
+}: PartnershipWorkspaceProps = {}) {
   const [projects, setProjects] = useState<readonly ProjectDto[]>([]);
   const [commissions, setCommissions] = useState<readonly CommissionDto[]>([]);
   const [contributions, setContributions] = useState<readonly ContributionDto[]>([]);
@@ -654,7 +668,26 @@ export function PartnershipWorkspace() {
                   <td data-label="Beklenen">{formatMoney(record.expectedAmount)}</td>
                   <td data-label="Alınan / tarihçe">
                     <strong>{formatMoney(record.receivedAmount)}</strong>
-                    {record.receipts.map((receipt) => <small key={receipt.id}>{formatDate(receipt.receivedOn)} · {formatMoney(receipt.amount)}</small>)}
+                    {record.receipts.map((receipt) => <div key={receipt.id}>
+                      <small>{formatDate(receipt.receivedOn)} · {formatMoney(receipt.amount)}</small>
+                      <RecordLifecycleControls
+                        actions={capabilities.canReversePartnership && (receipt.entryType ?? "receipt") === "receipt" && !record.receipts.some((entry) => entry.entryType === "reversal" && entry.reversalOfId === receipt.id) ? [{
+                          description: "Bu tahsilatı silmeden ters kayıtla dengeler; katkı toplamı yeniden hesaplanır.",
+                          id: "reverse",
+                          label: "Tahsilatı ters kaydet",
+                          request: {
+                            endpoint: `/api/finance/partnership/receipts/${receipt.id}/reverse`,
+                            kind: "reverse",
+                          },
+                          tone: "danger",
+                        }] : []}
+                        canReadHistory={capabilities.canReadAudit}
+                        entityId={receipt.id}
+                        entityLabel={`${record.description} tahsilatı`}
+                        entityType="partnership_contribution_receipt"
+                        onSuccess={() => setRevision((current) => current + 1)}
+                      />
+                    </div>)}
                   </td>
                   <td data-label="Vade / durum"><span className={`${styles.status} ${styles[record.status]}`}>{contributionStatusLabels[record.status]}</span><small>{formatDate(record.dueOn)}</small></td>
                   <td data-label="İşlem">

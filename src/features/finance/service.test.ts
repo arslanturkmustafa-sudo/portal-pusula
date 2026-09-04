@@ -9,6 +9,8 @@ const mocks = vi.hoisted(() => ({
   appendAuditEvent: vi.fn(),
   findActiveCustomerProjectForUpdate: vi.fn(),
   findCollectionByClientOperationKeyForUpdate: vi.fn(),
+  findCollectionForUpdate: vi.fn(),
+  findCollectionReversalForUpdate: vi.fn(),
   findCustomerForUpdate: vi.fn(),
   findFinanceContractForUpdate: vi.fn(),
   findGeneratedReceivableForUpdate: vi.fn(),
@@ -16,7 +18,9 @@ const mocks = vi.hoisted(() => ({
   insertCollectionRecordIdempotently: vi.fn(),
   insertOpeningBalanceRecordIdempotently: vi.fn(),
   insertReceivableRecord: vi.fn(),
+  listReceivableCollectionMovements: vi.fn(),
   listReceivableRecords: vi.fn(),
+  updateReceivableLifecycleRecord: vi.fn(),
 }));
 
 vi.mock("@/features/customers/repository", () => ({
@@ -27,6 +31,8 @@ vi.mock("@/features/customers/repository", () => ({
 vi.mock("@/features/finance/repository", () => ({
   findCollectionByClientOperationKeyForUpdate:
     mocks.findCollectionByClientOperationKeyForUpdate,
+  findCollectionForUpdate: mocks.findCollectionForUpdate,
+  findCollectionReversalForUpdate: mocks.findCollectionReversalForUpdate,
   findFinanceContractForUpdate: mocks.findFinanceContractForUpdate,
   findGeneratedReceivableForUpdate: mocks.findGeneratedReceivableForUpdate,
   findReceivableForUpdate: mocks.findReceivableForUpdate,
@@ -35,7 +41,9 @@ vi.mock("@/features/finance/repository", () => ({
   insertOpeningBalanceRecordIdempotently:
     mocks.insertOpeningBalanceRecordIdempotently,
   insertReceivableRecord: mocks.insertReceivableRecord,
+  listReceivableCollectionMovements: mocks.listReceivableCollectionMovements,
   listReceivableRecords: mocks.listReceivableRecords,
+  updateReceivableLifecycleRecord: mocks.updateReceivableLifecycleRecord,
 }));
 
 vi.mock("@/platform/audit/repository", () => ({
@@ -50,6 +58,7 @@ vi.mock("@/platform/jobs/mysql-transaction", () => ({
 }));
 
 import {
+  CollectionAlreadyReversedError,
   CollectionDateInFutureError,
   CollectionExceedsOutstandingError,
   ContractNotBillableError,
@@ -58,8 +67,11 @@ import {
   FinanceContractProjectMissingError,
   FinanceCustomerProjectUnavailableError,
   FinanceIdempotencyConflictError,
+  FinanceVersionConflictError,
   generateContractMonthReceivable,
   listFinanceReceivables,
+  reverseReceivableCollection,
+  voidReceivable,
 } from "@/features/finance/service";
 
 const projectId = "70000000-0000-4000-8000-000000000001";
@@ -78,13 +90,18 @@ const receivable = {
   projectId,
   projectName: "Mühendis Kafası",
   projectShortCode: "MUHENDIS_KAFASI",
+  recordState: "active" as const,
   sourceType: "contract_month" as const,
   totalAmount: "120.0000",
   updatedAtUtc: "2026-09-01 09:00:00.000000",
   vatAmount: "20.0000",
+  version: 1,
+  voidedAtUtc: null,
+  voidReason: null,
 };
 
 const context = {
+  actorId: "80000000-0000-4000-8000-000000000001",
   correlationId: "correlation-1",
   now: new Date("2026-09-01T09:00:00.000Z"),
 };
@@ -94,6 +111,9 @@ describe("finance write service", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.findCollectionByClientOperationKeyForUpdate.mockResolvedValue(null);
+    mocks.findCollectionReversalForUpdate.mockResolvedValue(null);
+    mocks.listReceivableCollectionMovements.mockResolvedValue([]);
+    mocks.updateReceivableLifecycleRecord.mockResolvedValue(true);
     mocks.findActiveCustomerProjectForUpdate.mockResolvedValue({
       customerId: receivable.customerId,
       projectId,
@@ -140,6 +160,54 @@ describe("finance write service", () => {
       "2026-09-01",
       "2026-10-01",
       undefined,
+    );
+  });
+
+  it("groups only the redacted collection movement read model under its receivable", async () => {
+    mocks.listReceivableRecords.mockResolvedValue({
+      collectedAmountInRange: "0.0000",
+      receivables: [{ ...receivable, collectedAmount: "0.0000" }],
+    });
+    mocks.listReceivableCollectionMovements.mockResolvedValue([
+      {
+        amount: "25.0000",
+        collectedOn: "2026-09-01",
+        entryType: "collection",
+        id: "50000000-0000-4000-8000-000000000001",
+        reasonSummary: null,
+        receivableId: receivable.id,
+        reversalOfId: null,
+        reversed: true,
+      },
+      {
+        amount: "25.0000",
+        collectedOn: "2026-09-02",
+        entryType: "reversal",
+        id: "50000000-0000-4000-8000-000000000002",
+        reasonSummary: "Ters kayıt gerekçesi kaydedildi.",
+        receivableId: receivable.id,
+        reversalOfId: "50000000-0000-4000-8000-000000000001",
+        reversed: false,
+      },
+    ]);
+
+    const result = await listFinanceReceivables(
+      {} as Pool,
+      { projectId },
+      new Date("2026-09-15T09:00:00.000Z"),
+    );
+
+    expect(result.receivables[0]?.collections).toEqual([
+      expect.objectContaining({ entryType: "collection", reversed: true }),
+      expect.objectContaining({
+        entryType: "reversal",
+        reasonSummary: "Ters kayıt gerekçesi kaydedildi.",
+      }),
+    ]);
+    expect(result.receivables[0]?.collections[0]).not.toHaveProperty("receivableId");
+    expect(mocks.listReceivableCollectionMovements).toHaveBeenCalledWith(
+      expect.anything(),
+      projectId,
     );
   });
 
@@ -331,9 +399,12 @@ describe("finance write service", () => {
       clientOperationKey,
       collectedOn: "2026-09-01",
       createdAtUtc: "2026-09-01 09:00:00.000000",
+      entryType: "collection" as const,
       id: "50000000-0000-4000-8000-000000000001",
       note: null,
       receivableId: receivable.id,
+      reversalOfId: null,
+      reversalReason: null,
     };
     mocks.findCollectionByClientOperationKeyForUpdate.mockResolvedValueOnce(
       persistedCollection,
@@ -366,9 +437,12 @@ describe("finance write service", () => {
       clientOperationKey,
       collectedOn: "2026-09-01",
       createdAtUtc: "2026-09-01 09:00:00.000000",
+      entryType: "collection",
       id: "50000000-0000-4000-8000-000000000001",
       note: null,
       receivableId: receivable.id,
+      reversalOfId: null,
+      reversalReason: null,
     });
 
     await expect(
@@ -389,7 +463,9 @@ describe("finance write service", () => {
 
   it("returns an identical opening-balance replay without a second audit", async () => {
     mocks.findCustomerForUpdate.mockResolvedValue({
+      archivedAtUtc: null,
       id: receivable.customerId,
+      status: "active",
     });
     mocks.insertOpeningBalanceRecordIdempotently.mockResolvedValue({
       ...receivable,
@@ -424,7 +500,11 @@ describe("finance write service", () => {
   });
 
   it("rejects an opening balance outside the customer's active project portfolio", async () => {
-    mocks.findCustomerForUpdate.mockResolvedValue({ id: receivable.customerId });
+    mocks.findCustomerForUpdate.mockResolvedValue({
+      archivedAtUtc: null,
+      id: receivable.customerId,
+      status: "active",
+    });
     mocks.findActiveCustomerProjectForUpdate.mockResolvedValue(null);
 
     await expect(
@@ -443,5 +523,198 @@ describe("finance write service", () => {
       ),
     ).rejects.toBeInstanceOf(FinanceCustomerProjectUnavailableError);
     expect(mocks.insertOpeningBalanceRecordIdempotently).not.toHaveBeenCalled();
+  });
+
+  it("rejects a new opening balance for an archived customer", async () => {
+    mocks.findCustomerForUpdate.mockResolvedValue({
+      archivedAtUtc: "2026-09-01 09:00:00.000000",
+      id: receivable.customerId,
+      status: "inactive",
+    });
+
+    await expect(
+      createOpeningBalance(
+        {} as Pool,
+        {
+          clientOperationKey,
+          customerId: receivable.customerId,
+          description: "Arşiv sonrası bakiye",
+          dueOn: "2026-09-15",
+          netAmount: "100",
+          projectId,
+          vatAmount: "0",
+        },
+        context,
+      ),
+    ).rejects.toBeInstanceOf(FinanceCustomerProjectUnavailableError);
+    expect(mocks.findActiveCustomerProjectForUpdate).not.toHaveBeenCalled();
+    expect(mocks.insertOpeningBalanceRecordIdempotently).not.toHaveBeenCalled();
+  });
+
+  it("voids an uncollected receivable with optimistic locking and an actor audit", async () => {
+    mocks.findReceivableForUpdate.mockResolvedValue({
+      ...receivable,
+      collectedAmount: "0.0000",
+    });
+
+    const result = await voidReceivable(
+      {} as Pool,
+      receivable.id,
+      { action: "void", reason: "Mükerrer alacak kaydı", version: 1 },
+      context,
+    );
+
+    expect(result).toMatchObject({
+      outstandingAmount: "0.0000",
+      recordState: "voided",
+      status: "voided",
+      version: 2,
+      voidReason: "Mükerrer alacak kaydı",
+    });
+    expect(mocks.updateReceivableLifecycleRecord).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ recordState: "voided", version: 2 }),
+      1,
+    );
+    expect(mocks.appendAuditEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        action: "receivable.voided",
+        actorId: context.actorId,
+        afterSummary: expect.objectContaining({ reason: "Mükerrer alacak kaydı" }),
+      }),
+    );
+  });
+
+  it("fails closed when the receivable version changed", async () => {
+    mocks.findReceivableForUpdate.mockResolvedValue({
+      ...receivable,
+      collectedAmount: "0.0000",
+      version: 2,
+    });
+
+    await expect(
+      voidReceivable(
+        {} as Pool,
+        receivable.id,
+        { action: "void", reason: "Mükerrer alacak kaydı", version: 1 },
+        context,
+      ),
+    ).rejects.toBeInstanceOf(FinanceVersionConflictError);
+    expect(mocks.updateReceivableLifecycleRecord).not.toHaveBeenCalled();
+  });
+
+  it("creates an exact collection reversal and restores outstanding money", async () => {
+    const original = {
+      amount: "25.0000",
+      clientOperationKey,
+      collectedOn: "2026-09-01",
+      createdAtUtc: "2026-09-01 09:00:00.000000",
+      entryType: "collection" as const,
+      id: "50000000-0000-4000-8000-000000000001",
+      note: null,
+      receivableId: receivable.id,
+      reversalOfId: null,
+      reversalReason: null,
+    };
+    mocks.findCollectionForUpdate.mockResolvedValue(original);
+    mocks.findReceivableForUpdate.mockResolvedValue(receivable);
+    mocks.insertCollectionRecordIdempotently.mockImplementation(
+      async (_connection, collection) => collection,
+    );
+
+    const result = await reverseReceivableCollection(
+      {} as Pool,
+      original.id,
+      {
+        clientOperationKey: "90000000-0000-4000-8000-000000000001",
+        reason: "Banka işlemi iade edildi",
+      },
+      context,
+    );
+
+    expect(result).toMatchObject({
+      created: true,
+      receivable: {
+        collectedAmount: "0.0000",
+        outstandingAmount: "120.0000",
+      },
+      reversal: {
+        amount: "25.0000",
+        entryType: "reversal",
+        reversalOfId: original.id,
+        reversalReason: "Banka işlemi iade edildi",
+      },
+    });
+    expect(mocks.appendAuditEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        action: "receivable.collection_reversed",
+        actorId: context.actorId,
+      }),
+    );
+  });
+
+  it("blocks a second reversal of the same collection", async () => {
+    mocks.findCollectionForUpdate.mockResolvedValue({
+      amount: "25.0000",
+      entryType: "collection",
+      id: "50000000-0000-4000-8000-000000000001",
+      receivableId: receivable.id,
+      reversalOfId: null,
+      reversalReason: null,
+    });
+    mocks.findReceivableForUpdate.mockResolvedValue(receivable);
+    mocks.findCollectionReversalForUpdate.mockResolvedValue({ id: "existing" });
+
+    await expect(
+      reverseReceivableCollection(
+        {} as Pool,
+        "50000000-0000-4000-8000-000000000001",
+        {
+          clientOperationKey: "90000000-0000-4000-8000-000000000001",
+          reason: "Banka işlemi iade edildi",
+        },
+        context,
+      ),
+    ).rejects.toBeInstanceOf(CollectionAlreadyReversedError);
+    expect(mocks.insertCollectionRecordIdempotently).not.toHaveBeenCalled();
+  });
+
+  it("replays the same reversal operation without another write or audit", async () => {
+    const originalId = "50000000-0000-4000-8000-000000000001";
+    const reversalOperationKey = "90000000-0000-4000-8000-000000000001";
+    const reversal = {
+      amount: "25.0000",
+      clientOperationKey: reversalOperationKey,
+      collectedOn: "2026-09-01",
+      createdAtUtc: "2026-09-01 09:00:00.000000",
+      entryType: "reversal" as const,
+      id: "a0000000-0000-4000-8000-000000000001",
+      note: null,
+      receivableId: receivable.id,
+      reversalOfId: originalId,
+      reversalReason: "Banka işlemi iade edildi",
+    };
+    mocks.findCollectionByClientOperationKeyForUpdate.mockResolvedValue(reversal);
+    mocks.findReceivableForUpdate.mockResolvedValue({
+      ...receivable,
+      collectedAmount: "0.0000",
+    });
+
+    const result = await reverseReceivableCollection(
+      {} as Pool,
+      originalId,
+      {
+        clientOperationKey: reversalOperationKey,
+        reason: reversal.reversalReason,
+      },
+      context,
+    );
+
+    expect(result).toMatchObject({ created: false, reversal });
+    expect(mocks.findCollectionForUpdate).not.toHaveBeenCalled();
+    expect(mocks.insertCollectionRecordIdempotently).not.toHaveBeenCalled();
+    expect(mocks.appendAuditEvent).not.toHaveBeenCalled();
   });
 });

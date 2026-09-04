@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 
-import { isCurrentAdminAuthenticated } from "@/platform/auth/server-auth";
+import { authenticateCurrentPrincipal } from "@/platform/auth/server-auth";
+import { safePortalReturnPath } from "@/platform/navigation/portal-return-path";
 
 import styles from "./login.module.css";
 
@@ -12,15 +13,16 @@ export const metadata: Metadata = {
 };
 
 type LoginPageProps = Readonly<{
-  searchParams: Promise<{ hata?: string }>;
+  searchParams: Promise<{ hata?: string; next?: string }>;
 }>;
 
 export default async function LoginPage({ searchParams }: LoginPageProps) {
-  if (await isCurrentAdminAuthenticated()) {
-    redirect("/musteriler");
-  }
+  const { hata, next } = await searchParams;
+  const returnPath = safePortalReturnPath(next);
 
-  const { hata } = await searchParams;
+  if (await authenticateCurrentPrincipal()) {
+    redirect(returnPath);
+  }
 
   return (
     <main className={styles.page}>
@@ -38,6 +40,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
         </p>
 
         <form className={styles.form} action="/api/auth/login" method="post">
+          <input name="next" type="hidden" value={returnPath} />
           <label>
             <span>E-posta</span>
             <input

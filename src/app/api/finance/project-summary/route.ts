@@ -22,7 +22,7 @@ function json(body: unknown, status = 200): NextResponse {
 }
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  if (!(await authenticateAdminRequest(request))) {
+  if (!(await authenticateAdminRequest(request, "finance.reports.read"))) {
     return json({ status: "unauthorized" }, 401);
   }
   try {

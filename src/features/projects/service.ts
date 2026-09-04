@@ -17,6 +17,7 @@ import {
   type UpdateProjectInput,
   updateProjectInputSchema,
 } from "@/features/projects/validation";
+import { LifecycleArchivedRecordError } from "@/features/lifecycle";
 import { appendAuditEvent } from "@/platform/audit/repository";
 import { withUtcTransaction } from "@/platform/jobs/mysql-transaction";
 import { toUtcDateTime6 } from "@/platform/jobs/time";
@@ -89,6 +90,9 @@ export async function createProject(
   const now = toUtcDateTime6(context.now ?? new Date());
   const project: Project = {
     ...input,
+    archiveReason: null,
+    archivedAtUtc: null,
+    archivedByUserAccountId: null,
     closedAtUtc: isTerminal(input.status) ? now : null,
     createdAtUtc: now,
     currency: "TRY",
@@ -133,6 +137,9 @@ export async function updateProject(
     return await withUtcTransaction(pool, async (connection) => {
       const before = await findProjectForUpdate(connection, id);
       if (!before) throw new ProjectNotFoundError();
+      if (before.archivedAtUtc !== null) {
+        throw new LifecycleArchivedRecordError();
+      }
       if (before.version !== input.version) {
         throw new ProjectVersionConflictError();
       }

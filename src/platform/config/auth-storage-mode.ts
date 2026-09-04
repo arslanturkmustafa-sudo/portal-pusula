@@ -7,6 +7,11 @@ export function getAuthStorageMode(): AuthStorageMode {
   if (value === undefined || value === "" || value === "database") {
     return "database";
   }
-  if (value === "environment") return "environment";
+  if (value === "environment") {
+    if (process.env.NODE_ENV === "production") {
+      throw new Error("Environment authentication mode is disabled in production.");
+    }
+    return "environment";
+  }
   throw new Error("Authentication storage mode is invalid.");
 }

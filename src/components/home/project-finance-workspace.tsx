@@ -4,6 +4,8 @@ import Decimal from "decimal.js";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
+import { redirectToPortalLogin as redirectToLogin } from "@/platform/navigation/portal-return-path";
+
 type ProjectFinanceTotals = Readonly<{
   accruedNetAmount: string;
   accruedTotalAmount: string;
@@ -94,10 +96,6 @@ function hasFinancialRecord(totals: ProjectFinanceTotals): boolean {
     totals.collectionCount > 0 ||
     totals.expenseCount > 0
   );
-}
-
-function redirectToLogin(): void {
-  window.location.assign(new URL("/giris", window.location.origin).toString());
 }
 
 export function ProjectFinanceWorkspace() {

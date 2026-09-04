@@ -40,6 +40,9 @@ const accountId = "10000000-0000-4000-8000-000000000001";
 const now = new Date("2026-09-03T08:00:00.000Z");
 const nowSql = "2026-09-03 08:00:00.000000";
 const before = {
+  archiveReason: null,
+  archivedAtUtc: null,
+  archivedByUserAccountId: null,
   budgetAmount: null,
   closedAtUtc: null,
   createdAtUtc: "2026-09-01 08:00:00.000000",

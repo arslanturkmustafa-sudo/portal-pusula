@@ -1,4 +1,6 @@
 import type { Metadata, Viewport } from "next";
+import { GeistMono } from "geist/font/mono";
+import { GeistSans } from "geist/font/sans";
 
 import { OfflineStatus } from "@/components/pwa/offline-status";
 import { ServiceWorkerRegistration } from "@/components/pwa/service-worker-registration";
@@ -18,7 +20,7 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#172522",
+  themeColor: "#101728",
   colorScheme: "light",
   width: "device-width",
   initialScale: 1,
@@ -26,7 +28,7 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="tr">
+    <html lang="tr" className={`${GeistSans.variable} ${GeistMono.variable}`}>
       <body>
         <OfflineStatus />
         <ServiceWorkerRegistration />
