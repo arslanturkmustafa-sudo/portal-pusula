@@ -118,6 +118,9 @@ describe("TasksWorkspace", () => {
       .toBeInTheDocument();
     const reportLink = screen.getByRole("link", { name: "Firma görev raporu" });
     expect(reportLink).toHaveAttribute("href", "/gorevler/rapor");
+    expect(reportLink).toHaveClass("task-report-action");
+    expect(within(reportLink).getByText("Firma raporu")).toBeInTheDocument();
+    expect(reportLink.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
     await user.selectOptions(
       screen.getByRole("combobox", { name: "Müşteri filtresi" }),
       customer.id,

@@ -18,10 +18,14 @@ export const dailyPlanDateSchema = z
   .string()
   .refine(isRealIsoDate, "Geçerli bir tarih girin.");
 
+export const dailyPlanViewSchema = z.enum(["day", "week", "month"]);
+
 export const dailyPlanQuerySchema = z
   .object({
     date: dailyPlanDateSchema,
+    view: dailyPlanViewSchema.default("day"),
   })
   .strict();
 
 export type DailyPlanQuery = z.infer<typeof dailyPlanQuerySchema>;
+export type DailyPlanView = z.infer<typeof dailyPlanViewSchema>;

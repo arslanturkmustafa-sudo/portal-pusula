@@ -8,7 +8,7 @@ vi.mock("server-only", () => ({}));
 import { listDailyAgendaItems } from "@/features/daily-plan/repository";
 
 describe("daily agenda repository", () => {
-  it("joins visits to every contract and customer for the exact local date", async () => {
+  it("joins visits to every contract and customer inside the inclusive date range", async () => {
     const execute = vi.fn().mockResolvedValue([
       [
         {
@@ -39,7 +39,8 @@ describe("daily agenda repository", () => {
 
     const result = await listDailyAgendaItems(
       { execute } as unknown as PoolConnection,
-      "2026-09-02",
+      "2026-09-01",
+      "2026-09-07",
     );
 
     expect(execute).toHaveBeenCalledOnce();
@@ -47,12 +48,12 @@ describe("daily agenda repository", () => {
     expect(sql).toContain("FROM monthly_visit_commitment AS visit");
     expect(sql).toContain("INNER JOIN consulting_contract AS contract");
     expect(sql).toContain("INNER JOIN customer");
-    expect(sql).toContain("WHERE visit.committed_on = ?");
+    expect(sql).toContain("WHERE visit.committed_on BETWEEN ? AND ?");
     expect(sql).toMatch(
-      /ORDER BY visit\.internal_planned_at_utc IS NULL ASC,[\s\S]*visit\.internal_planned_at_utc ASC,[\s\S]*visit\.id ASC/u,
+      /ORDER BY visit\.committed_on ASC,[\s\S]*visit\.internal_planned_at_utc IS NULL ASC,[\s\S]*visit\.internal_planned_at_utc ASC,[\s\S]*visit\.id ASC/u,
     );
     expect(sql).not.toMatch(/contract\.status\s*=/iu);
-    expect(parameters).toEqual(["2026-09-02"]);
+    expect(parameters).toEqual(["2026-09-01", "2026-09-07"]);
     expect(result).toEqual([
       {
         committedOn: "2026-09-02",
@@ -100,6 +101,7 @@ describe("daily agenda repository", () => {
     await expect(
       listDailyAgendaItems(
         { execute } as unknown as PoolConnection,
+        "2026-09-02",
         "2026-09-02",
       ),
     ).rejects.toThrow("Visit resolution status is invalid.");

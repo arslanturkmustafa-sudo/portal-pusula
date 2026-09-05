@@ -19,7 +19,7 @@ Kaynakta çalışan ilk dikey dilim şunları içerir:
 - sözleşme ve ziyaret yazmalarıyla aynı transaction içinde denetim kaydı;
 - sözleşme ayından sınır aylarda gün oranlı ve idempotent alacak üretme, geçmiş alacak açılışı ve kısmi tahsilat;
 - net/KDV/toplam tutar snapshot'ı, kalan bakiye ve vade durumunun finans ekranında hesaplanması;
-- günlük ziyaret ve toplantıların tek akışta görüldüğü günlük plan;
+- ziyaretlerin günlük, Pazartesi–Pazar haftalık veya aylık raporlandığı; yetkili hesabın müşteri ekranına geçmeden gerçekleşme günü ve notla tamamlayabildiği plan çalışma alanı;
 - görev oluşturma, düzenleme, durum ve öncelik takibi yapılan Kanban çalışma alanı;
 - Mühendis Kafası, ByPusula, OptiPusula ve 7 Emlak Ajansı için proje portföyü oluşturma ve düzenleme;
 - müşterileri bir veya daha fazla projeye bağlama; sözleşme, alacak ve görevlerde yalnız müşterinin aktif proje bağlarını kullanma;

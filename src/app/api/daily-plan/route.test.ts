@@ -17,6 +17,7 @@ const querySchema = z.object({
         date.getUTCDate() === day
       );
     }),
+  view: z.enum(["day", "week", "month"]).default("day"),
 });
 
 const mocks = vi.hoisted(() => ({
@@ -60,6 +61,8 @@ const agenda = {
       visitId: "30000000-0000-4000-8000-000000000001",
     },
   ],
+  range: { endDate: "2026-09-02", startDate: "2026-09-02" },
+  view: "day",
 };
 
 function request(query = "?date=2026-09-02"): NextRequest {
@@ -85,6 +88,24 @@ describe("daily plan API", () => {
     expect(mocks.getDailyAgenda).toHaveBeenCalledWith(
       mocks.pool,
       "2026-09-02",
+      "day",
+    );
+  });
+
+  it("accepts one supported range view", async () => {
+    mocks.getDailyAgenda.mockResolvedValue({
+      ...agenda,
+      range: { endDate: "2026-09-06", startDate: "2026-08-31" },
+      view: "week",
+    });
+
+    const response = await GET(request("?date=2026-09-02&view=week"));
+
+    expect(response.status).toBe(200);
+    expect(mocks.getDailyAgenda).toHaveBeenCalledWith(
+      mocks.pool,
+      "2026-09-02",
+      "week",
     );
   });
 
@@ -100,7 +121,12 @@ describe("daily plan API", () => {
     expect(mocks.getDailyAgenda).not.toHaveBeenCalled();
   });
 
-  it.each(["", "?date=2026-02-30", "?date=2026-9-2"])(
+  it.each([
+    "",
+    "?date=2026-02-30",
+    "?date=2026-9-2",
+    "?date=2026-09-02&view=year",
+  ])(
     "maps a missing or invalid date to a generic validation error: %s",
     async (query) => {
       const response = await GET(request(query));
@@ -117,6 +143,7 @@ describe("daily plan API", () => {
   it.each([
     "?date=2026-09-02&extra=value",
     "?date=2026-09-02&date=2026-09-03",
+    "?date=2026-09-02&view=week&view=month",
   ])("rejects an ambiguous query shape: %s", async (query) => {
     const response = await GET(request(query));
 

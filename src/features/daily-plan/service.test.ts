@@ -18,7 +18,11 @@ vi.mock("@/platform/jobs/mysql-transaction", () => ({
   withUtcTransaction: mocks.withUtcTransaction,
 }));
 
-import { getDailyAgenda } from "@/features/daily-plan/service";
+import {
+  dailyAgendaRange,
+  getDailyAgenda,
+  MAX_DAILY_PLAN_RANGE_DAYS,
+} from "@/features/daily-plan/service";
 
 const item = {
   committedOn: "2026-09-02",
@@ -42,12 +46,14 @@ describe("daily agenda service", () => {
     mocks.listDailyAgendaItems.mockResolvedValue([item]);
   });
 
-  it("returns the validated date with repository items in one UTC transaction", async () => {
+  it("returns the validated daily range with repository items in one UTC transaction", async () => {
     const pool = {} as Pool;
 
     await expect(getDailyAgenda(pool, "2026-09-02")).resolves.toEqual({
       date: "2026-09-02",
       items: [item],
+      range: { endDate: "2026-09-02", startDate: "2026-09-02" },
+      view: "day",
     });
     expect(mocks.withUtcTransaction).toHaveBeenCalledWith(
       pool,
@@ -56,6 +62,39 @@ describe("daily agenda service", () => {
     expect(mocks.listDailyAgendaItems).toHaveBeenCalledWith(
       expect.anything(),
       "2026-09-02",
+      "2026-09-02",
+    );
+  });
+
+  it("uses Monday through Sunday for a weekly view", async () => {
+    await expect(
+      getDailyAgenda({} as Pool, "2026-09-02", "week"),
+    ).resolves.toMatchObject({
+      range: { endDate: "2026-09-06", startDate: "2026-08-31" },
+      view: "week",
+    });
+    expect(mocks.listDailyAgendaItems).toHaveBeenCalledWith(
+      expect.anything(),
+      "2026-08-31",
+      "2026-09-06",
+    );
+  });
+
+  it("uses the full calendar month within the maximum query range", () => {
+    expect(dailyAgendaRange("2028-02-29", "month")).toEqual({
+      date: "2028-02-29",
+      range: { endDate: "2028-02-29", startDate: "2028-02-01" },
+      view: "month",
+    });
+    expect(MAX_DAILY_PLAN_RANGE_DAYS).toBe(31);
+  });
+
+  it("keeps boundary weeks inside supported ISO dates", () => {
+    expect(dailyAgendaRange("1000-01-01", "week").range.startDate).toBe(
+      "1000-01-01",
+    );
+    expect(dailyAgendaRange("9999-12-31", "week").range.endDate).toBe(
+      "9999-12-31",
     );
   });
 
@@ -65,5 +104,12 @@ describe("daily agenda service", () => {
     });
     expect(mocks.withUtcTransaction).not.toHaveBeenCalled();
     expect(mocks.listDailyAgendaItems).not.toHaveBeenCalled();
+  });
+
+  it("rejects an unsupported view before opening a database transaction", async () => {
+    await expect(
+      getDailyAgenda({} as Pool, "2026-09-02", "quarter"),
+    ).rejects.toMatchObject({ name: "ZodError" });
+    expect(mocks.withUtcTransaction).not.toHaveBeenCalled();
   });
 });

@@ -785,14 +785,24 @@ export function TasksWorkspace({
           <>
             {capabilities.canExportReports ? (
               <Link
-                className="text-action"
+                aria-label="Firma görev raporu"
+                className="task-report-action"
                 href={
                   customerFilter !== "all" && customerFilter !== "unassigned"
                     ? `/gorevler/rapor?customerId=${encodeURIComponent(customerFilter)}`
                     : "/gorevler/rapor"
                 }
               >
-                Firma görev raporu
+                <svg
+                  aria-hidden="true"
+                  fill="none"
+                  focusable="false"
+                  viewBox="0 0 16 16"
+                >
+                  <path d="M3 13V8.5M8 13V3M13 13V6" />
+                  <path d="M1.75 13.25h12.5" />
+                </svg>
+                <span>Firma raporu</span>
               </Link>
             ) : null}
             {capabilities.canWriteTasks ? (

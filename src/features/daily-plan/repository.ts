@@ -72,7 +72,8 @@ function mapDailyAgendaItem(row: DailyAgendaRow): DailyAgendaItem {
 
 export async function listDailyAgendaItems(
   connection: PoolConnection,
-  date: string,
+  startDate: string,
+  endDate: string,
 ): Promise<readonly DailyAgendaItem[]> {
   const [rows] = await connection.execute<DailyAgendaRow[]>(
     `SELECT visit.id AS visit_id,
@@ -89,11 +90,12 @@ export async function listDailyAgendaItems(
                ON contract.id = visit.contract_id
        INNER JOIN customer
                ON customer.id = contract.customer_id
-      WHERE visit.committed_on = ?
-      ORDER BY visit.internal_planned_at_utc IS NULL ASC,
+      WHERE visit.committed_on BETWEEN ? AND ?
+      ORDER BY visit.committed_on ASC,
+               visit.internal_planned_at_utc IS NULL ASC,
                visit.internal_planned_at_utc ASC,
                visit.id ASC`,
-    [date],
+    [startDate, endDate],
   );
   return rows.map(mapDailyAgendaItem);
 }

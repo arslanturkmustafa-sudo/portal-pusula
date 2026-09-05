@@ -10,7 +10,22 @@ afterEach(() => {
 });
 
 function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
+  let responseBody = body;
+  if (
+    body !== null &&
+    typeof body === "object" &&
+    "date" in body &&
+    typeof body.date === "string" &&
+    "items" in body &&
+    !("range" in body)
+  ) {
+    responseBody = {
+      ...body,
+      range: { endDate: body.date, startDate: body.date },
+      view: "day",
+    };
+  }
+  return new Response(JSON.stringify(responseBody), {
     headers: { "Content-Type": "application/json" },
     status,
   });
@@ -33,6 +48,16 @@ function shiftDate(value: string, days: number): string {
   const date = new Date(Date.UTC(year, month - 1, day, 12));
   date.setUTCDate(date.getUTCDate() + days);
   return date.toISOString().slice(0, 10);
+}
+
+function weekRange(value: string) {
+  const [year, month, day] = value.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day, 12));
+  const daysSinceMonday = (date.getUTCDay() + 6) % 7;
+  return {
+    endDate: shiftDate(value, 6 - daysSinceMonday),
+    startDate: shiftDate(value, -daysSinceMonday),
+  };
 }
 
 describe("DailyPlanWorkspace", () => {
@@ -115,6 +140,9 @@ describe("DailyPlanWorkspace", () => {
     expect(within(untimed).getByText("Telafi bekliyor")).toBeInTheDocument();
     expect(within(untimed).getByText("Mira Teknoloji")).toBeInTheDocument();
     expect(within(untimed).getByText("Mutabakatla iptal")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /ziyaretini tamamla/u }),
+    ).not.toBeInTheDocument();
   });
 
   it("moves between days, accepts a date input and shows an empty day", async () => {
@@ -130,7 +158,7 @@ describe("DailyPlanWorkspace", () => {
 
     render(<DailyPlanWorkspace />);
     expect(
-      await screen.findByText("Bu gün için planlanmış ziyaret bulunmuyor."),
+      await screen.findByText("Bu dönem için planlanmış ziyaret bulunmuyor."),
     ).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Sonraki gün" }));
@@ -172,6 +200,163 @@ describe("DailyPlanWorkspace", () => {
     expect(screen.getByRole("button", { name: "Sonraki gün" })).toBeDisabled();
   });
 
+  it("switches between daily, weekly and monthly reports and groups visits by day", async () => {
+    const anchor = "2026-09-02";
+    const weeklyRange = weekRange(anchor);
+    const fetchMock = vi.fn<typeof fetch>(async (input) => {
+      const url = new URL(String(input), "https://portal.example");
+      const date = url.searchParams.get("date") ?? anchor;
+      const view = url.searchParams.get("view") ?? "day";
+      if (view === "week") {
+        return jsonResponse({
+          date,
+          items: [
+            {
+              committedOn: weeklyRange.startDate,
+              contractId: "contract-1",
+              customerCode: "ATLAS",
+              customerId: "customer-1",
+              customerName: "Atlas Makina",
+              internalDurationMinutes: 45,
+              internalPlannedAtUtc: `${weeklyRange.startDate} 06:30:00.000000`,
+              resolutionStatus: "planned",
+              visitId: "visit-1",
+            },
+            {
+              committedOn: "2026-09-04",
+              contractId: "contract-2",
+              customerCode: "VEGA",
+              customerId: "customer-2",
+              customerName: "Vega Endüstri",
+              internalDurationMinutes: null,
+              internalPlannedAtUtc: null,
+              resolutionStatus: "completed",
+              visitId: "visit-2",
+            },
+          ],
+          range: weeklyRange,
+          view,
+        });
+      }
+      if (view === "month") {
+        return jsonResponse({
+          date,
+          items: [
+            {
+              committedOn: "2026-09-04",
+              contractId: "contract-2",
+              customerCode: "VEGA",
+              customerId: "customer-2",
+              customerName: "Vega Endüstri",
+              internalDurationMinutes: null,
+              internalPlannedAtUtc: null,
+              resolutionStatus: "completed",
+              visitId: "visit-2",
+            },
+          ],
+          range: { endDate: "2026-09-30", startDate: "2026-09-01" },
+          view,
+        });
+      }
+      return jsonResponse({ date, items: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+
+    render(<DailyPlanWorkspace />);
+    await screen.findByText("Bu dönem için planlanmış ziyaret bulunmuyor.");
+    fireEvent.change(screen.getByLabelText("Plan tarihi"), {
+      target: { value: anchor },
+    });
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        `/api/daily-plan?date=${anchor}`,
+        expect.any(Object),
+      );
+    });
+
+    await user.click(screen.getByRole("button", { name: "Haftalık" }));
+    expect(await screen.findByRole("heading", { name: "Haftalık plan" })).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/api/daily-plan?date=${anchor}&view=week`,
+      expect.any(Object),
+    );
+    expect(screen.getByRole("region", { name: /31 Ağustos 2026 Pazartesi/u })).toHaveTextContent(
+      "Atlas Makina",
+    );
+    expect(screen.getByRole("region", { name: /4 Eylül 2026 Cuma/u })).toHaveTextContent(
+      "Vega Endüstri",
+    );
+    expect(screen.getByLabelText("Dönem özeti")).toHaveTextContent("2 ziyaret");
+    expect(screen.getByLabelText("Dönem özeti")).toHaveTextContent("2 planlı gün");
+
+    await user.click(screen.getByRole("button", { name: "Aylık" }));
+    expect(await screen.findByRole("heading", { name: "Aylık plan" })).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/api/daily-plan?date=${anchor}&view=month`,
+      expect.any(Object),
+    );
+  });
+
+  it("completes a planned visit in place when the account has visit write access", async () => {
+    const today = currentIstanbulDate();
+    const visit = {
+      committedOn: today,
+      contractId: "contract-1",
+      customerCode: "ATLAS",
+      customerId: "customer-1",
+      customerName: "Atlas Makina",
+      internalDurationMinutes: 45,
+      internalPlannedAtUtc: `${today} 06:30:00.000000`,
+      resolutionStatus: "planned",
+      visitId: "visit-1",
+    } as const;
+    const fetchMock = vi.fn<typeof fetch>(async (_input, init) => {
+      if (init?.method === "PATCH") {
+        return jsonResponse({
+          visit: { id: visit.visitId, resolutionStatus: "completed" },
+        });
+      }
+      return jsonResponse({ date: today, items: [visit] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+
+    render(<DailyPlanWorkspace canWriteVisits />);
+    await user.click(
+      await screen.findByRole("button", {
+        name: /Atlas Makina.*ziyaretini tamamla/u,
+      }),
+    );
+    await user.click(screen.getByRole("button", { name: "Tamamla ve kaydet" }));
+
+    expect(
+      await screen.findByText("Atlas Makina ziyareti tamamlandı."),
+    ).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/customers/customer-1/contracts/contract-1/visits/visit-1",
+      expect.objectContaining({
+        body: JSON.stringify({
+          deliveredOn: today,
+          resolutionNote: null,
+          resolutionStatus: "completed",
+        }),
+        credentials: "same-origin",
+        method: "PATCH",
+        signal: expect.any(AbortSignal),
+      }),
+    );
+    expect(
+      screen.queryByRole("button", { name: /ziyaretini tamamla/u }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Dönem özeti")).toHaveTextContent(
+      "1 tamamlandı",
+    );
+    await waitFor(() => {
+      expect(screen.getByText("ATLAS").closest("article")).toHaveFocus();
+    });
+  });
+
   it("shows loading, reports failures and retries the selected date", async () => {
     let resolveFirst: ((response: Response) => void) | undefined;
     const firstResponse = new Promise<Response>((resolve) => {
@@ -186,16 +371,18 @@ describe("DailyPlanWorkspace", () => {
     const user = userEvent.setup();
 
     render(<DailyPlanWorkspace />);
-    expect(screen.getByText("Günün ziyaretleri yükleniyor…")).toBeInTheDocument();
+    expect(
+      screen.getByText("Planlanan ziyaretler yükleniyor…"),
+    ).toBeInTheDocument();
 
     resolveFirst?.(jsonResponse({ status: "service_unavailable" }, 503));
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Günlük plana ulaşılamadı.",
+      "Plan görünümüne ulaşılamadı.",
     );
 
     await user.click(screen.getByRole("button", { name: "Yeniden dene" }));
     expect(
-      await screen.findByText("Bu gün için planlanmış ziyaret bulunmuyor."),
+      await screen.findByText("Bu dönem için planlanmış ziyaret bulunmuyor."),
     ).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });

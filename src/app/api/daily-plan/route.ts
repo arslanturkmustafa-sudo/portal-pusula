@@ -32,11 +32,16 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   try {
     const queryEntries = [...request.nextUrl.searchParams.entries()];
-    if (queryEntries.length !== 1 || queryEntries[0]?.[0] !== "date") {
+    const queryKeys = queryEntries.map(([key]) => key);
+    if (
+      queryKeys.filter((key) => key === "date").length !== 1 ||
+      queryKeys.filter((key) => key === "view").length > 1 ||
+      queryKeys.some((key) => key !== "date" && key !== "view")
+    ) {
       return json({ status: "validation_error" }, 400);
     }
     const input = dailyPlanQuerySchema.parse(Object.fromEntries(queryEntries));
-    const agenda = await getDailyAgenda(databasePool(), input.date);
+    const agenda = await getDailyAgenda(databasePool(), input.date, input.view);
     return json(agenda);
   } catch (error) {
     if (error instanceof z.ZodError) {
