@@ -247,6 +247,23 @@ button, a { color: inherit; }
   color: var(--ink-soft);
   font-size: 0.68rem;
 }
+
+.customer-summary-refresh-error {
+  align-items: center;
+  background: color-mix(in srgb, var(--danger) 8%, var(--sheet));
+  border: 1px solid color-mix(in srgb, var(--danger) 28%, var(--line));
+  border-radius: 12px;
+  color: var(--ink);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  justify-content: space-between;
+  padding: 12px 14px;
+}
+
+.customer-summary-refresh-error .text-action {
+  flex: 0 0 auto;
+}
 .customer-entry {
   display: grid;
   grid-template-columns: minmax(180px, 0.8fr) minmax(0, 2.2fr);
@@ -318,7 +335,7 @@ button, a { color: inherit; }
 }
 .ledger-summary {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   border-bottom: 1px solid var(--line-strong);
 }
 .ledger-summary > div {
@@ -851,7 +868,9 @@ button, a { color: inherit; }
 .visit-list { border-bottom: 1px solid var(--line-strong); }
 .visit-row {
   display: grid;
-  grid-template-columns: minmax(125px, 1.2fr) minmax(92px, 0.8fr) minmax(82px, 0.7fr);
+  grid-template-columns:
+    minmax(125px, 1.1fr) minmax(135px, 1.2fr)
+    minmax(92px, 0.75fr) minmax(82px, 0.65fr);
   gap: 0.55rem;
   padding: 0.75rem 0;
   border-bottom: 1px solid var(--line);
@@ -1591,6 +1610,60 @@ button, a { color: inherit; }
   font-size: 0.7rem;
   font-weight: 700;
 }
+.daily-plan-filter-bar {
+  min-height: 58px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+  margin-bottom: 1rem;
+  padding: 0.55rem 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+.daily-plan-filters,
+.daily-plan-export-actions {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.55rem;
+}
+.daily-plan-filters label {
+  min-width: 180px;
+  display: grid;
+  gap: 0.22rem;
+}
+.daily-plan-filters label > span,
+.daily-plan-export-actions > span {
+  color: var(--ink-soft);
+  font-size: 0.57rem;
+  font-weight: 700;
+}
+.daily-plan-filters select {
+  min-height: 38px;
+  padding: 0.4rem 0.55rem;
+  border: 1px solid var(--line-strong);
+  background: var(--sheet);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.67rem;
+}
+.daily-plan-filters select:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+.daily-plan-export-actions a {
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 0.65rem;
+  border: 1px solid var(--line-strong);
+  background: var(--sheet);
+  color: var(--ink);
+  font-size: 0.62rem;
+  font-weight: 750;
+  text-decoration: none;
+}
+.daily-plan-export-actions a:hover { background: var(--sheet-soft); }
 .daily-plan-feedback {
   min-height: 66px;
   display: flex;
@@ -1837,6 +1910,15 @@ button, a { color: inherit; }
   color: var(--line-strong);
   content: "/";
 }
+.daily-plan-entry-meta .daily-plan-location {
+  padding: 0.15rem 0.4rem;
+  border: 1px solid color-mix(in srgb, var(--terracotta) 38%, var(--line));
+  border-radius: 999px;
+  background: var(--sheet-soft);
+  color: var(--ink);
+  font-weight: 700;
+}
+.daily-plan-entry-meta .daily-plan-location::before { content: none; }
 .daily-plan-status {
   display: inline-flex;
   align-items: center;
@@ -1884,9 +1966,24 @@ button, a { color: inherit; }
   .daily-plan-view-switch { width: 100%; }
   .daily-plan-view-switch button { flex: 1; }
   .daily-plan-date-field { flex: 1; }
+  .daily-plan-filter-bar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .daily-plan-filters,
+  .daily-plan-export-actions { width: 100%; }
+  .daily-plan-filters label { flex: 1; }
 }
 
 @media (max-width: 620px) {
+  .daily-plan-filters,
+  .daily-plan-export-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+  .daily-plan-filters label { min-width: 0; }
+  .daily-plan-filters select,
+  .daily-plan-export-actions a { min-height: 44px; }
   .daily-plan-toolbar {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2887,6 +2984,46 @@ button, a { color: inherit; }
   font-size: 0.72rem;
   line-height: 1.5;
 }
+.expense-command-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+.expense-category-entry {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) auto;
+  align-items: end;
+  gap: 0.75rem 1rem;
+  padding: 0.9rem;
+  border: 1px solid var(--line-strong);
+  border-top: 0;
+  background: color-mix(in srgb, var(--sheet) 92%, var(--forest) 8%);
+}
+.expense-category-entry label > span {
+  display: block;
+  margin-bottom: 0.3rem;
+  color: var(--ink-soft);
+  font-size: 0.58rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.expense-category-entry input {
+  width: 100%;
+  min-height: 40px;
+  padding: 0.48rem 0.58rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 0;
+  background: var(--sheet);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.72rem;
+}
+.expense-category-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+.expense-category-entry .entry-error { grid-column: 1 / -1; margin: 0; }
 .expense-summary { border-top: 1px solid var(--ink); }
 .expense-entry,
 .card-entry { border-top: 0; }
@@ -3097,9 +3234,153 @@ button, a { color: inherit; }
   font-size: 0.72rem;
 }
 .card-payment-plan { padding-top: 0.6rem; }
-.card-plan-filters { display: grid; grid-template-columns: repeat(2, minmax(150px, 1fr)); gap: 0.6rem; }
+.card-plan-filters {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(150px, 1fr)) auto;
+  gap: 0.6rem;
+}
+.card-plan-all-periods {
+  min-height: 44px;
+  display: grid;
+  align-content: center;
+  gap: 0.12rem;
+  padding: 0.38rem 0.7rem;
+  border: 1px solid var(--line-strong);
+  background: var(--sheet);
+  color: var(--ink);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+.card-plan-all-periods strong { font-size: 0.72rem; }
+.card-plan-all-periods small { color: var(--ink-soft); font-size: 0.68rem; }
+.card-plan-all-periods[aria-pressed="true"] {
+  border-color: var(--forest);
+  background: var(--forest);
+  color: var(--sheet);
+}
+.card-plan-all-periods[aria-pressed="true"] small { color: inherit; }
+.card-plan-all-periods:disabled { cursor: not-allowed; opacity: 0.62; }
 .card-plan-summary { margin-top: 0.8rem; }
-.card-plan-table-wrap { margin-top: 1rem; }
+.card-plan-groups {
+  display: grid;
+  gap: 1.25rem;
+  margin-top: 1.25rem;
+}
+.card-plan-group {
+  min-width: 0;
+  border: 1px solid var(--line-strong);
+  background: color-mix(in srgb, var(--sheet) 82%, var(--sheet-soft));
+}
+.card-plan-group-heading {
+  min-height: 86px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.85rem 1rem;
+  border-bottom: 1px solid var(--line-strong);
+}
+.card-plan-group-heading h4 {
+  margin: 0;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.18rem;
+  font-weight: 500;
+}
+.card-plan-group-heading p:last-child {
+  margin: 0.3rem 0 0;
+  color: var(--ink-soft);
+  font-size: 0.72rem;
+}
+.card-plan-card-summary {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  margin: 0;
+  border-bottom: 1px solid var(--line-strong);
+}
+.card-plan-card-summary > div {
+  min-width: 0;
+  min-height: 82px;
+  padding: 0.85rem 1rem;
+  border-right: 1px solid var(--line);
+}
+.card-plan-card-summary > div:last-child { border-right: 0; }
+.card-plan-card-summary dt {
+  color: var(--ink-soft);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.card-plan-card-summary dd {
+  margin: 0.34rem 0 0;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(0.9rem, 1.4vw, 1.15rem);
+  overflow-wrap: anywhere;
+}
+.card-plan-card-summary small {
+  display: block;
+  margin-top: 0.2rem;
+  color: var(--ink-soft);
+  font-size: 0.68rem;
+}
+.card-plan-card-summary .is-positive { box-shadow: inset 0 3px 0 #47745f; }
+.card-plan-card-summary .is-attention { box-shadow: inset 0 3px 0 var(--terracotta); }
+.card-plan-table-wrap { margin-top: 0; }
+.card-bulk-payment-trigger {
+  min-height: 44px;
+  padding: 0.45rem 0.75rem;
+  border: 1px solid var(--forest);
+  background: var(--forest);
+  color: var(--sheet);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.7rem;
+  font-weight: 800;
+}
+.card-bulk-payment-trigger:disabled { cursor: not-allowed; opacity: 0.5; }
+.card-bulk-payment-editor {
+  width: min(430px, 100%);
+  display: grid;
+  grid-template-columns: minmax(145px, 1fr) auto;
+  align-items: end;
+  gap: 0.55rem;
+}
+.card-bulk-payment-summary {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.8rem;
+  margin: 0;
+  padding: 0 0 0.5rem;
+  border-bottom: 1px solid var(--line);
+}
+.card-bulk-payment-summary strong { font-size: 0.76rem; }
+.card-bulk-payment-summary span {
+  color: var(--ink-soft);
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.card-bulk-payment-editor label > span {
+  display: block;
+  margin-bottom: 0.2rem;
+  color: var(--ink-soft);
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+.card-bulk-payment-editor input {
+  width: 100%;
+  min-height: 44px;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 0;
+  background: var(--sheet);
+  color: var(--ink);
+  font: inherit;
+}
+.card-bulk-payment-editor > div { display: flex; gap: 0.35rem; }
 .card-installment-status.is-overdue { color: #9b3f25; }
 .card-installment-status.is-overdue::before { background: var(--terracotta); }
 .card-installment-status.is-paid::before { background: #47745f; }
@@ -3113,7 +3394,7 @@ button, a { color: inherit; }
   display: block;
   margin-bottom: 0.2rem;
   color: var(--ink-soft);
-  font-size: 0.58rem;
+  font-size: 0.68rem;
   font-weight: 700;
 }
 .card-payment-editor input {
@@ -3139,7 +3420,10 @@ button, a { color: inherit; }
   .finance-subnav a { padding-right: 0.5rem; padding-left: 0.5rem; }
   .finance-subnav a:first-child { padding-left: 0.5rem; }
   .expense-command-bar { align-items: stretch; flex-direction: column; gap: 0.9rem; }
-  .expense-command-bar .primary-action { width: 100%; }
+  .expense-command-actions { width: 100%; }
+  .expense-command-actions > * { flex: 1; }
+  .expense-category-entry { grid-template-columns: 1fr; }
+  .expense-category-actions { justify-content: flex-end; }
   .expense-toolbar { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .expense-search { grid-column: 1 / -1; }
   .card-register-heading,
@@ -3148,6 +3432,16 @@ button, a { color: inherit; }
   .card-register-list > li { grid-template-columns: 1fr auto; }
   .card-register-list dl { grid-column: 1 / -1; }
   .card-plan-filters { width: 100%; }
+  .card-plan-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .card-plan-all-periods { grid-column: 1 / -1; }
+  .card-plan-group-heading { align-items: stretch; flex-direction: column; }
+  .card-plan-card-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .card-plan-card-summary > div { border-bottom: 1px solid var(--line); }
+  .card-plan-card-summary > div:nth-child(even) { border-right: 0; }
+  .card-plan-card-summary > div:last-child {
+    grid-column: 1 / -1;
+    border-bottom: 0;
+  }
   .expense-table thead,
   .card-plan-table thead {
     position: absolute;
@@ -3204,6 +3498,23 @@ button, a { color: inherit; }
   .expense-toolbar select,
   .card-plan-filters input,
   .card-plan-filters select { min-height: 44px; }
+  .expense-command-actions { align-items: stretch; flex-direction: column; }
+  .expense-command-actions > *,
+  .expense-category-actions > * { min-height: 44px; }
+  .expense-category-actions { display: grid; grid-template-columns: 1fr; }
+  .card-plan-card-summary { grid-template-columns: 1fr; }
+  .card-plan-card-summary > div,
+  .card-plan-card-summary > div:nth-child(even),
+  .card-plan-card-summary > div:last-child {
+    grid-column: 1;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .card-plan-card-summary > div:last-child { border-bottom: 0; }
+  .card-bulk-payment-editor { grid-template-columns: 1fr; }
+  .card-bulk-payment-summary { align-items: flex-start; flex-direction: column; gap: 0.2rem; }
+  .card-bulk-payment-summary span { text-align: left; }
+  .card-bulk-payment-editor > div > button { min-height: 44px; flex: 1; }
   .finance-form input,
   .finance-form select,
   .finance-form-actions button,

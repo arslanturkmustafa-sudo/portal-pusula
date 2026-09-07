@@ -6,6 +6,7 @@ import {
   createFinanceTransactionInputSchema,
   FinanceAccountInactiveError,
   FinanceAccountNotFoundError,
+  FinanceTransactionBeforeAccountOpeningError,
   FinanceTransactionFutureDateError,
   FinanceTransactionIdempotencyConflictError,
 } from "@/features/finance";
@@ -62,6 +63,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
     if (error instanceof FinanceTransactionFutureDateError) {
       return spendingJson({ status: "future_date" }, 409);
+    }
+    if (error instanceof FinanceTransactionBeforeAccountOpeningError) {
+      return spendingJson({ status: "before_account_opening" }, 400);
     }
     if (error instanceof FinanceTransactionIdempotencyConflictError) {
       return spendingJson({ status: "idempotency_conflict" }, 409);

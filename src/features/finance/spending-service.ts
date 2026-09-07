@@ -7,6 +7,7 @@ import type { Pool } from "mysql2/promise";
 
 import { findProjectForUpdate } from "@/features/projects/repository";
 import { buildCardInstallmentPlan } from "@/features/finance/card-plan";
+import { findActiveExpenseCategoryByCodeForUpdate } from "@/features/finance/expense-category-repository";
 import { addMoney } from "@/features/finance/money";
 import { istanbulDate, monthBounds } from "@/features/finance/period";
 import {
@@ -19,6 +20,7 @@ import {
   insertCreditCardRecordIdempotently,
   insertExpenseRecordIdempotently,
   listCardInstallmentRecords,
+  listCardInstallmentsForBulkUpdate,
   listCreditCardRecords,
   listExpenseInstallmentsForUpdate,
   listExpenseRecords,
@@ -30,6 +32,8 @@ import {
   updateExpenseRecord,
 } from "@/features/finance/spending-repository";
 import {
+  type BulkPayCardInstallmentsInput,
+  bulkPayCardInstallmentsInputSchema,
   type CreateCreditCardInput,
   createCreditCardInputSchema,
   type CreateExpenseInput,
@@ -99,6 +103,13 @@ export class InstallmentPaymentDateInFutureError extends Error {
   }
 }
 
+export class CardInstallmentBulkConflictError extends Error {
+  constructor() {
+    super("The card installment selection changed before bulk payment.");
+    this.name = "CardInstallmentBulkConflictError";
+  }
+}
+
 export type SpendingWriteContext = Readonly<{
   actorId?: string;
   correlationId: string;
@@ -127,9 +138,27 @@ export type CardInstallmentSummary = Readonly<{
   plannedAmount: string;
 }>;
 
+export type CardInstallmentCardSummary = Readonly<{
+  cardId: string;
+  creditCardName: string;
+  nextDueAmount: string;
+  nextDueOn: string | null;
+  overdueAmount: string;
+  paidAmount: string;
+  remainingAmount: string;
+  totalAmount: string;
+}>;
+
 export type CardInstallmentCollection = Readonly<{
+  cardSummaries: readonly CardInstallmentCardSummary[];
   installments: readonly CardInstallmentView[];
   summary: CardInstallmentSummary;
+}>;
+
+export type BulkPayCardInstallmentsResult = Readonly<{
+  installments: readonly CardInstallmentView[];
+  replayed: boolean;
+  updatedCount: number;
 }>;
 
 function moneyTotal(netAmount: string, vatAmount: string): string {
@@ -221,6 +250,69 @@ function installmentAuditSummary(installment: CardInstallment) {
     status: installment.status,
     version: installment.version,
   };
+}
+
+function installmentView(
+  installment: CardInstallment,
+  today: string,
+): CardInstallmentView {
+  const status =
+    installment.status === "paid"
+      ? "paid"
+      : installment.dueOn < today
+        ? "overdue"
+        : "planned";
+  return { ...installment, status };
+}
+
+function summarizeInstallmentsByCard(
+  installments: readonly CardInstallmentView[],
+): readonly CardInstallmentCardSummary[] {
+  const summaries = new Map<string, CardInstallmentCardSummary>();
+  for (const installment of installments) {
+    const current = summaries.get(installment.creditCardId) ?? {
+      cardId: installment.creditCardId,
+      creditCardName: installment.creditCardName,
+      nextDueAmount: "0.0000",
+      nextDueOn: null,
+      overdueAmount: "0.0000",
+      paidAmount: "0.0000",
+      remainingAmount: "0.0000",
+      totalAmount: "0.0000",
+    };
+    const isPaid = installment.status === "paid";
+    const isEarlierDue =
+      installment.status === "planned" &&
+      (current.nextDueOn === null || installment.dueOn < current.nextDueOn);
+    const isSameDue =
+      installment.status === "planned" &&
+      installment.dueOn === current.nextDueOn;
+    summaries.set(installment.creditCardId, {
+      ...current,
+      nextDueAmount: isEarlierDue
+        ? installment.amount
+        : isSameDue
+          ? addMoney(current.nextDueAmount, installment.amount)
+          : current.nextDueAmount,
+      nextDueOn: isEarlierDue ? installment.dueOn : current.nextDueOn,
+      overdueAmount:
+        installment.status === "overdue"
+          ? addMoney(current.overdueAmount, installment.amount)
+          : current.overdueAmount,
+      paidAmount: isPaid
+        ? addMoney(current.paidAmount, installment.amount)
+        : current.paidAmount,
+      remainingAmount: isPaid
+        ? current.remainingAmount
+        : addMoney(current.remainingAmount, installment.amount),
+      totalAmount: addMoney(current.totalAmount, installment.amount),
+    });
+  }
+  return [...summaries.values()].sort(
+    (left, right) =>
+      left.creditCardName.localeCompare(right.creditCardName, "tr") ||
+      left.cardId.localeCompare(right.cardId),
+  );
 }
 
 async function requireProject(
@@ -398,6 +490,9 @@ export async function createExpense(
       }
       return { created: false, expense: replay };
     }
+    if (!(await findActiveExpenseCategoryByCodeForUpdate(connection, input.category))) {
+      throw new SpendingResourceNotFoundError();
+    }
     await requireProject(connection, input.projectId);
     const card = await selectedCard(connection, input.creditCardId);
     const pending: Expense = {
@@ -458,6 +553,12 @@ export async function updateExpense(
     if (before.version !== input.version) throw new SpendingVersionConflictError();
     if (before.status === "voided") throw new ExpenseAlreadyVoidedError();
 
+    if (
+      before.category !== input.category &&
+      !(await findActiveExpenseCategoryByCodeForUpdate(connection, input.category))
+    ) {
+      throw new SpendingResourceNotFoundError();
+    }
     await requireProject(connection, input.projectId);
     const planChanged = expensePlanChanged(before, input);
     const card =
@@ -532,13 +633,9 @@ export async function listCardInstallments(
     let overdueAmount = "0.0000";
     let paidAmount = "0.0000";
     let plannedAmount = "0.0000";
-    const installments = stored.map<CardInstallmentView>((item) => {
-      const status =
-        item.status === "paid"
-          ? "paid"
-          : item.dueOn < today
-            ? "overdue"
-            : "planned";
+    const installments = stored.map((item) => {
+      const visible = installmentView(item, today);
+      const { status } = visible;
       if (status === "paid") paidAmount = addMoney(paidAmount, item.amount);
       else {
         openAmount = addMoney(openAmount, item.amount);
@@ -548,11 +645,100 @@ export async function listCardInstallments(
           plannedAmount = addMoney(plannedAmount, item.amount);
         }
       }
-      return { ...item, status };
+      return visible;
     });
     return {
+      cardSummaries: summarizeInstallmentsByCard(installments),
       installments,
       summary: { openAmount, overdueAmount, paidAmount, plannedAmount },
+    };
+  });
+}
+
+export async function bulkPayCardInstallments(
+  pool: Pool,
+  rawInput: BulkPayCardInstallmentsInput,
+  context: SpendingWriteContext,
+): Promise<BulkPayCardInstallmentsResult> {
+  const input = bulkPayCardInstallmentsInputSchema.parse(rawInput);
+  if (context.actorId !== undefined) assertCanonicalUuid(context.actorId);
+  const nowDate = context.now ?? new Date();
+  const now = toUtcDateTime6(nowDate);
+  const today = istanbulDate(nowDate);
+  if (input.paidOn > today) throw new InstallmentPaymentDateInFutureError();
+
+  return withUtcTransaction(pool, async (connection) => {
+    if (!(await findCreditCardForUpdate(connection, input.cardId))) {
+      throw new SpendingResourceNotFoundError();
+    }
+    const locked = await listCardInstallmentsForBulkUpdate(
+      connection,
+      input.cardId,
+      input.month,
+    );
+    const requested = new Map(
+      input.installments.map((installment) => [installment.id, installment.version]),
+    );
+    const open = locked.filter((installment) => installment.status === "planned");
+
+    if (open.length === 0) {
+      const replayed = input.installments.every((expected) => {
+        const installment = locked.find((candidate) => candidate.id === expected.id);
+        return (
+          installment?.status === "paid" &&
+          installment.paidOn === input.paidOn &&
+          installment.version === expected.version + 1
+        );
+      });
+      if (!replayed) throw new CardInstallmentBulkConflictError();
+      const requestedIds = new Set(requested.keys());
+      return {
+        installments: locked
+          .filter((installment) => requestedIds.has(installment.id))
+          .map((installment) => installmentView(installment, today)),
+        replayed: true,
+        updatedCount: 0,
+      };
+    }
+
+    if (
+      open.length !== requested.size ||
+      open.some(
+        (installment) => requested.get(installment.id) !== installment.version,
+      )
+    ) {
+      throw new CardInstallmentBulkConflictError();
+    }
+
+    const updated: CardInstallment[] = [];
+    for (const before of open) {
+      const after: CardInstallment = {
+        ...before,
+        paidOn: input.paidOn,
+        status: "paid",
+        updatedAtUtc: now,
+        version: before.version + 1,
+      };
+      if (!(await updateCardInstallmentRecord(connection, after, before.version))) {
+        throw new CardInstallmentBulkConflictError();
+      }
+      await appendAuditEvent(connection, {
+        action: "credit_card_installment.paid_bulk",
+        actorId: context.actorId,
+        actorType: "user",
+        afterSummary: installmentAuditSummary(after),
+        beforeSummary: installmentAuditSummary(before),
+        correlationId: context.correlationId,
+        entityId: after.id,
+        entityType: "credit_card_installment",
+        occurredAtUtc: now,
+      });
+      updated.push(after);
+    }
+    return {
+      installments: updated.map((installment) => installmentView(installment, today)),
+      replayed: false,
+      updatedCount: updated.length,
     };
   });
 }

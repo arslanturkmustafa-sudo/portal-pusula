@@ -65,7 +65,12 @@ describe("customer repository", () => {
     await expect(
       listCustomerRecords(
         { execute } as unknown as PoolConnection,
-        { includeBilling: true, includeContact: true, includeVisits: true },
+        {
+          businessDate: "2026-09-07",
+          includeBilling: true,
+          includeContact: true,
+          includeVisits: true,
+        },
       ),
     ).resolves.toEqual([
       expect.objectContaining({
@@ -98,9 +103,29 @@ describe("customer repository", () => {
     ]);
     expect(execute).toHaveBeenCalledWith(
       expect.stringMatching(
-        /LEFT JOIN customer_project[\s\S]*monthly_visit_commitment[\s\S]*SUM\(monthly_fee_amount\)[\s\S]*p\.display_name ASC/iu,
+        /LEFT JOIN customer_project[\s\S]*monthly_visit_commitment[\s\S]*visit\.committed_on >= \?[\s\S]*SUM\(monthly_fee_amount\)[\s\S]*starts_on <= \?[\s\S]*ends_on >= \?[\s\S]*p\.display_name ASC/iu,
       ),
+      ["2026-09-07", "2026-09-07", "2026-09-07"],
     );
+    expect(String(execute.mock.calls[0]?.[0])).not.toContain("CURRENT_DATE");
+  });
+
+  it("requires an explicit canonical business date for visit or billing projections", async () => {
+    const execute = vi.fn();
+
+    await expect(
+      listCustomerRecords(
+        { execute } as unknown as PoolConnection,
+        { includeVisits: true },
+      ),
+    ).rejects.toThrow("Customer projection business date is invalid.");
+    await expect(
+      listCustomerRecords(
+        { execute } as unknown as PoolConnection,
+        { businessDate: "2026-02-30", includeBilling: true },
+      ),
+    ).rejects.toThrow("Customer projection business date is invalid.");
+    expect(execute).not.toHaveBeenCalled();
   });
 
   it("never selects billing columns unless the caller explicitly allows them", async () => {

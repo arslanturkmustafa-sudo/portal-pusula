@@ -91,11 +91,14 @@ export {
   creditCard,
   creditCardInstallment,
   expense,
+  expenseCategory,
   type CreditCardInstallmentRecord,
   type CreditCardRecord,
+  type ExpenseCategoryRecord,
   type ExpenseRecord,
   type NewCreditCardInstallmentRecord,
   type NewCreditCardRecord,
+  type NewExpenseCategoryRecord,
   type NewExpenseRecord,
 } from "./finance-spending";
 export {

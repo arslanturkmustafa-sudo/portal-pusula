@@ -59,6 +59,9 @@ export function DailyPlanDayTasks({ date, tasks }: DailyPlanDayTasksProps) {
               <p className={styles.context}>
                 {context === "" ? "Firma veya proje bağlantısı yok" : context}
               </p>
+              {typeof task.locationLabel === "string" ? (
+                <p className={styles.location}>Konum · {task.locationLabel}</p>
+              ) : null}
               <p className={styles.meta}>
                 <span>
                   Vade:{" "}

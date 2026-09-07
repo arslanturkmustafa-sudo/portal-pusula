@@ -7,10 +7,39 @@ vi.mock("server-only", () => ({}));
 
 import {
   listDailyAgendaItems,
+  listDailyPlanCustomerOptions,
   listDailyPlanTasks,
 } from "@/features/daily-plan/repository";
 
 describe("daily agenda repository", () => {
+  it("lists every active, non-archived customer for period-independent filtering", async () => {
+    const execute = vi.fn().mockResolvedValue([
+      [
+        {
+          customer_code: "ATLAS",
+          customer_id: "10000000-0000-4000-8000-000000000001",
+          customer_name: "Atlas Makina",
+        },
+      ],
+      [],
+    ]);
+
+    await expect(
+      listDailyPlanCustomerOptions({ execute } as unknown as PoolConnection),
+    ).resolves.toEqual([
+      {
+        code: "ATLAS",
+        id: "10000000-0000-4000-8000-000000000001",
+        name: "Atlas Makina",
+      },
+    ]);
+    const [sql, parameters] = execute.mock.calls[0] as [string, unknown[]];
+    expect(sql).toContain("archived_at_utc IS NULL");
+    expect(sql).toContain("BINARY status = BINARY 'active'");
+    expect(sql).toContain("ORDER BY display_name ASC, id ASC");
+    expect(parameters).toBeUndefined();
+  });
+
   it("joins visits to every contract and customer inside the inclusive date range", async () => {
     const execute = vi.fn().mockResolvedValue([
       [
@@ -22,6 +51,7 @@ describe("daily agenda repository", () => {
           customer_name: "Öncü Üretim",
           internal_duration_minutes: 120,
           internal_planned_at_utc: new Date("2026-09-02T06:00:00.000Z"),
+          location_label: "Merkez ofis",
           resolution_status: "planned",
           visit_id: "30000000-0000-4000-8000-000000000001",
         },
@@ -33,6 +63,7 @@ describe("daily agenda repository", () => {
           customer_name: "Rota Teknoloji",
           internal_duration_minutes: null,
           internal_planned_at_utc: null,
+          location_label: null,
           resolution_status: "makeup_pending",
           visit_id: "30000000-0000-4000-8000-000000000002",
         },
@@ -66,6 +97,7 @@ describe("daily agenda repository", () => {
         customerName: "Öncü Üretim",
         internalDurationMinutes: 120,
         internalPlannedAtUtc: "2026-09-02 06:00:00.000000",
+        locationLabel: "Merkez ofis",
         resolutionStatus: "planned",
         visitId: "30000000-0000-4000-8000-000000000001",
       },
@@ -77,6 +109,7 @@ describe("daily agenda repository", () => {
         customerName: "Rota Teknoloji",
         internalDurationMinutes: null,
         internalPlannedAtUtc: null,
+        locationLabel: null,
         resolutionStatus: "makeup_pending",
         visitId: "30000000-0000-4000-8000-000000000002",
       },
@@ -89,10 +122,12 @@ describe("daily agenda repository", () => {
         {
           calendar_on: new Date("2026-09-04T00:00:00.000Z"),
           calendar_source: "visit",
+          customer_id: "10000000-0000-4000-8000-000000000001",
           customer_name: "Öncü Üretim",
           due_on: "2026-09-08",
           id: "40000000-0000-4000-8000-000000000001",
           linked_visit_id: "30000000-0000-4000-8000-000000000001",
+          location_label: "Saha A",
           project_name: "Dönüşüm Programı",
           status: "todo",
           title: "Saha gözlemlerini hazırla",
@@ -100,10 +135,12 @@ describe("daily agenda repository", () => {
         {
           calendar_on: "2026-09-06",
           calendar_source: "due_date",
+          customer_id: null,
           customer_name: null,
           due_on: new Date("2026-09-06T00:00:00.000Z"),
           id: "40000000-0000-4000-8000-000000000002",
           linked_visit_id: null,
+          location_label: null,
           project_name: null,
           status: "blocked",
           title: "İç kontrol listesini tamamla",
@@ -121,6 +158,8 @@ describe("daily agenda repository", () => {
     expect(execute).toHaveBeenCalledOnce();
     const [sql, parameters] = execute.mock.calls[0] as [string, string[]];
     expect(sql).toContain("FROM work_task AS task");
+    expect(sql).toContain("LEFT JOIN customer_project AS task_customer_project");
+    expect(sql).toContain("task_customer_project.customer_id = task.customer_id");
     expect(sql).toContain("candidate_contract.customer_id = task.customer_id");
     expect(sql).toContain("candidate_visit.resolution_status = 'planned'");
     expect(sql).toContain("candidate_visit.committed_on <= task.due_on");
@@ -129,14 +168,15 @@ describe("daily agenda repository", () => {
     );
     expect(sql).toContain("LEFT JOIN work_task_visit AS exact_visit_link");
     expect(sql).toContain("exact_visit.id = exact_visit_link.visit_id");
+    expect(sql).toContain("exact_visit_contract.customer_id = task.customer_id");
     expect(sql).toMatch(
-      /COALESCE\(\s*exact_visit\.committed_on,\s*mapped_visit\.committed_on,\s*task\.due_on\s*\) BETWEEN \? AND \?/u,
+      /COALESCE\(\s*CASE WHEN exact_visit_contract\.id IS NOT NULL\s*THEN exact_visit\.committed_on END,\s*mapped_visit\.committed_on,\s*task\.due_on\s*\) BETWEEN \? AND \?/u,
     );
     expect(sql).toContain(
       "task.status IN ('backlog', 'todo', 'in_progress', 'blocked')",
     );
     expect(sql).toContain(
-      "task.status = 'done' AND exact_visit_link.task_id IS NOT NULL",
+      "task.status = 'done' AND exact_visit_contract.id IS NOT NULL",
     );
     expect(sql).not.toContain("'cancelled'");
     expect(parameters).toEqual(["2026-09-01", "2026-09-07"]);
@@ -144,10 +184,12 @@ describe("daily agenda repository", () => {
       {
         calendarOn: "2026-09-04",
         calendarSource: "visit",
+        customerId: "10000000-0000-4000-8000-000000000001",
         customerName: "Öncü Üretim",
         dueOn: "2026-09-08",
         id: "40000000-0000-4000-8000-000000000001",
         linkedVisitId: "30000000-0000-4000-8000-000000000001",
+        locationLabel: "Saha A",
         projectName: "Dönüşüm Programı",
         status: "todo",
         title: "Saha gözlemlerini hazırla",
@@ -155,10 +197,12 @@ describe("daily agenda repository", () => {
       {
         calendarOn: "2026-09-06",
         calendarSource: "due_date",
+        customerId: null,
         customerName: null,
         dueOn: "2026-09-06",
         id: "40000000-0000-4000-8000-000000000002",
         linkedVisitId: null,
+        locationLabel: null,
         projectName: null,
         status: "blocked",
         title: "İç kontrol listesini tamamla",
@@ -172,10 +216,12 @@ describe("daily agenda repository", () => {
         {
           calendar_on: "2026-09-04",
           calendar_source: "visit",
+          customer_id: "10000000-0000-4000-8000-000000000001",
           customer_name: "Öncü Üretim",
           due_on: "2026-09-05",
           id: "40000000-0000-4000-8000-000000000003",
           linked_visit_id: "30000000-0000-4000-8000-000000000003",
+          location_label: "Çevrim içi",
           project_name: "Dönüşüm Programı",
           status: "done",
           title: "Ziyaret riskleri paylaşıldı",
@@ -228,10 +274,12 @@ describe("daily agenda repository", () => {
           {
             calendar_on: "2026-09-06",
             calendar_source: calendarSource,
+            customer_id: null,
             customer_name: null,
             due_on: "2026-09-06",
             id: "40000000-0000-4000-8000-000000000002",
             linked_visit_id: linkedVisitId,
+            location_label: null,
             project_name: null,
             status,
             title: "İç kontrol listesini tamamla",
@@ -261,6 +309,7 @@ describe("daily agenda repository", () => {
           customer_name: "Test",
           internal_duration_minutes: null,
           internal_planned_at_utc: null,
+          location_label: null,
           resolution_status: "unexpected",
           visit_id: "30000000-0000-4000-8000-000000000001",
         },
@@ -275,5 +324,21 @@ describe("daily agenda repository", () => {
         "2026-09-02",
       ),
     ).rejects.toThrow("Visit resolution status is invalid.");
+  });
+
+  it("binds an optional customer scope as a parameter for visits and tasks", async () => {
+    const customerId = "10000000-0000-4000-8000-000000000001";
+    const execute = vi.fn().mockResolvedValue([[], []]);
+    const connection = { execute } as unknown as PoolConnection;
+
+    await listDailyAgendaItems(connection, "2026-09-01", "2026-09-30", customerId);
+    await listDailyPlanTasks(connection, "2026-09-01", "2026-09-30", customerId);
+
+    const [visitSql, visitParameters] = execute.mock.calls[0] as [string, string[]];
+    const [taskSql, taskParameters] = execute.mock.calls[1] as [string, string[]];
+    expect(visitSql).toContain("AND customer.id = ?");
+    expect(taskSql).toContain("AND task.customer_id = ?");
+    expect(visitParameters).toEqual(["2026-09-01", "2026-09-30", customerId]);
+    expect(taskParameters).toEqual(["2026-09-01", "2026-09-30", customerId]);
   });
 });

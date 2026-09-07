@@ -40,7 +40,9 @@ const owner = {
   role: "owner" as const,
 };
 
-function request(query = "month=2026-09") {
+function request(
+  query = "from=2026-09-01&to=2026-09-30&granularity=weekly",
+) {
   return new NextRequest(`https://portal.example.test/api/finance/cash-flow?${query}`, {
     headers: { "x-correlation-id": correlationId },
   });
@@ -50,7 +52,10 @@ describe("cash flow report API", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.authenticatePrincipalRequest.mockResolvedValue(owner);
-    mocks.getCashFlowReport.mockResolvedValue({ month: "2026-09" });
+    mocks.getCashFlowReport.mockResolvedValue({
+      granularity: "weekly",
+      range: { from: "2026-09-01", to: "2026-09-30" },
+    });
     mocks.requestLogger.mockReturnValue({ error: mocks.error });
   });
 
@@ -67,21 +72,31 @@ describe("cash flow report API", () => {
     expect(mocks.getCashFlowReport).not.toHaveBeenCalled();
   });
 
-  it("returns a private, correlated report for an exact month query", async () => {
+  it("returns a private, correlated report for an exact range query", async () => {
     const response = await GET(request());
 
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toContain("no-store");
     expect(response.headers.get("x-content-type-options")).toBe("nosniff");
     expect(response.headers.get("x-correlation-id")).toBe(correlationId);
-    expect(mocks.getCashFlowReport).toHaveBeenCalledWith({}, { month: "2026-09" });
+    expect(mocks.getCashFlowReport).toHaveBeenCalledWith(
+      {},
+      {
+        from: "2026-09-01",
+        granularity: "weekly",
+        to: "2026-09-30",
+      },
+    );
   });
 
   it.each([
     "",
-    "month=2026-09&month=2026-10",
-    "month=2026-9",
-    "month=2026-09&projectId=unexpected",
+    "from=2026-09-01&to=2026-09-30",
+    "from=2026-09-01&from=2026-09-02&to=2026-09-30&granularity=weekly",
+    "from=2026-09-31&to=2026-10-01&granularity=weekly",
+    "from=2026-09-30&to=2026-09-01&granularity=monthly",
+    "from=2026-09-01&to=2026-09-30&granularity=daily",
+    "from=2026-09-01&to=2026-09-30&granularity=weekly&projectId=unexpected",
   ])("rejects a non-exact filter: %s", async (query) => {
     expect((await GET(request(query))).status).toBe(400);
     expect(mocks.getCashFlowReport).not.toHaveBeenCalled();

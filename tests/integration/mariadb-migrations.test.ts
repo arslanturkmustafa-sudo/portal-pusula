@@ -33,6 +33,7 @@ const projectTable = "project";
 const workTaskProjectTable = "work_task_project";
 const creditCardTable = "credit_card";
 const expenseTable = "expense";
+const expenseCategoryTable = "expense_category";
 const creditCardInstallmentTable = "credit_card_installment";
 const customerProjectTable = "customer_project";
 const partnershipCommissionTable = "partnership_commission";
@@ -64,6 +65,7 @@ const allMigratedPlatformTables = [
   projectTable,
   workTaskProjectTable,
   creditCardTable,
+  expenseCategoryTable,
   expenseTable,
   creditCardInstallmentTable,
   customerProjectTable,
@@ -77,6 +79,7 @@ const allMigratedPlatformTables = [
   workTaskVisitTable,
 ] as const;
 const repositoryRoot = process.cwd();
+const expectedMigrationCount = 19;
 const migrationLockWaitTimeoutMs = 5_000;
 const migrationLockPollIntervalMs = 25;
 
@@ -358,6 +361,7 @@ async function resetKnownMigrationArtifacts(pool: Pool): Promise<void> {
   await pool.query(`DROP TABLE IF EXISTS \`${partnershipCommissionTable}\``);
   await pool.query(`DROP TABLE IF EXISTS \`${creditCardInstallmentTable}\``);
   await pool.query(`DROP TABLE IF EXISTS \`${expenseTable}\``);
+  await pool.query(`DROP TABLE IF EXISTS \`${expenseCategoryTable}\``);
   await pool.query(`DROP TABLE IF EXISTS \`${creditCardTable}\``);
   await pool.query(`DROP TABLE IF EXISTS \`${workTaskProjectTable}\``);
   await pool.query(`DROP TABLE IF EXISTS \`${workTaskTable}\``);
@@ -889,6 +893,241 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
       }
     });
 
+    it("creates the 0018 expense category and visit location storage contracts", async () => {
+      const [statusRows] = await pool.execute<PlatformTableStatusRow[]>(
+        `SELECT TABLE_NAME, ENGINE, TABLE_COLLATION
+         FROM information_schema.TABLES
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?`,
+        [expenseCategoryTable],
+      );
+      expect(statusRows).toEqual([
+        {
+          ENGINE: "InnoDB",
+          TABLE_COLLATION: "utf8mb4_unicode_ci",
+          TABLE_NAME: expenseCategoryTable,
+        },
+      ]);
+
+      const [columnRows] = await pool.execute<PlatformColumnMetadataRow[]>(
+        `SELECT TABLE_NAME, COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLLATION_NAME
+         FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE()
+           AND (
+             TABLE_NAME = ?
+             OR (TABLE_NAME = ? AND COLUMN_NAME = 'category')
+             OR (TABLE_NAME = ? AND COLUMN_NAME = 'location_label')
+           )
+         ORDER BY TABLE_NAME, ORDINAL_POSITION`,
+        [expenseCategoryTable, expenseTable, monthlyVisitCommitmentTable],
+      );
+      const categoryColumns = columnRows.filter(
+        (row) => row.TABLE_NAME === expenseCategoryTable,
+      );
+      expect(categoryColumns.map((row) => row.COLUMN_NAME)).toEqual([
+        "id",
+        "code",
+        "client_operation_key",
+        "display_name",
+        "is_system",
+        "status",
+        "version",
+        "created_at_utc",
+        "updated_at_utc",
+      ]);
+      const columns = new Map(
+        columnRows.map((row) => [`${row.TABLE_NAME}.${row.COLUMN_NAME}`, row]),
+      );
+      expect(columns.get("expense_category.id")).toMatchObject({
+        COLLATION_NAME: "ascii_bin",
+        COLUMN_TYPE: "char(36)",
+        IS_NULLABLE: "NO",
+      });
+      expect(columns.get("expense_category.client_operation_key")).toMatchObject({
+        COLLATION_NAME: "ascii_bin",
+        COLUMN_TYPE: "char(36)",
+        IS_NULLABLE: "NO",
+      });
+      expect(columns.get("expense_category.code")).toMatchObject({
+        COLLATION_NAME: "ascii_bin",
+        COLUMN_TYPE: "varchar(32)",
+        IS_NULLABLE: "NO",
+      });
+      expect(columns.get("expense_category.display_name")).toMatchObject({
+        COLLATION_NAME: "utf8mb4_unicode_ci",
+        COLUMN_TYPE: "varchar(191)",
+        IS_NULLABLE: "NO",
+      });
+      expect(columns.get("expense.category")).toMatchObject({
+        COLLATION_NAME: "ascii_bin",
+        COLUMN_TYPE: "varchar(32)",
+        IS_NULLABLE: "NO",
+      });
+      expect(
+        columns.get("monthly_visit_commitment.location_label"),
+      ).toMatchObject({
+        COLLATION_NAME: "utf8mb4_unicode_ci",
+        COLUMN_TYPE: "varchar(191)",
+        IS_NULLABLE: "YES",
+      });
+
+      const [indexRows] = await pool.execute<PlatformIndexMetadataRow[]>(
+        `SELECT TABLE_NAME, INDEX_NAME, NON_UNIQUE, SEQ_IN_INDEX, COLUMN_NAME
+         FROM information_schema.STATISTICS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?
+         ORDER BY INDEX_NAME, SEQ_IN_INDEX`,
+        [expenseCategoryTable],
+      );
+      const indexes = new Map<
+        string,
+        { columns: string[]; unique: boolean }
+      >();
+      for (const row of indexRows) {
+        const current = indexes.get(row.INDEX_NAME) ?? {
+          columns: [],
+          unique: row.NON_UNIQUE === 0,
+        };
+        current.columns.push(row.COLUMN_NAME);
+        indexes.set(row.INDEX_NAME, current);
+      }
+      expect(Object.fromEntries(indexes)).toEqual({
+        PRIMARY: { columns: ["id"], unique: true },
+        idx_expense_category_status_name: {
+          columns: ["status", "display_name"],
+          unique: false,
+        },
+        uq_expense_category_client_operation: {
+          columns: ["client_operation_key"],
+          unique: true,
+        },
+        uq_expense_category_code: { columns: ["code"], unique: true },
+        uq_expense_category_display_name: {
+          columns: ["display_name"],
+          unique: true,
+        },
+      });
+
+      const [checkRows] = await pool.execute<CheckConstraintMetadataRow[]>(
+        `SELECT tc.TABLE_NAME, cc.CONSTRAINT_NAME, cc.CHECK_CLAUSE
+         FROM information_schema.TABLE_CONSTRAINTS AS tc
+         INNER JOIN information_schema.CHECK_CONSTRAINTS AS cc
+           ON cc.CONSTRAINT_SCHEMA = tc.CONSTRAINT_SCHEMA
+          AND cc.CONSTRAINT_NAME = tc.CONSTRAINT_NAME
+         WHERE tc.TABLE_SCHEMA = DATABASE()
+           AND tc.TABLE_NAME = ?
+           AND tc.CONSTRAINT_TYPE = 'CHECK'
+         ORDER BY cc.CONSTRAINT_NAME`,
+        [expenseCategoryTable],
+      );
+      expect(checkRows.map((row) => row.CONSTRAINT_NAME)).toEqual([
+        "chk_expense_category_code",
+        "chk_expense_category_display_name",
+        "chk_expense_category_flags",
+        "chk_expense_category_identity",
+        "chk_expense_category_timeline",
+        "chk_expense_category_version",
+      ]);
+
+      const [foreignKeyRows] =
+        await pool.execute<PlatformForeignKeyMetadataRow[]>(
+          `SELECT kcu.TABLE_NAME,
+                  kcu.CONSTRAINT_NAME,
+                  kcu.COLUMN_NAME,
+                  kcu.REFERENCED_TABLE_NAME,
+                  kcu.REFERENCED_COLUMN_NAME,
+                  rc.DELETE_RULE,
+                  rc.UPDATE_RULE
+           FROM information_schema.KEY_COLUMN_USAGE AS kcu
+           INNER JOIN information_schema.REFERENTIAL_CONSTRAINTS AS rc
+             ON rc.CONSTRAINT_SCHEMA = kcu.CONSTRAINT_SCHEMA
+            AND rc.TABLE_NAME = kcu.TABLE_NAME
+            AND rc.CONSTRAINT_NAME = kcu.CONSTRAINT_NAME
+           WHERE kcu.TABLE_SCHEMA = DATABASE()
+             AND kcu.TABLE_NAME = ?
+             AND kcu.CONSTRAINT_NAME = 'fk_expense_category'`,
+          [expenseTable],
+        );
+      expect(foreignKeyRows).toEqual([
+        {
+          COLUMN_NAME: "category",
+          CONSTRAINT_NAME: "fk_expense_category",
+          DELETE_RULE: "RESTRICT",
+          REFERENCED_COLUMN_NAME: "code",
+          REFERENCED_TABLE_NAME: expenseCategoryTable,
+          TABLE_NAME: expenseTable,
+          UPDATE_RULE: "RESTRICT",
+        },
+      ]);
+
+      const [seedRows] = await pool.query<
+        (RowDataPacket & {
+          code: string;
+          display_name: string;
+          is_system: number;
+          status: string;
+        })[]
+      >(
+        `SELECT code, display_name, is_system, status
+         FROM \`${expenseCategoryTable}\`
+         ORDER BY code`,
+      );
+      expect(seedRows).toEqual([
+        {
+          code: "external_service",
+          display_name: "Dış hizmet",
+          is_system: 1,
+          status: "active",
+        },
+        {
+          code: "marketing",
+          display_name: "Pazarlama",
+          is_system: 1,
+          status: "active",
+        },
+        {
+          code: "meals_hospitality",
+          display_name: "Yemek / ağırlama",
+          is_system: 1,
+          status: "active",
+        },
+        {
+          code: "office",
+          display_name: "Ofis",
+          is_system: 1,
+          status: "active",
+        },
+        {
+          code: "other",
+          display_name: "Diğer",
+          is_system: 1,
+          status: "active",
+        },
+        {
+          code: "rent",
+          display_name: "Kira",
+          is_system: 1,
+          status: "active",
+        },
+        {
+          code: "software_subscription",
+          display_name: "Yazılım / abonelik",
+          is_system: 1,
+          status: "active",
+        },
+        {
+          code: "tax_fee",
+          display_name: "Vergi / harç",
+          is_system: 1,
+          status: "active",
+        },
+        {
+          code: "transportation",
+          display_name: "Ulaşım",
+          is_system: 1,
+          status: "active",
+        },
+      ]);
+    });
+
     it("creates the durable cron gate with its exact storage and check contracts", async () => {
       const [statusRows] = await pool.execute<PlatformTableStatusRow[]>(
         `SELECT TABLE_NAME, ENGINE, TABLE_COLLATION
@@ -959,7 +1198,7 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
       ]);
     });
 
-    it("records the immutable 0000 through 0017 migration hash chain", async () => {
+    it("records the immutable 0000 through 0018 migration hash chain", async () => {
       const [rows] = await pool.query<MigrationRow[]>(
         `SELECT id, hash, created_at FROM \`${migrationTable}\` ORDER BY id`,
       );
@@ -1053,6 +1292,11 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
           created_at: 1788765868726,
           hash: "bb1241676016ea62f65944607393f09d76bef6f0c53630bfa9d61c203818d7e8",
           id: 18,
+        },
+        {
+          created_at: 1788799557949,
+          hash: "48286e594051f082b85891e043f9578dfa2105fb50aef98b878e8d476cdbba6f",
+          id: 19,
         },
       ]);
     });
@@ -1598,7 +1842,7 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
       const [before] = await pool.query<MigrationRow[]>(
         `SELECT id, hash, created_at FROM \`${migrationTable}\` ORDER BY id`,
       );
-      expect(before).toHaveLength(18);
+      expect(before).toHaveLength(expectedMigrationCount);
 
       await runMigration();
 
@@ -1612,7 +1856,7 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
       const [migrationRows] = await pool.query<MigrationRow[]>(
         `SELECT id, hash, created_at FROM \`${migrationTable}\` ORDER BY id`,
       );
-      expect(migrationRows).toHaveLength(18);
+      expect(migrationRows).toHaveLength(expectedMigrationCount);
       const migration = migrationRows[3];
       if (migration === undefined) {
         throw new Error("Expected the fourth applied migration journal row.");
@@ -1731,7 +1975,7 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
           const [journalRows] = await lockConnection.query<MigrationRow[]>(
             `SELECT id, hash, created_at FROM \`${migrationTable}\` ORDER BY id`,
           );
-          expect(journalRows).toHaveLength(18);
+          expect(journalRows).toHaveLength(expectedMigrationCount);
           expect(await tableExists(lockConnection, verificationTable)).toBe(
             true,
           );

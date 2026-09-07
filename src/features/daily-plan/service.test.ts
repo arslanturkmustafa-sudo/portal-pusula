@@ -7,12 +7,14 @@ vi.mock("server-only", () => ({}));
 
 const mocks = vi.hoisted(() => ({
   listDailyAgendaItems: vi.fn(),
+  listDailyPlanCustomerOptions: vi.fn(),
   listDailyPlanTasks: vi.fn(),
   withUtcTransaction: vi.fn(),
 }));
 
 vi.mock("@/features/daily-plan/repository", () => ({
   listDailyAgendaItems: mocks.listDailyAgendaItems,
+  listDailyPlanCustomerOptions: mocks.listDailyPlanCustomerOptions,
   listDailyPlanTasks: mocks.listDailyPlanTasks,
 }));
 
@@ -34,6 +36,7 @@ const item = {
   customerName: "Öncü Üretim",
   internalDurationMinutes: 120,
   internalPlannedAtUtc: "2026-09-02 06:00:00.000000",
+  locationLabel: "Merkez ofis",
   resolutionStatus: "planned" as const,
   visitId: "30000000-0000-4000-8000-000000000001",
 };
@@ -41,13 +44,21 @@ const item = {
 const task = {
   calendarOn: "2026-09-02",
   calendarSource: "visit" as const,
+  customerId: "10000000-0000-4000-8000-000000000001",
   customerName: "Öncü Üretim",
   dueOn: "2026-09-05",
   id: "40000000-0000-4000-8000-000000000001",
   linkedVisitId: "30000000-0000-4000-8000-000000000001",
+  locationLabel: "Merkez ofis",
   projectName: "Dönüşüm Programı",
   status: "todo" as const,
   title: "Saha gözlemlerini hazırla",
+};
+
+const customer = {
+  code: "ONCU",
+  id: "10000000-0000-4000-8000-000000000001",
+  name: "Öncü Üretim",
 };
 
 describe("daily agenda service", () => {
@@ -58,6 +69,7 @@ describe("daily agenda service", () => {
         operation({}),
     );
     mocks.listDailyAgendaItems.mockResolvedValue([item]);
+    mocks.listDailyPlanCustomerOptions.mockResolvedValue([customer]);
     mocks.listDailyPlanTasks.mockResolvedValue([task]);
   });
 
@@ -65,6 +77,7 @@ describe("daily agenda service", () => {
     const pool = {} as Pool;
 
     await expect(getDailyAgenda(pool, "2026-09-02", "day", true)).resolves.toEqual({
+      customers: [customer],
       date: "2026-09-02",
       items: [item],
       range: { endDate: "2026-09-02", startDate: "2026-09-02" },
@@ -79,11 +92,16 @@ describe("daily agenda service", () => {
       expect.anything(),
       "2026-09-02",
       "2026-09-02",
+      null,
+    );
+    expect(mocks.listDailyPlanCustomerOptions).toHaveBeenCalledWith(
+      expect.anything(),
     );
     expect(mocks.listDailyPlanTasks).toHaveBeenCalledWith(
       expect.anything(),
       "2026-09-02",
       "2026-09-02",
+      null,
     );
   });
 
@@ -98,11 +116,13 @@ describe("daily agenda service", () => {
       expect.anything(),
       "2026-08-31",
       "2026-09-06",
+      null,
     );
     expect(mocks.listDailyPlanTasks).toHaveBeenCalledWith(
       expect.anything(),
       "2026-08-31",
       "2026-09-06",
+      null,
     );
   });
 
@@ -112,6 +132,32 @@ describe("daily agenda service", () => {
     ).resolves.toMatchObject({ tasks: [] });
     expect(mocks.listDailyAgendaItems).toHaveBeenCalledOnce();
     expect(mocks.listDailyPlanTasks).not.toHaveBeenCalled();
+  });
+
+  it("passes a validated customer scope to both repositories", async () => {
+    const customerId = "10000000-0000-4000-8000-000000000001";
+
+    await getDailyAgenda({} as Pool, "2026-09-02", "day", true, customerId);
+
+    expect(mocks.listDailyAgendaItems).toHaveBeenCalledWith(
+      expect.anything(),
+      "2026-09-02",
+      "2026-09-02",
+      customerId,
+    );
+    expect(mocks.listDailyPlanTasks).toHaveBeenCalledWith(
+      expect.anything(),
+      "2026-09-02",
+      "2026-09-02",
+      customerId,
+    );
+  });
+
+  it("rejects an invalid customer scope before opening a transaction", async () => {
+    await expect(
+      getDailyAgenda({} as Pool, "2026-09-02", "day", true, "customer-1"),
+    ).rejects.toMatchObject({ name: "ZodError" });
+    expect(mocks.withUtcTransaction).not.toHaveBeenCalled();
   });
 
   it("uses the full calendar month within the maximum query range", () => {
@@ -140,6 +186,7 @@ describe("daily agenda service", () => {
     });
     expect(mocks.withUtcTransaction).not.toHaveBeenCalled();
     expect(mocks.listDailyAgendaItems).not.toHaveBeenCalled();
+    expect(mocks.listDailyPlanCustomerOptions).not.toHaveBeenCalled();
     expect(mocks.listDailyPlanTasks).not.toHaveBeenCalled();
   });
 

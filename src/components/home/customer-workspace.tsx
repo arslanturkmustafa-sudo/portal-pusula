@@ -54,6 +54,7 @@ type VisitDto = Readonly<{
   id: string;
   internalDurationMinutes: number | null;
   internalPlannedAtUtc: string | null;
+  locationLabel: string | null;
   resolutionNote: string | null;
   resolutionStatus: VisitStatus;
 }>;
@@ -64,6 +65,7 @@ type VisitDraft = {
   id: string | null;
   internalDurationMinutes: string;
   internalStartTime: string;
+  locationLabel: string;
   resolutionNote: string;
   resolutionStatus: VisitStatus;
 };
@@ -337,6 +339,7 @@ function visitDraft(visit?: VisitDto): VisitDraft {
         ? ""
         : String(visit.internalDurationMinutes),
     internalStartTime: localTimeFromUtc(visit?.internalPlannedAtUtc ?? null),
+    locationLabel: visit?.locationLabel ?? "",
     resolutionNote: visit?.resolutionNote ?? "",
     resolutionStatus: visit?.resolutionStatus ?? "planned",
   };
@@ -622,7 +625,6 @@ function CustomerWorkspaceSession({
       .then((payload) => {
         const loadedVisits = payload.monthPlan?.visits ?? [];
         setVisits(loadedVisits.map(visitDraft));
-        onVisitsSavedRef.current(loadedVisits);
         setPlanError(null);
         setPlanLoadState("ready");
       })
@@ -936,6 +938,8 @@ function CustomerWorkspaceSession({
             ),
       internalStartTime:
         formText(formData, `visits.${index}.internalStartTime`) || null,
+      locationLabel:
+        formText(formData, `visits.${index}.locationLabel`).trim() || null,
     }));
 
     if (
@@ -1662,6 +1666,21 @@ function CustomerWorkspaceSession({
                             onInput={(event) =>
                               updateVisit(index, {
                                 committedOn: event.currentTarget.value,
+                              })
+                            }
+                          />
+                        </label>
+                        <label>
+                          <span>Konum / görüşme kanalı</span>
+                          <input
+                            disabled={monthLocked}
+                            maxLength={191}
+                            name={`visits.${index}.locationLabel`}
+                            placeholder="Ofis, saha veya çevrim içi"
+                            value={visit.locationLabel}
+                            onChange={(event) =>
+                              updateVisit(index, {
+                                locationLabel: event.target.value,
                               })
                             }
                           />

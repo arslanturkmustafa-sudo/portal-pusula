@@ -9,13 +9,16 @@ const mocks = vi.hoisted(() => ({
   appendAuditEvent: vi.fn(),
   contractHasReceivable: vi.fn(),
   contractHasVisitOutsideRange: vi.fn(),
+  deletePlannedMonthVisits: vi.fn(),
   findActiveCustomerProjectForUpdate: vi.fn(),
   findCustomerForUpdate: vi.fn(),
   findOverlappingContract: vi.fn(),
   findOwnedContractForUpdate: vi.fn(),
   findOwnedVisitForUpdate: vi.fn(),
   insertContractRecord: vi.fn(),
+  insertVisitRecords: vi.fn(),
   insertTaskVisitRecord: vi.fn(),
+  listMonthVisitRecords: vi.fn(),
   createTaskInTransaction: vi.fn(),
   updateContractRecord: vi.fn(),
   updateVisitRecord: vi.fn(),
@@ -29,14 +32,14 @@ vi.mock("@/features/customers/repository", () => ({
 vi.mock("@/features/contracts/repository", () => ({
   contractHasVisitOutsideRange: mocks.contractHasVisitOutsideRange,
   contractHasReceivable: mocks.contractHasReceivable,
-  deletePlannedMonthVisits: vi.fn(),
+  deletePlannedMonthVisits: mocks.deletePlannedMonthVisits,
   findOverlappingContract: mocks.findOverlappingContract,
   findOwnedContractForUpdate: mocks.findOwnedContractForUpdate,
   findOwnedVisitForUpdate: mocks.findOwnedVisitForUpdate,
   insertContractRecord: mocks.insertContractRecord,
-  insertVisitRecords: vi.fn(),
+  insertVisitRecords: mocks.insertVisitRecords,
   listContractRecords: vi.fn(),
-  listMonthVisitRecords: vi.fn(),
+  listMonthVisitRecords: mocks.listMonthVisitRecords,
   updateContractRecord: mocks.updateContractRecord,
   updateVisitRecord: mocks.updateVisitRecord,
 }));
@@ -66,6 +69,7 @@ import {
   ContractProjectUnavailableError,
   ContractVisitRangeConflictError,
   createCustomerContract,
+  replaceMonthlyVisitPlan,
   updateMonthlyVisitWithWorkItems,
   updateCustomerContract,
 } from "@/features/contracts/service";
@@ -120,6 +124,7 @@ const plannedVisit = {
   id: visitId,
   internalDurationMinutes: 120,
   internalPlannedAtUtc: "2026-09-03 06:00:00.000000",
+  locationLabel: null,
   resolutionNote: null,
   resolutionStatus: "planned" as const,
   updatedAtUtc: "2026-09-01 09:00:00.000000",
@@ -139,10 +144,50 @@ describe("contract write service", () => {
       projectId,
     });
     mocks.findOverlappingContract.mockResolvedValue(null);
+    mocks.listMonthVisitRecords.mockResolvedValue([]);
     mocks.contractHasReceivable.mockResolvedValue(false);
     mocks.contractHasVisitOutsideRange.mockResolvedValue(false);
     mocks.updateContractRecord.mockResolvedValue(true);
     mocks.updateVisitRecord.mockResolvedValue(undefined);
+  });
+
+  it("stores a normalized optional location with a monthly visit plan", async () => {
+    const result = await replaceMonthlyVisitPlan(
+      {} as Pool,
+      customerId,
+      contractId,
+      "2026-09",
+      {
+        visits: [
+          {
+            committedOn: "2026-09-03",
+            internalDurationMinutes: 120,
+            internalStartTime: "09:00",
+            locationLabel: "  Fabrika A  ",
+          },
+        ],
+      },
+      context,
+    );
+
+    expect(mocks.insertVisitRecords).toHaveBeenCalledWith(
+      expect.anything(),
+      [
+        expect.objectContaining({
+          committedOn: "2026-09-03",
+          internalDurationMinutes: 120,
+          internalPlannedAtUtc: "2026-09-03 06:00:00.000000",
+          locationLabel: "Fabrika A",
+        }),
+      ],
+    );
+    expect(mocks.appendAuditEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        afterSummary: expect.objectContaining({ locations: ["Fabrika A"] }),
+      }),
+    );
+    expect(result.visits[0]?.locationLabel).toBe("Fabrika A");
   });
 
   it("completes a visit and links each work item as a done customer-project task", async () => {

@@ -64,6 +64,23 @@ type PaymentDraft = Readonly<{
   paidOn: string;
 }>;
 
+type BulkPaymentDraft = Readonly<{
+  cardId: string;
+  paidOn: string;
+}>;
+
+type CardPlanGroup = Readonly<{
+  cardId: string;
+  creditCardName: string;
+  installments: readonly CardInstallmentDto[];
+  nextDueAmount: string;
+  nextDueOn: string | null;
+  overdueAmount: string;
+  paidAmount: string;
+  remainingAmount: string;
+  totalAmount: string;
+}>;
+
 function istanbulToday(): string {
   const parts = new Intl.DateTimeFormat("en-CA", {
     day: "2-digit",
@@ -176,7 +193,62 @@ function withCurrentStatus(installment: CardInstallmentDto): CardInstallmentDto 
   return { ...installment, status: "overdue" };
 }
 
-export function CardPlanWorkspace() {
+function buildCardPlanGroups(
+  installments: readonly CardInstallmentDto[],
+): readonly CardPlanGroup[] {
+  const grouped = new Map<string, CardInstallmentDto[]>();
+  for (const installment of installments) {
+    const current = grouped.get(installment.creditCardId) ?? [];
+    current.push(installment);
+    grouped.set(installment.creditCardId, current);
+  }
+  return [...grouped.entries()]
+    .map(([cardId, cardInstallments]) => {
+      const planned = cardInstallments.filter(
+        (installment) => installment.status === "planned",
+      );
+      const nextDueOn = planned[0]?.dueOn ?? null;
+      return {
+        cardId,
+        creditCardName: cardInstallments[0]?.creditCardName ?? "Kart",
+        installments: cardInstallments,
+        nextDueAmount:
+          nextDueOn === null
+            ? "0.0000"
+            : sumMoney(
+                planned
+                  .filter((installment) => installment.dueOn === nextDueOn)
+                  .map((installment) => installment.amount),
+              ),
+        nextDueOn,
+        overdueAmount: sumMoney(
+          cardInstallments
+            .filter((installment) => installment.status === "overdue")
+            .map((installment) => installment.amount),
+        ),
+        paidAmount: sumMoney(
+          cardInstallments
+            .filter((installment) => installment.status === "paid")
+            .map((installment) => installment.amount),
+        ),
+        remainingAmount: sumMoney(
+          cardInstallments
+            .filter((installment) => installment.status !== "paid")
+            .map((installment) => installment.amount),
+        ),
+        totalAmount: sumMoney(cardInstallments.map((installment) => installment.amount)),
+      };
+    })
+    .sort(
+      (left, right) =>
+        left.creditCardName.localeCompare(right.creditCardName, "tr") ||
+        left.cardId.localeCompare(right.cardId),
+    );
+}
+
+export function CardPlanWorkspace({
+  canWrite,
+}: Readonly<{ canWrite: boolean }>) {
   const [cards, setCards] = useState<readonly CreditCardDto[]>([]);
   const [installments, setInstallments] = useState<readonly CardInstallmentDto[]>([]);
   const [cardLoadState, setCardLoadState] = useState<LoadState>("loading");
@@ -192,11 +264,23 @@ export function CardPlanWorkspace() {
   const [formError, setFormError] = useState<string | null>(null);
   const [cardActionError, setCardActionError] = useState<string | null>(null);
   const [planError, setPlanError] = useState<string | null>(null);
+  const [planRefreshRequired, setPlanRefreshRequired] = useState(false);
   const [paymentDraft, setPaymentDraft] = useState<PaymentDraft | null>(null);
+  const [bulkPaymentDraft, setBulkPaymentDraft] =
+    useState<BulkPaymentDraft | null>(null);
+  const bulkPaymentCardId = bulkPaymentDraft?.cardId ?? null;
+  const [bulkPayingCardId, setBulkPayingCardId] = useState<string | null>(null);
   const [updatingInstallmentId, setUpdatingInstallmentId] = useState<string | null>(null);
   const [updatingCardId, setUpdatingCardId] = useState<string | null>(null);
   const [announcement, setAnnouncement] = useState("");
   const editorTitleRef = useRef<HTMLHeadingElement>(null);
+  const bulkDateInputRef = useRef<HTMLInputElement>(null);
+  const bulkHeadingRefs = useRef(new Map<string, HTMLHeadingElement>());
+  const bulkTriggerRefs = useRef(new Map<string, HTMLButtonElement>());
+  const bulkReturnFocusRef = useRef<Readonly<{
+    cardId: string;
+    preferTrigger: boolean;
+  }> | null>(null);
   const operationRef = useRef<Readonly<{ fingerprint: string; key: string }> | null>(
     null,
   );
@@ -219,6 +303,7 @@ export function CardPlanWorkspace() {
     async (signal?: AbortSignal) => {
       const query = new URLSearchParams();
       if (month !== "") query.set("month", month);
+      else query.set("status", "open");
       if (cardFilter !== "all") query.set("cardId", cardFilter);
       const queryString = query.toString();
       const response = await fetch(`/api/finance/card-installments${queryString === "" ? "" : `?${queryString}`}`, {
@@ -234,8 +319,9 @@ export function CardPlanWorkspace() {
       if (!Array.isArray(payload.installments)) {
         throw new Error("Installment response is invalid.");
       }
-      setInstallments(payload.installments);
+      setInstallments(payload.installments.map(withCurrentStatus));
       setPlanError(null);
+      setPlanRefreshRequired(false);
       setPlanLoadState("ready");
     },
     [cardFilter, month],
@@ -277,6 +363,24 @@ export function CardPlanWorkspace() {
     title?.focus({ preventScroll: true });
   }, [editorOpen, editingCard]);
 
+  useEffect(() => {
+    if (bulkPaymentCardId !== null) {
+      const frame = requestAnimationFrame(() => bulkDateInputRef.current?.focus());
+      return () => cancelAnimationFrame(frame);
+    }
+    const returnTarget = bulkReturnFocusRef.current;
+    if (returnTarget === null) return;
+    bulkReturnFocusRef.current = null;
+    const frame = requestAnimationFrame(() => {
+      const target =
+        (returnTarget.preferTrigger
+          ? bulkTriggerRefs.current.get(returnTarget.cardId)
+          : undefined) ?? bulkHeadingRefs.current.get(returnTarget.cardId);
+      target?.focus();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [bulkPaymentCardId]);
+
   const summary = useMemo(
     () => ({
       overdue: sumMoney(
@@ -296,6 +400,10 @@ export function CardPlanWorkspace() {
       ),
       total: sumMoney(installments.map((installment) => installment.amount)),
     }),
+    [installments],
+  );
+  const cardPlanGroups = useMemo(
+    () => buildCardPlanGroups(installments),
     [installments],
   );
 
@@ -470,14 +578,115 @@ export function CardPlanWorkspace() {
     }
   }
 
+  async function bulkPayGroup(group: CardPlanGroup): Promise<void> {
+    const draft = bulkPaymentDraft;
+    const openInstallments = group.installments.filter(
+      (installment) => installment.status !== "paid",
+    );
+    if (
+      !canWrite ||
+      month === "" ||
+      draft?.cardId !== group.cardId ||
+      openInstallments.length === 0 ||
+      bulkPayingCardId !== null
+    ) {
+      return;
+    }
+    setBulkPayingCardId(group.cardId);
+    setPlanError(null);
+    try {
+      const response = await fetch("/api/finance/card-installments/bulk-pay", {
+        body: JSON.stringify({
+          cardId: group.cardId,
+          installments: openInstallments.map((installment) => ({
+            id: installment.id,
+            version: installment.version,
+          })),
+          month,
+          paidOn: draft.paidOn,
+        }),
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        method: "PATCH",
+      });
+      if (response.status === 401) return redirectToLogin();
+      const payload = (await response.json()) as {
+        installments?: CardInstallmentDto[];
+        replayed?: boolean;
+        status?: string;
+        updatedCount?: number;
+      };
+      if (!response.ok || !Array.isArray(payload.installments)) {
+        if (response.status === 409) {
+          bulkReturnFocusRef.current = {
+            cardId: group.cardId,
+            preferTrigger: false,
+          };
+          setBulkPaymentDraft(null);
+          setPlanRefreshRequired(true);
+          setPlanError(
+            "Ödeme planı başka bir işlemde değişti. Devam etmek için güncel planı yükleyin.",
+          );
+        } else {
+          setPlanError(
+            response.status === 403
+              ? "Bu işlem için kart ödeme yetkiniz bulunmuyor."
+              : "Toplu ödeme kaydedilemedi. Lütfen yeniden deneyin.",
+          );
+        }
+        return;
+      }
+      const saved = new Map(
+        payload.installments.map((installment) => [
+          installment.id,
+          withCurrentStatus(installment),
+        ]),
+      );
+      setInstallments((current) =>
+        current.map((installment) => saved.get(installment.id) ?? installment),
+      );
+      bulkReturnFocusRef.current = {
+        cardId: group.cardId,
+        preferTrigger: false,
+      };
+      setBulkPaymentDraft(null);
+      setAnnouncement(
+        payload.replayed
+          ? `${group.creditCardName} için ödeme daha önce kaydedilmişti.`
+          : `${group.creditCardName} için ${payload.updatedCount ?? saved.size} taksit ödendi olarak işaretlendi.`,
+      );
+    } catch {
+      setPlanError("Toplu ödeme kaydedilemedi. Bağlantıyı kontrol edip yeniden deneyin.");
+    } finally {
+      setBulkPayingCardId(null);
+    }
+  }
+
   function beginPayment(installment: CardInstallmentDto): void {
     setPaymentDraft({ installmentId: installment.id, paidOn: istanbulToday() });
     setPlanError(null);
   }
 
+  function showAllPeriods(): void {
+    if (month === "") return;
+    setInstallments([]);
+    setPaymentDraft(null);
+    setBulkPaymentDraft(null);
+    setPlanError(null);
+    setPlanRefreshRequired(false);
+    setPlanLoadState("loading");
+    setMonth("");
+  }
+
+  function closeBulkPaymentEditor(cardId: string): void {
+    bulkReturnFocusRef.current = { cardId, preferTrigger: true };
+    setBulkPaymentDraft(null);
+  }
+
   function retryPlan(): void {
     setInstallments([]);
     setPlanError(null);
+    setPlanRefreshRequired(false);
     setPlanLoadState("loading");
     setPlanRequestRevision((current) => current + 1);
   }
@@ -492,7 +701,11 @@ export function CardPlanWorkspace() {
           <h2 id="card-plan-title">Kartlar ve ödeme planı</h2>
           <p>Kartla yapılan giderlerin taksitlerini ve yaklaşan ödeme tarihlerini izleyin.</p>
         </div>
-        <button className="primary-action" type="button" onClick={openCreate}>+ Kart ekle</button>
+        {canWrite ? (
+          <button className="primary-action" type="button" onClick={openCreate}>
+            + Kart ekle
+          </button>
+        ) : null}
       </div>
 
       {editorOpen ? (
@@ -636,7 +849,11 @@ export function CardPlanWorkspace() {
         ) : cards.length === 0 ? (
           <div className="card-register-empty">
             <strong>Henüz kart tanımlanmadı.</strong>
-            <button className="text-action" type="button" onClick={openCreate}>İlk kartı ekle</button>
+            {canWrite ? (
+              <button className="text-action" type="button" onClick={openCreate}>
+                İlk kartı ekle
+              </button>
+            ) : null}
           </div>
         ) : (
           <ul className="card-register-list">
@@ -657,25 +874,27 @@ export function CardPlanWorkspace() {
                 <span className={`card-register-status is-${card.status}`}>
                   {card.status === "active" ? "Aktif" : "Pasif"}
                 </span>
-                <div className="card-register-actions">
-                  <button
-                    aria-label={`${card.displayName} kartını düzenle`}
-                    type="button"
-                    onClick={() => openEdit(card)}
-                  >
-                    Düzenle
-                  </button>
-                  {card.status === "active" ? (
+                {canWrite ? (
+                  <div className="card-register-actions">
                     <button
-                      aria-label={`${card.displayName} kartını pasife al`}
-                      disabled={updatingCardId !== null}
+                      aria-label={`${card.displayName} kartını düzenle`}
                       type="button"
-                      onClick={() => void inactivateCard(card)}
+                      onClick={() => openEdit(card)}
                     >
-                      {updatingCardId === card.id ? "İşleniyor…" : "Pasife al"}
+                      Düzenle
                     </button>
-                  ) : null}
-                </div>
+                    {card.status === "active" ? (
+                      <button
+                        aria-label={`${card.displayName} kartını pasife al`}
+                        disabled={updatingCardId !== null}
+                        type="button"
+                        onClick={() => void inactivateCard(card)}
+                      >
+                        {updatingCardId === card.id ? "İşleniyor…" : "Pasife al"}
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
               </li>
             ))}
           </ul>
@@ -700,7 +919,9 @@ export function CardPlanWorkspace() {
                 onChange={(event) => {
                   setInstallments([]);
                   setPaymentDraft(null);
+                  setBulkPaymentDraft(null);
                   setPlanError(null);
+                  setPlanRefreshRequired(false);
                   setPlanLoadState("loading");
                   setMonth(event.target.value);
                 }}
@@ -714,7 +935,9 @@ export function CardPlanWorkspace() {
                 onChange={(event) => {
                   setInstallments([]);
                   setPaymentDraft(null);
+                  setBulkPaymentDraft(null);
                   setPlanError(null);
+                  setPlanRefreshRequired(false);
                   setPlanLoadState("loading");
                   setCardFilter(event.target.value);
                 }}
@@ -723,13 +946,23 @@ export function CardPlanWorkspace() {
                 {cards.map((card) => <option key={card.id} value={card.id}>{card.displayName}</option>)}
               </select>
             </label>
+            <button
+              aria-pressed={month === ""}
+              className="card-plan-all-periods"
+              disabled={planLoadState === "loading" || month === ""}
+              type="button"
+              onClick={showAllPeriods}
+            >
+              <strong>Tüm dönemler</strong>
+              <small>Açık borçların tamamını gör</small>
+            </button>
           </div>
         </div>
 
         <section className="finance-summary card-plan-summary" aria-label="Kart ödeme özeti">
           {[
             ["Dönem toplamı", summary.total],
-            ["Ödenecek", summary.planned],
+            ["Kalan borç", summary.planned],
             ["Geciken", summary.overdue],
             ["Ödendi", summary.paid],
           ].map(([label, value]) => (
@@ -743,119 +976,275 @@ export function CardPlanWorkspace() {
         {planError === null ? null : (
           <div className="finance-workspace-message is-error" role="alert">
             <span>{planError}</span>
-            {planLoadState === "error" ? (
-              <button type="button" onClick={retryPlan}>Yeniden dene</button>
+            {planLoadState === "error" || planRefreshRequired ? (
+              <button type="button" onClick={retryPlan}>
+                {planRefreshRequired ? "Güncel planı yükle" : "Yeniden dene"}
+              </button>
             ) : null}
           </div>
         )}
 
-        {planLoadState === "error" ? null : <div className="finance-table-wrap card-plan-table-wrap">
-          <table className="finance-table card-plan-table" aria-label="Kart taksit ve ödeme planı">
-            <thead>
-              <tr>
-                <th scope="col">Kart</th>
-                <th scope="col">Gider</th>
-                <th scope="col">Taksit</th>
-                <th scope="col">Son ödeme</th>
-                <th scope="col">Tutar</th>
-                <th scope="col">Durum</th>
-                <th scope="col">Ödeme tarihi</th>
-                <th scope="col">İşlem</th>
-              </tr>
-            </thead>
-            <tbody>
-              {installments.map((installment) => (
-                <tr key={installment.id}>
-                  <td data-label="Kart"><strong>{installment.creditCardName}</strong></td>
-                  <td data-label="Gider">{installment.expenseDescription}</td>
-                  <td data-label="Taksit">{installment.installmentNumber} / {installment.installmentCount}</td>
-                  <td data-label="Son ödeme">{formatDate(installment.dueOn)}</td>
-                  <td data-label="Tutar"><strong>{formatMoney(installment.amount)}</strong></td>
-                  <td data-label="Durum">
-                    <span className={`finance-status card-installment-status is-${installment.status}`}>{statusLabel(installment.status)}</span>
-                  </td>
-                  <td data-label="Ödeme tarihi">
-                    {installment.paidOn === null ? "—" : formatDate(installment.paidOn)}
-                  </td>
-                  <td data-label="İşlem">
-                    {paymentDraft?.installmentId === installment.id ? (
-                      <form
-                        className="card-payment-editor"
-                        onSubmit={(event) => {
-                          event.preventDefault();
-                          void updateInstallment(installment, "paid", paymentDraft.paidOn);
+        {planLoadState === "error" ? null : planLoadState === "loading" ? (
+          <p className="finance-workspace-message" role="status">
+            Ödeme planı yükleniyor…
+          </p>
+        ) : cardPlanGroups.length === 0 ? (
+          <p className="finance-workspace-message">Bu dönem için kart ödemesi yok.</p>
+        ) : (
+          <div className="card-plan-groups">
+            {cardPlanGroups.map((group) => {
+              const openCount = group.installments.filter(
+                (installment) => installment.status !== "paid",
+              ).length;
+              const bulkEditorOpen = bulkPaymentDraft?.cardId === group.cardId;
+              return (
+                <section
+                  className="card-plan-group"
+                  aria-labelledby={`card-plan-group-${group.cardId}`}
+                  key={group.cardId}
+                >
+                  <div className="card-plan-group-heading">
+                    <div>
+                      <p className="section-kicker">Kart borç görünümü</p>
+                      <h4
+                        id={`card-plan-group-${group.cardId}`}
+                        ref={(node) => {
+                          if (node === null) bulkHeadingRefs.current.delete(group.cardId);
+                          else bulkHeadingRefs.current.set(group.cardId, node);
                         }}
+                        tabIndex={-1}
                       >
-                        <label>
-                          <span>Ödeme tarihi</span>
-                          <input
-                            aria-label={`${installment.expenseDescription} ${installment.installmentNumber}. taksit ödeme tarihi`}
-                            max={istanbulToday()}
-                            required
-                            type="date"
-                            value={paymentDraft.paidOn}
-                            onChange={(event) => setPaymentDraft({
-                              installmentId: installment.id,
-                              paidOn: event.target.value,
-                            })}
-                          />
-                        </label>
-                        <div>
-                          <button
-                            aria-label={`${installment.expenseDescription} ${installment.installmentNumber}. taksit ödemesini kaydet`}
-                            className="card-payment-toggle"
-                            disabled={updatingInstallmentId !== null}
-                            type="submit"
+                        {group.creditCardName}
+                      </h4>
+                      <p>{group.installments.length} taksit · {openCount} açık</p>
+                    </div>
+                    {canWrite && !planRefreshRequired && month !== "" && openCount > 0 ? (
+                      bulkEditorOpen ? (
+                        <form
+                          className="card-bulk-payment-editor"
+                          aria-describedby={`card-bulk-payment-summary-${group.cardId}`}
+                          aria-label={`${group.creditCardName} açık taksitlerini toplu şekilde ödendi olarak işaretle`}
+                          onSubmit={(event) => {
+                            event.preventDefault();
+                            void bulkPayGroup(group);
+                          }}
+                        >
+                          <p
+                            className="card-bulk-payment-summary"
+                            id={`card-bulk-payment-summary-${group.cardId}`}
                           >
-                            {updatingInstallmentId === installment.id ? "Kaydediliyor…" : "Kaydet"}
-                          </button>
-                          <button
-                            aria-label={`${installment.expenseDescription} ${installment.installmentNumber}. taksit ödeme girişinden vazgeç`}
-                            className="card-payment-toggle"
-                            disabled={updatingInstallmentId !== null}
-                            type="button"
-                            onClick={() => setPaymentDraft(null)}
-                          >
-                            Vazgeç
-                          </button>
-                        </div>
-                      </form>
-                    ) : (
-                      <button
-                        aria-label={`${installment.expenseDescription} ${installment.installmentNumber}. taksitini ${installment.status === "paid" ? "plana geri al" : "ödendi işaretle"}`}
-                        className="card-payment-toggle"
-                        disabled={updatingInstallmentId !== null}
-                        type="button"
-                        onClick={() => {
-                          if (installment.status === "paid") {
-                            void updateInstallment(installment, "planned", null);
-                          } else {
-                            beginPayment(installment);
+                            <strong>{group.creditCardName}</strong>
+                            <span>
+                              {openCount} açık taksit · {formatMoney(group.remainingAmount)}
+                            </span>
+                          </p>
+                          <label>
+                            <span>Toplu ödeme tarihi</span>
+                            <input
+                              aria-label={`${group.creditCardName} toplu ödeme tarihi`}
+                              max={istanbulToday()}
+                              ref={bulkDateInputRef}
+                              required
+                              type="date"
+                              value={bulkPaymentDraft.paidOn}
+                              onChange={(event) =>
+                                setBulkPaymentDraft({
+                                  cardId: group.cardId,
+                                  paidOn: event.target.value,
+                                })
+                              }
+                            />
+                          </label>
+                          <div>
+                            <button
+                              className="card-payment-toggle"
+                              disabled={
+                                bulkPayingCardId !== null ||
+                                updatingInstallmentId !== null
+                              }
+                              type="submit"
+                            >
+                              {bulkPayingCardId === group.cardId
+                                ? "Kaydediliyor…"
+                                : `${openCount} taksiti ödendi olarak işaretle`}
+                            </button>
+                            <button
+                              className="card-payment-toggle"
+                              disabled={bulkPayingCardId !== null}
+                              type="button"
+                              onClick={() => closeBulkPaymentEditor(group.cardId)}
+                            >
+                              Vazgeç
+                            </button>
+                          </div>
+                        </form>
+                      ) : (
+                        <button
+                          className="card-bulk-payment-trigger"
+                          disabled={
+                            bulkPayingCardId !== null ||
+                            updatingInstallmentId !== null
                           }
-                        }}
-                      >
-                        {updatingInstallmentId === installment.id
-                          ? "İşleniyor…"
-                          : installment.status === "paid"
-                            ? "Plana geri al"
-                            : "Ödendi işaretle"}
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              ))}
-              {installments.length === 0 ? (
-                <tr>
-                  <td className="empty-row" colSpan={8}>
-                    {planLoadState === "loading"
-                      ? "Ödeme planı yükleniyor…"
-                      : "Bu dönem için kart ödemesi yok."}
-                  </td>
-                </tr>
-              ) : null}
-            </tbody>
-          </table>
-        </div>}
+                          ref={(node) => {
+                            if (node === null) bulkTriggerRefs.current.delete(group.cardId);
+                            else bulkTriggerRefs.current.set(group.cardId, node);
+                          }}
+                          type="button"
+                          onClick={() => {
+                            setPaymentDraft(null);
+                            setBulkPaymentDraft({
+                              cardId: group.cardId,
+                              paidOn: istanbulToday(),
+                            });
+                          }}
+                        >
+                          Dönemin açık taksitlerini ödendi olarak işaretle
+                        </button>
+                      )
+                    ) : null}
+                  </div>
+
+                  <dl className="card-plan-card-summary">
+                    <div>
+                      <dt>Dönem borcu</dt>
+                      <dd>{formatMoney(group.totalAmount)}</dd>
+                    </div>
+                    <div className="is-positive">
+                      <dt>Ödendi</dt>
+                      <dd>{formatMoney(group.paidAmount)}</dd>
+                    </div>
+                    <div>
+                      <dt>Kalan</dt>
+                      <dd>{formatMoney(group.remainingAmount)}</dd>
+                    </div>
+                    <div className={group.overdueAmount === "0.0000" ? "" : "is-attention"}>
+                      <dt>Gecikmiş</dt>
+                      <dd>{formatMoney(group.overdueAmount)}</dd>
+                    </div>
+                    <div>
+                      <dt>Yaklaşan vade</dt>
+                      <dd>
+                        {group.nextDueOn === null ? "—" : formatDate(group.nextDueOn)}
+                      </dd>
+                      {group.nextDueOn === null ? null : (
+                        <small>{formatMoney(group.nextDueAmount)}</small>
+                      )}
+                    </div>
+                  </dl>
+
+                  <div className="finance-table-wrap card-plan-table-wrap">
+                    <table
+                      className="finance-table card-plan-table"
+                      aria-label={`${group.creditCardName} taksit planı`}
+                    >
+                      <thead>
+                        <tr>
+                          <th scope="col">Gider</th>
+                          <th scope="col">Taksit</th>
+                          <th scope="col">Son ödeme</th>
+                          <th scope="col">Tutar</th>
+                          <th scope="col">Durum</th>
+                          <th scope="col">Ödeme tarihi</th>
+                          {canWrite ? <th scope="col">İşlem</th> : null}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {group.installments.map((installment) => (
+                          <tr key={installment.id}>
+                            <td data-label="Gider">{installment.expenseDescription}</td>
+                            <td data-label="Taksit">{installment.installmentNumber} / {installment.installmentCount}</td>
+                            <td data-label="Son ödeme">{formatDate(installment.dueOn)}</td>
+                            <td data-label="Tutar"><strong>{formatMoney(installment.amount)}</strong></td>
+                            <td data-label="Durum">
+                              <span className={`finance-status card-installment-status is-${installment.status}`}>{statusLabel(installment.status)}</span>
+                            </td>
+                            <td data-label="Ödeme tarihi">
+                              {installment.paidOn === null ? "—" : formatDate(installment.paidOn)}
+                            </td>
+                            {canWrite ? (
+                              <td data-label="İşlem">
+                                {paymentDraft?.installmentId === installment.id ? (
+                                  <form
+                                    className="card-payment-editor"
+                                    onSubmit={(event) => {
+                                      event.preventDefault();
+                                      void updateInstallment(installment, "paid", paymentDraft.paidOn);
+                                    }}
+                                  >
+                                    <label>
+                                      <span>Ödeme tarihi</span>
+                                      <input
+                                        aria-label={`${installment.expenseDescription} ${installment.installmentNumber}. taksit ödeme tarihi`}
+                                        max={istanbulToday()}
+                                        required
+                                        type="date"
+                                        value={paymentDraft.paidOn}
+                                        onChange={(event) => setPaymentDraft({
+                                          installmentId: installment.id,
+                                          paidOn: event.target.value,
+                                        })}
+                                      />
+                                    </label>
+                                    <div>
+                                      <button
+                                        aria-label={`${installment.expenseDescription} ${installment.installmentNumber}. taksit ödemesini kaydet`}
+                                        className="card-payment-toggle"
+                                        disabled={
+                                          updatingInstallmentId !== null ||
+                                          bulkPayingCardId !== null
+                                        }
+                                        type="submit"
+                                      >
+                                        {updatingInstallmentId === installment.id ? "Kaydediliyor…" : "Kaydet"}
+                                      </button>
+                                      <button
+                                        aria-label={`${installment.expenseDescription} ${installment.installmentNumber}. taksit ödeme girişinden vazgeç`}
+                                        className="card-payment-toggle"
+                                        disabled={updatingInstallmentId !== null}
+                                        type="button"
+                                        onClick={() => setPaymentDraft(null)}
+                                      >
+                                        Vazgeç
+                                      </button>
+                                    </div>
+                                  </form>
+                                ) : (
+                                  <button
+                                    aria-label={`${installment.expenseDescription} ${installment.installmentNumber}. taksitini ${installment.status === "paid" ? "plana geri al" : "ödendi işaretle"}`}
+                                    className="card-payment-toggle"
+                                    disabled={
+                                      updatingInstallmentId !== null ||
+                                      bulkPayingCardId !== null ||
+                                      planRefreshRequired
+                                    }
+                                    type="button"
+                                    onClick={() => {
+                                      if (installment.status === "paid") {
+                                        void updateInstallment(installment, "planned", null);
+                                      } else {
+                                        beginPayment(installment);
+                                      }
+                                    }}
+                                  >
+                                    {updatingInstallmentId === installment.id
+                                      ? "İşleniyor…"
+                                      : installment.status === "paid"
+                                        ? "Plana geri al"
+                                        : "Ödendi işaretle"}
+                                  </button>
+                                )}
+                              </td>
+                            ) : null}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+              );
+            })}
+          </div>
+        )}
       </section>
     </section>
   );

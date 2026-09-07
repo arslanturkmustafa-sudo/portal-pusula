@@ -127,6 +127,13 @@
       "when": 1788765868726,
       "tag": "0017_work_task_visit",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "5",
+      "when": 1788799557949,
+      "tag": "0018_planning_expense_categories",
+      "breakpoints": true
     }
   ]
 }

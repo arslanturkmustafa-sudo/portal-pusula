@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   deletePlannedExpenseInstallments: vi.fn(),
   findCardInstallmentForUpdate: vi.fn(),
   findCreditCardForUpdate: vi.fn(),
+  findActiveExpenseCategoryByCodeForUpdate: vi.fn(),
   findExpenseByOperationKeyForUpdate: vi.fn(),
   findExpenseForUpdate: vi.fn(),
   findProjectForUpdate: vi.fn(),
@@ -17,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   insertCreditCardRecordIdempotently: vi.fn(),
   insertExpenseRecordIdempotently: vi.fn(),
   listCardInstallmentRecords: vi.fn(),
+  listCardInstallmentsForBulkUpdate: vi.fn(),
   listCreditCardRecords: vi.fn(),
   listExpenseInstallmentsForUpdate: vi.fn(),
   listExpenseRecords: vi.fn(),
@@ -27,6 +29,10 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/features/projects/repository", () => ({
   findProjectForUpdate: mocks.findProjectForUpdate,
+}));
+vi.mock("@/features/finance/expense-category-repository", () => ({
+  findActiveExpenseCategoryByCodeForUpdate:
+    mocks.findActiveExpenseCategoryByCodeForUpdate,
 }));
 vi.mock("@/features/finance/spending-repository", () => ({
   deletePlannedExpenseInstallments: mocks.deletePlannedExpenseInstallments,
@@ -39,6 +45,7 @@ vi.mock("@/features/finance/spending-repository", () => ({
     mocks.insertCreditCardRecordIdempotently,
   insertExpenseRecordIdempotently: mocks.insertExpenseRecordIdempotently,
   listCardInstallmentRecords: mocks.listCardInstallmentRecords,
+  listCardInstallmentsForBulkUpdate: mocks.listCardInstallmentsForBulkUpdate,
   listCreditCardRecords: mocks.listCreditCardRecords,
   listExpenseInstallmentsForUpdate: mocks.listExpenseInstallmentsForUpdate,
   listExpenseRecords: mocks.listExpenseRecords,
@@ -57,11 +64,14 @@ vi.mock("@/platform/jobs/mysql-transaction", () => ({
 }));
 
 import {
+  bulkPayCardInstallments,
+  CardInstallmentBulkConflictError,
   createCreditCard,
   createExpense,
   ExpensePlanLockedError,
   listCardInstallments,
   listExpenses,
+  SpendingResourceNotFoundError,
   updateCardInstallment,
   updateExpense,
 } from "@/features/finance/spending-service";
@@ -119,10 +129,32 @@ const expense = {
   voidReason: null,
 };
 
+const installment = {
+  amount: "40.0000",
+  createdAtUtc: nowSql,
+  creditCardId: cardId,
+  creditCardName: card.displayName,
+  dueOn: "2026-09-01",
+  expenseDescription: expense.description,
+  expenseId,
+  id: "60000000-0000-4000-8000-000000000001",
+  installmentCount: 3,
+  installmentNumber: 1,
+  paidOn: null,
+  statementMonth: "2026-08",
+  status: "planned" as const,
+  updatedAtUtc: nowSql,
+  version: 1,
+};
+
 describe("spending service", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.findCreditCardForUpdate.mockResolvedValue(card);
+    mocks.findActiveExpenseCategoryByCodeForUpdate.mockResolvedValue({
+      code: "software_subscription",
+      status: "active",
+    });
     mocks.findExpenseByOperationKeyForUpdate.mockResolvedValue(null);
     mocks.findProjectForUpdate.mockResolvedValue({ id: projectId });
     mocks.insertCreditCardRecordIdempotently.mockImplementation(
@@ -136,6 +168,8 @@ describe("spending service", () => {
       }),
     );
     mocks.listExpenseInstallmentsForUpdate.mockResolvedValue([]);
+    mocks.listCardInstallmentsForBulkUpdate.mockResolvedValue([]);
+    mocks.updateCardInstallmentRecord.mockResolvedValue(true);
     mocks.updateExpenseRecord.mockResolvedValue(true);
   });
 
@@ -193,6 +227,33 @@ describe("spending service", () => {
       dueOn: "2026-11-05",
       statementMonth: "2026-10",
     });
+  });
+
+  it("rejects an unknown or inactive expense category before persistence", async () => {
+    mocks.findActiveExpenseCategoryByCodeForUpdate.mockResolvedValueOnce(null);
+    await expect(
+      createExpense(
+        {} as Pool,
+        {
+          category: "custom_missing",
+          clientOperationKey: operationKey,
+          creditCardId: null,
+          description: "Geçersiz kategori denemesi",
+          documentNumber: null,
+          documentType: "none",
+          incurredOn: "2026-09-03",
+          installmentCount: 1,
+          netAmount: "100",
+          note: null,
+          paymentMethod: "cash",
+          projectId: null,
+          vatAmount: "20",
+          vendorName: null,
+        },
+        context,
+      ),
+    ).rejects.toBeInstanceOf(SpendingResourceNotFoundError);
+    expect(mocks.insertExpenseRecordIdempotently).not.toHaveBeenCalled();
   });
 
   it("does not allow a paid card plan to be changed or voided", async () => {
@@ -256,31 +317,181 @@ describe("spending service", () => {
   });
 
   it("derives overdue status without changing the stored plan", async () => {
-    mocks.listCardInstallmentRecords.mockResolvedValue([
-      {
-        amount: "40.0000",
-        createdAtUtc: nowSql,
-        creditCardId: cardId,
-        creditCardName: card.displayName,
-        dueOn: "2026-09-01",
-        expenseDescription: expense.description,
-        expenseId,
-        id: "60000000-0000-4000-8000-000000000001",
-        installmentCount: 3,
-        installmentNumber: 1,
-        paidOn: null,
-        statementMonth: "2026-08",
-        status: "planned",
-        updatedAtUtc: nowSql,
-        version: 1,
-      },
-    ]);
+    mocks.listCardInstallmentRecords.mockResolvedValue([installment]);
     const result = await listCardInstallments({} as Pool, {}, now);
     expect(result.installments[0]?.status).toBe("overdue");
     expect(result.summary).toMatchObject({
       openAmount: "40.0000",
       overdueAmount: "40.0000",
     });
+    expect(result.cardSummaries).toEqual([
+      expect.objectContaining({
+        cardId,
+        nextDueOn: null,
+        overdueAmount: "40.0000",
+        paidAmount: "0.0000",
+        remainingAmount: "40.0000",
+        totalAmount: "40.0000",
+      }),
+    ]);
+  });
+
+  it("preserves the open-only filter while deriving overdue status", async () => {
+    mocks.listCardInstallmentRecords.mockResolvedValue([installment]);
+
+    const result = await listCardInstallments(
+      {} as Pool,
+      { status: "open" },
+      now,
+    );
+
+    expect(mocks.listCardInstallmentRecords).toHaveBeenCalledWith(
+      expect.anything(),
+      { status: "open" },
+    );
+    expect(result.installments).toEqual([
+      expect.objectContaining({ id: installment.id, status: "overdue" }),
+    ]);
+  });
+
+  it("summarizes paid, remaining, overdue, and the nearest upcoming card due", async () => {
+    mocks.listCardInstallmentRecords.mockResolvedValue([
+      { ...installment, dueOn: "2026-09-02" },
+      {
+        ...installment,
+        amount: "30.0000",
+        dueOn: "2026-09-10",
+        id: "60000000-0000-4000-8000-000000000002",
+        installmentNumber: 2,
+      },
+      {
+        ...installment,
+        amount: "20.0000",
+        dueOn: "2026-09-10",
+        id: "60000000-0000-4000-8000-000000000003",
+        installmentNumber: 3,
+      },
+      {
+        ...installment,
+        amount: "10.0000",
+        id: "60000000-0000-4000-8000-000000000004",
+        paidOn: "2026-09-01",
+        status: "paid",
+      },
+    ]);
+
+    const result = await listCardInstallments({} as Pool, {}, now);
+
+    expect(result.cardSummaries).toEqual([
+      {
+        cardId,
+        creditCardName: card.displayName,
+        nextDueAmount: "50.0000",
+        nextDueOn: "2026-09-10",
+        overdueAmount: "40.0000",
+        paidAmount: "10.0000",
+        remainingAmount: "90.0000",
+        totalAmount: "100.0000",
+      },
+    ]);
+  });
+
+  it("bulk-pays the exact open snapshot in repository lock order with audit", async () => {
+    const second = {
+      ...installment,
+      amount: "30.0000",
+      dueOn: "2026-09-10",
+      id: "60000000-0000-4000-8000-000000000002",
+      installmentNumber: 2,
+      version: 2,
+    };
+    mocks.listCardInstallmentsForBulkUpdate.mockResolvedValue([
+      installment,
+      second,
+    ]);
+
+    const result = await bulkPayCardInstallments(
+      {} as Pool,
+      {
+        cardId,
+        installments: [
+          { id: installment.id, version: 1 },
+          { id: second.id, version: 2 },
+        ],
+        month: "2026-09",
+        paidOn: "2026-09-03",
+      },
+      context,
+    );
+
+    expect(mocks.findCreditCardForUpdate).toHaveBeenCalledBefore(
+      mocks.listCardInstallmentsForBulkUpdate,
+    );
+    expect(mocks.listCardInstallmentsForBulkUpdate).toHaveBeenCalledWith(
+      expect.anything(),
+      cardId,
+      "2026-09",
+    );
+    expect(mocks.updateCardInstallmentRecord).toHaveBeenCalledTimes(2);
+    expect(mocks.updateCardInstallmentRecord.mock.calls.map((call) => call[1].id)).toEqual([
+      installment.id,
+      second.id,
+    ]);
+    expect(mocks.appendAuditEvent).toHaveBeenCalledTimes(2);
+    expect(result).toMatchObject({ replayed: false, updatedCount: 2 });
+    expect(result.installments.every((item) => item.status === "paid")).toBe(true);
+  });
+
+  it("rejects a stale or incomplete bulk snapshot before changing any row", async () => {
+    mocks.listCardInstallmentsForBulkUpdate.mockResolvedValue([
+      installment,
+      {
+        ...installment,
+        id: "60000000-0000-4000-8000-000000000002",
+        installmentNumber: 2,
+      },
+    ]);
+
+    await expect(
+      bulkPayCardInstallments(
+        {} as Pool,
+        {
+          cardId,
+          installments: [{ id: installment.id, version: 1 }],
+          month: "2026-09",
+          paidOn: "2026-09-03",
+        },
+        context,
+      ),
+    ).rejects.toBeInstanceOf(CardInstallmentBulkConflictError);
+    expect(mocks.updateCardInstallmentRecord).not.toHaveBeenCalled();
+    expect(mocks.appendAuditEvent).not.toHaveBeenCalled();
+  });
+
+  it("treats an exact bulk-payment retry as a no-op without duplicate audit", async () => {
+    mocks.listCardInstallmentsForBulkUpdate.mockResolvedValue([
+      {
+        ...installment,
+        paidOn: "2026-09-03",
+        status: "paid",
+        version: 2,
+      },
+    ]);
+
+    const result = await bulkPayCardInstallments(
+      {} as Pool,
+      {
+        cardId,
+        installments: [{ id: installment.id, version: 1 }],
+        month: "2026-09",
+        paidOn: "2026-09-03",
+      },
+      context,
+    );
+
+    expect(result).toMatchObject({ replayed: true, updatedCount: 0 });
+    expect(mocks.updateCardInstallmentRecord).not.toHaveBeenCalled();
+    expect(mocks.appendAuditEvent).not.toHaveBeenCalled();
   });
 
   it("returns an overdue view when a past-due installment is reopened", async () => {

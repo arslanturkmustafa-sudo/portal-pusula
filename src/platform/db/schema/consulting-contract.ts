@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import {
   char,
   check,
+  customType,
   date,
   datetime,
   decimal,
@@ -17,6 +18,16 @@ import {
 import { customer } from "./customer";
 import { customerProject } from "./customer-project";
 import { userAccount } from "./user-account";
+
+const utf8mb4UnicodeVarchar = customType<{
+  config: { length: number };
+  configRequired: true;
+  data: string;
+  driverData: string;
+}>({
+  dataType: ({ length }) =>
+    `varchar(${length}) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
+});
 
 export const consultingContract = mysqlTable(
   "consulting_contract",
@@ -167,6 +178,7 @@ export const monthlyVisitCommitment = mysqlTable(
     internalDurationMinutes: smallint("internal_duration_minutes", {
       unsigned: true,
     }),
+    locationLabel: utf8mb4UnicodeVarchar("location_label", { length: 191 }),
     deliveredOn: date("delivered_on", { mode: "string" }),
     resolutionNote: varchar("resolution_note", { length: 2000 }),
     createdAtUtc: datetime("created_at_utc", {
@@ -229,7 +241,11 @@ export const monthlyVisitCommitment = mysqlTable(
     ),
     check(
       "chk_monthly_visit_optional_fields",
-      sql`${table.resolutionNote} IS NULL OR CHAR_LENGTH(${table.resolutionNote}) BETWEEN 1 AND 2000`,
+      sql`(${table.locationLabel} IS NULL OR (
+          CHAR_LENGTH(${table.locationLabel}) BETWEEN 1 AND 191
+          AND ${table.locationLabel} = TRIM(${table.locationLabel})
+        ))
+        AND (${table.resolutionNote} IS NULL OR CHAR_LENGTH(${table.resolutionNote}) BETWEEN 1 AND 2000)`,
     ),
     check(
       "chk_monthly_visit_timeline",

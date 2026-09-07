@@ -345,6 +345,158 @@ describe("DailyPlanWorkspace", () => {
     expect(screen.getByLabelText("Dönem özeti")).toHaveTextContent("1 görev");
   });
 
+  it("filters every calendar view by customer and location and exposes authenticated outputs", async () => {
+    const date = "2026-09-02";
+    const atlasId = "10000000-0000-4000-8000-000000000001";
+    const vegaId = "10000000-0000-4000-8000-000000000002";
+    const emptyCustomerId = "10000000-0000-4000-8000-000000000003";
+    const fetchMock = vi.fn<typeof fetch>(async (input) => {
+      const url = new URL(String(input), "https://portal.example");
+      const view = (url.searchParams.get("view") ?? "day") as
+        | "day"
+        | "week"
+        | "month";
+      return jsonResponse({
+        customers: [
+          { code: "ATLAS", id: atlasId, name: "Atlas Makina" },
+          { code: "VEGA", id: vegaId, name: "Vega Endüstri" },
+          { code: "NOVA", id: emptyCustomerId, name: "Nova Kimya" },
+        ],
+        date,
+        items: [
+          {
+            committedOn: date,
+            contractId: "contract-atlas",
+            customerCode: "ATLAS",
+            customerId: atlasId,
+            customerName: "Atlas Makina",
+            internalDurationMinutes: 45,
+            internalPlannedAtUtc: `${date} 06:30:00.000000`,
+            locationLabel: "Merkez ofis",
+            resolutionStatus: "planned",
+            visitId: "visit-atlas",
+          },
+          {
+            committedOn: date,
+            contractId: "contract-vega",
+            customerCode: "VEGA",
+            customerId: vegaId,
+            customerName: "Vega Endüstri",
+            internalDurationMinutes: null,
+            internalPlannedAtUtc: null,
+            locationLabel: "Fabrika",
+            resolutionStatus: "planned",
+            visitId: "visit-vega",
+          },
+        ],
+        range:
+          view === "month"
+            ? { endDate: "2026-09-30", startDate: "2026-09-01" }
+            : view === "week"
+              ? weekRange(date)
+              : { endDate: date, startDate: date },
+        tasks: [
+          {
+            calendarOn: date,
+            calendarSource: "visit",
+            customerId: atlasId,
+            customerName: "Atlas Makina",
+            dueOn: "2026-09-05",
+            id: "task-atlas",
+            linkedVisitId: "visit-atlas",
+            locationLabel: "Çevrim içi",
+            projectName: "Danışmanlık",
+            status: "todo",
+            title: "Atlas toplantı notu",
+          },
+        ],
+        view,
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+
+    render(<DailyPlanWorkspace />);
+    fireEvent.change(screen.getByLabelText("Plan tarihi"), {
+      target: { value: date },
+    });
+    expect(await screen.findByText("Atlas Makina", { selector: "strong" })).toBeInTheDocument();
+    expect(screen.getByText("Vega Endüstri", { selector: "strong" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "ICS indir" })).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("option", { name: "Nova Kimya · NOVA" }),
+    ).toBeInTheDocument();
+
+    await user.selectOptions(
+      screen.getByLabelText("Takvimi müşteriye göre filtrele"),
+      atlasId,
+    );
+    expect(screen.queryByText("Vega Endüstri", { selector: "strong" })).not.toBeInTheDocument();
+    const icsLink = screen.getByRole("link", { name: "ICS indir" });
+    expect(icsLink).toHaveAttribute(
+      "href",
+      `/api/daily-plan/export?customerId=${atlasId}&date=${date}&view=day&format=ics`,
+    );
+    expect(icsLink).toHaveAttribute("download");
+    expect(screen.getByRole("link", { name: "Yazdırılabilir görünüm" })).toHaveAttribute(
+      "target",
+      "_blank",
+    );
+
+    await user.selectOptions(
+      screen.getByLabelText("Takvimi konuma göre filtrele"),
+      "Çevrim içi",
+    );
+    expect(screen.queryByText("Atlas Makina", { selector: "strong" })).not.toBeInTheDocument();
+    expect(screen.getByText("Atlas toplantı notu")).toBeInTheDocument();
+    expect(screen.getByText("Konum · Çevrim içi")).toBeInTheDocument();
+    expect(screen.getByLabelText("Dönem özeti")).toHaveTextContent("0 ziyaret");
+    expect(screen.getByLabelText("Dönem özeti")).toHaveTextContent("1 görev");
+    const scopedExportQuery = new URLSearchParams({
+      customerId: atlasId,
+      date,
+      view: "day",
+      location: "Çevrim içi",
+    });
+    expect(screen.getByRole("link", { name: "ICS indir" })).toHaveAttribute(
+      "href",
+      `/api/daily-plan/export?${scopedExportQuery.toString()}&format=ics`,
+    );
+    expect(
+      screen.getByRole("link", { name: "Yazdırılabilir görünüm" }),
+    ).toHaveAttribute(
+      "href",
+      `/api/daily-plan/export?${scopedExportQuery.toString()}&format=print`,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Aylık" }));
+    const monthTable = await screen.findByRole("table", {
+      name: "Eylül 2026 plan takvimi",
+    });
+    expect(within(monthTable).getByText("Atlas toplantı notu")).toBeInTheDocument();
+    expect(within(monthTable).queryByText("Vega Endüstri")).not.toBeInTheDocument();
+    scopedExportQuery.set("view", "month");
+    expect(screen.getByRole("link", { name: "ICS indir" })).toHaveAttribute(
+      "href",
+      `/api/daily-plan/export?${scopedExportQuery.toString()}&format=ics`,
+    );
+
+    await user.selectOptions(
+      screen.getByLabelText("Takvimi müşteriye göre filtrele"),
+      emptyCustomerId,
+    );
+    expect(screen.getByRole("link", { name: "ICS indir" })).toHaveAttribute(
+      "href",
+      `/api/daily-plan/export?customerId=${emptyCustomerId}&date=${date}&view=month&format=ics`,
+    );
+    expect(screen.getByLabelText("Dönem özeti")).toHaveTextContent("0 ziyaret");
+    expect(
+      within(
+        screen.getByRole("table", { name: "Eylül 2026 plan takvimi" }),
+      ).queryByText("Atlas Makina"),
+    ).not.toBeInTheDocument();
+  });
+
   it("completes a planned visit in place when the account has visit write access", async () => {
     const today = currentIstanbulDate();
     const visit = {

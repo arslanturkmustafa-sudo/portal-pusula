@@ -117,8 +117,8 @@ describe.sequential("clean-only phpMyAdmin migration bundle policy", () => {
     expect(second.summary).toEqual(first.summary);
     expect(second.sql).toBe(first.sql);
     expect(second.manifestText).toBe(first.manifestText);
-    expect(first.summary.migrationCount).toBe(18);
-    expect(first.summary.statementCount).toBe(193);
+    expect(first.summary.migrationCount).toBe(19);
+    expect(first.summary.statementCount).toBe(202);
     expect(first.summary.sqlBytes).toBe(Buffer.byteLength(first.sql));
     expect(first.summary.sqlSha256).toBe(
       createHash("sha256").update(first.sql).digest("hex"),
@@ -163,7 +163,7 @@ describe.sequential("clean-only phpMyAdmin migration bundle policy", () => {
   });
 
   it("records the complete expected schema contract in the manifest", async () => {
-    const { manifest } = await build(await temporaryOutputDirectory());
+    const { manifest, sql } = await build(await temporaryOutputDirectory());
 
     expect(Object.keys(manifest.schema.tables)).toEqual([
       "_platform_migration_verification",
@@ -175,6 +175,7 @@ describe.sequential("clean-only phpMyAdmin migration bundle policy", () => {
       "customer",
       "customer_project",
       "expense",
+      "expense_category",
       "finance_account",
       "finance_ledger_entry",
       "finance_transaction",
@@ -228,6 +229,12 @@ describe.sequential("clean-only phpMyAdmin migration bundle policy", () => {
         "reversal_of_id",
         "reversal_reason",
       ]),
+    );
+    expect(manifest.schema.tables.expense_category).toEqual(
+      expect.arrayContaining(["code", "display_name", "status"]),
+    );
+    expect(manifest.schema.tables.monthly_visit_commitment).toContain(
+      "location_label",
     );
     expect(manifest.schema.tables.user_account).toEqual(
       expect.arrayContaining(["display_name", "role"]),
@@ -289,6 +296,10 @@ describe.sequential("clean-only phpMyAdmin migration bundle policy", () => {
       {
         name: "fk_customer_archived_by",
         tableName: "customer",
+      },
+      {
+        name: "fk_expense_category",
+        tableName: "expense",
       },
       {
         name: "fk_expense_credit_card",
@@ -427,6 +438,14 @@ describe.sequential("clean-only phpMyAdmin migration bundle policy", () => {
       name: "idx_receivable_state_due",
       tableName: "receivable",
     });
+    expect(manifest.schema.indexes).toContainEqual({
+      name: "uq_expense_category_display_name",
+      tableName: "expense_category",
+    });
+    expect(sql).toContain(
+      "BINARY TABLE_NAME = BINARY 'expense_category' AND BINARY INDEX_NAME = BINARY 'uq_expense_category_display_name'",
+    );
+    expect(sql).not.toContain("AND INDEX_NAME IN (");
     expect(manifest.schema.jsonChecks).toEqual([
       { columnName: "after_summary", tableName: "audit_event" },
       { columnName: "before_summary", tableName: "audit_event" },
@@ -549,10 +568,16 @@ describe.sequential("clean-only phpMyAdmin migration bundle policy", () => {
         sqlFileName: "0017_work_task_visit.sql",
         statementCount: 4,
       },
+      {
+        createdAt: 1788799557949,
+        hash: "48286e594051f082b85891e043f9578dfa2105fb50aef98b878e8d476cdbba6f",
+        sqlFileName: "0018_planning_expense_categories.sql",
+        statementCount: 9,
+      },
     ]);
     expect(
       manifest.migrations.flatMap((migration) => migration.statementHashes),
-    ).toHaveLength(193);
+    ).toHaveLength(202);
     expect(
       manifest.migrations
         .flatMap((migration) => migration.statementHashes)

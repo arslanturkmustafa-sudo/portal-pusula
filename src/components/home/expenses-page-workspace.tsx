@@ -6,6 +6,7 @@ type ExpensesPageWorkspaceProps = Readonly<{
   capabilities: Readonly<{
     canReadAudit: boolean;
     canReverseExpenses: boolean;
+    canWriteExpenses: boolean;
   }>;
 }>;
 

@@ -44,6 +44,7 @@ export type MonthlyVisit = Readonly<{
   id: string;
   internalDurationMinutes: number | null;
   internalPlannedAtUtc: string | null;
+  locationLabel: string | null;
   resolutionNote: string | null;
   resolutionStatus: VisitResolutionStatus;
   updatedAtUtc: string;
@@ -82,6 +83,7 @@ type VisitRow = RowDataPacket & {
   id: string;
   internal_duration_minutes: number | null;
   internal_planned_at_utc: string | Date | null;
+  location_label: string | null;
   resolution_note: string | null;
   resolution_status: string;
   updated_at_utc: string | Date;
@@ -157,6 +159,7 @@ function mapVisit(row: VisitRow): MonthlyVisit {
       row.internal_planned_at_utc === null
         ? null
         : canonicalDateTime(row.internal_planned_at_utc),
+    locationLabel: row.location_label,
     resolutionNote: row.resolution_note,
     resolutionStatus: row.resolution_status,
     updatedAtUtc: canonicalDateTime(row.updated_at_utc),
@@ -171,7 +174,7 @@ const CONTRACT_COLUMNS = `
 
 const VISIT_COLUMNS = `
   id, contract_id, committed_on, resolution_status,
-  internal_planned_at_utc, internal_duration_minutes, delivered_on,
+  internal_planned_at_utc, internal_duration_minutes, location_label, delivered_on,
   resolution_note, created_at_utc, updated_at_utc`;
 
 export async function listContractRecords(
@@ -415,10 +418,10 @@ export async function insertVisitRecords(
   for (const visit of visits) {
     const [result] = await connection.execute<ResultSetHeader>(
       `INSERT INTO monthly_visit_commitment
-         (id, contract_id, committed_on, resolution_status,
-          internal_planned_at_utc, internal_duration_minutes, delivered_on,
+       (id, contract_id, committed_on, resolution_status,
+          internal_planned_at_utc, internal_duration_minutes, location_label, delivered_on,
           resolution_note, created_at_utc, updated_at_utc)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         visit.id,
         visit.contractId,
@@ -426,6 +429,7 @@ export async function insertVisitRecords(
         visit.resolutionStatus,
         visit.internalPlannedAtUtc,
         visit.internalDurationMinutes,
+        visit.locationLabel,
         visit.deliveredOn,
         visit.resolutionNote,
         visit.createdAtUtc,

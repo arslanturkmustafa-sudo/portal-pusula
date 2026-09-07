@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  dailyPlanCustomerIdSchema,
   dailyPlanDateSchema,
+  dailyPlanExportQuerySchema,
+  dailyPlanLocationLabelSchema,
   dailyPlanQuerySchema,
   dailyPlanViewSchema,
 } from "@/features/daily-plan/validation";
@@ -43,5 +46,50 @@ describe("daily plan validation", () => {
       dailyPlanQuerySchema.safeParse({ date: "2026-09-02", extra: "value" })
         .success,
     ).toBe(false);
+  });
+
+  it("accepts only canonical customer-scoped export queries", () => {
+    const customerId = "10000000-0000-4000-8000-000000000001";
+    expect(
+      dailyPlanExportQuerySchema.parse({
+        customerId,
+        date: "2026-09-02",
+        format: "ics",
+      }),
+    ).toEqual({ customerId, date: "2026-09-02", format: "ics", view: "day" });
+    expect(dailyPlanCustomerIdSchema.safeParse("customer-1").success).toBe(false);
+    expect(
+      dailyPlanExportQuerySchema.safeParse({
+        customerId,
+        date: "2026-09-02",
+        format: "pdf",
+      }).success,
+    ).toBe(false);
+    expect(
+      dailyPlanExportQuerySchema.safeParse({
+        customerId,
+        date: "2026-09-02",
+        extra: "value",
+        format: "print",
+      }).success,
+    ).toBe(false);
+  });
+
+  it("normalizes and bounds an optional export location", () => {
+    expect(dailyPlanLocationLabelSchema.parse("  Merkez ofis  ")).toBe(
+      "Merkez ofis",
+    );
+    expect(
+      dailyPlanExportQuerySchema.parse({
+        customerId: "10000000-0000-4000-8000-000000000001",
+        date: "2026-09-02",
+        format: "print",
+        location: "  Merkez ofis  ",
+      }),
+    ).toMatchObject({ location: "Merkez ofis" });
+    expect(dailyPlanLocationLabelSchema.safeParse("   ").success).toBe(false);
+    expect(dailyPlanLocationLabelSchema.safeParse("x".repeat(192)).success).toBe(
+      false,
+    );
   });
 });

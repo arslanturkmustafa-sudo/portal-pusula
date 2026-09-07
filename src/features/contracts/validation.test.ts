@@ -113,16 +113,32 @@ describe("monthly visit validation", () => {
           committedOn: "2026-09-03",
           internalDurationMinutes: 240,
           internalStartTime: "09:00",
+          locationLabel: "  Fabrika A  ",
         },
         {
           committedOn: "2026-09-17",
           internalDurationMinutes: null,
           internalStartTime: null,
+          locationLabel: "   ",
         },
       ],
     });
 
     expect(result.visits).toHaveLength(2);
+    expect(result.visits[0]?.locationLabel).toBe("Fabrika A");
+    expect(result.visits[1]?.locationLabel).toBeNull();
+    expect(
+      monthlyVisitPlanInputSchema.safeParse({
+        visits: [
+          {
+            committedOn: "2026-09-03",
+            internalDurationMinutes: null,
+            internalStartTime: null,
+            locationLabel: "x".repeat(192),
+          },
+        ],
+      }).success,
+    ).toBe(false);
   });
 
   it("rejects duplicate days and half-filled internal plans", () => {
@@ -133,11 +149,13 @@ describe("monthly visit validation", () => {
             committedOn: "2026-09-03",
             internalDurationMinutes: null,
             internalStartTime: null,
+            locationLabel: null,
           },
           {
             committedOn: "2026-09-03",
             internalDurationMinutes: null,
             internalStartTime: null,
+            locationLabel: null,
           },
         ],
       }).success,
@@ -150,6 +168,7 @@ describe("monthly visit validation", () => {
             committedOn: "2026-09-03",
             internalDurationMinutes: null,
             internalStartTime: "09:00",
+            locationLabel: null,
           },
         ],
       }).success,

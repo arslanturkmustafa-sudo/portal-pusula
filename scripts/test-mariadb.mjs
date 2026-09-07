@@ -199,7 +199,7 @@ try {
     publishedPort,
   );
 
-  console.log("Running 0013 through 0017 lifecycle, finance-account, and task-visit incremental migrations...");
+  console.log("Running 0013 through 0018 lifecycle, finance-account, task-visit, and planning/category incremental migrations...");
   await runIntegrationFile(
     "mariadb-phpmyadmin-current-incremental.test.ts",
     publishedPort,

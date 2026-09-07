@@ -36,15 +36,22 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   try {
     const parameters = [...request.nextUrl.searchParams];
+    const expectedParameters = ["from", "granularity", "to"] as const;
     if (
-      parameters.length !== 1 ||
-      parameters[0]?.[0] !== "month" ||
-      request.nextUrl.searchParams.getAll("month").length !== 1
+      parameters.length !== expectedParameters.length ||
+      parameters.some(([name]) =>
+        !expectedParameters.includes(name as (typeof expectedParameters)[number])
+      ) ||
+      expectedParameters.some(
+        (name) => request.nextUrl.searchParams.getAll(name).length !== 1,
+      )
     ) {
       return json({ status: "validation_error" }, 400, correlationId);
     }
     const filter = cashFlowFilterSchema.parse({
-      month: request.nextUrl.searchParams.get("month"),
+      from: request.nextUrl.searchParams.get("from"),
+      granularity: request.nextUrl.searchParams.get("granularity"),
+      to: request.nextUrl.searchParams.get("to"),
     });
     return json(
       await getCashFlowReport(

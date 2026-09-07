@@ -203,6 +203,7 @@ function contractAuditSummary(contract: ConsultingContract) {
 function planAuditSummary(month: string, visits: readonly MonthlyVisit[]) {
   return {
     committedOn: visits.map((visit) => visit.committedOn),
+    locations: visits.map((visit) => visit.locationLabel),
     month,
     visitCount: visits.length,
   };
@@ -228,6 +229,7 @@ function samePlannedVisits(
       visit.committedOn === other.committedOn &&
       visit.internalPlannedAtUtc === other.internalPlannedAtUtc &&
       visit.internalDurationMinutes === other.internalDurationMinutes &&
+      visit.locationLabel === other.locationLabel &&
       visit.resolutionStatus === "planned"
     );
   });
@@ -533,6 +535,7 @@ export async function replaceMonthlyVisitPlan(
           visit.committedOn,
           visit.internalStartTime,
         ),
+        locationLabel: visit.locationLabel,
         resolutionNote: null,
         resolutionStatus: "planned" as const,
         updatedAtUtc: now,

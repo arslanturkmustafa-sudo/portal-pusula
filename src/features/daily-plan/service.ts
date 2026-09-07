@@ -5,11 +5,14 @@ import type { Pool } from "mysql2/promise";
 import {
   type DailyAgendaItem,
   listDailyAgendaItems,
+  listDailyPlanCustomerOptions,
   listDailyPlanTasks,
+  type DailyPlanCustomerOption,
   type DailyPlanTask,
 } from "@/features/daily-plan/repository";
 import {
   dailyPlanDateSchema,
+  dailyPlanCustomerIdSchema,
   dailyPlanViewSchema,
   type DailyPlanView,
 } from "@/features/daily-plan/validation";
@@ -23,6 +26,7 @@ export type DailyAgendaRange = Readonly<{
 }>;
 
 export type DailyAgenda = Readonly<{
+  customers: readonly DailyPlanCustomerOption[];
   date: string;
   items: readonly DailyAgendaItem[];
   range: DailyAgendaRange;
@@ -115,17 +119,27 @@ export async function getDailyAgenda(
   rawDate: unknown,
   rawView: unknown,
   includeTasks: boolean,
+  rawCustomerId: unknown = null,
 ): Promise<DailyAgenda> {
   const { date, range, view } = dailyAgendaRange(rawDate, rawView);
+  const customerId =
+    rawCustomerId === null ? null : dailyPlanCustomerIdSchema.parse(rawCustomerId);
   return withUtcTransaction(pool, async (connection) => {
+    const customers = await listDailyPlanCustomerOptions(connection);
     const items = await listDailyAgendaItems(
       connection,
       range.startDate,
       range.endDate,
+      customerId,
     );
     const tasks = includeTasks
-      ? await listDailyPlanTasks(connection, range.startDate, range.endDate)
+      ? await listDailyPlanTasks(
+          connection,
+          range.startDate,
+          range.endDate,
+          customerId,
+        )
       : [];
-    return { date, items, range, tasks, view };
+    return { customers, date, items, range, tasks, view };
   });
 }

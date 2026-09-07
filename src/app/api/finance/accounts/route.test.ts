@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 
 const mocks = vi.hoisted(() => ({
+  beforeAccountOpeningError: class extends Error {},
   authenticate: vi.fn(),
   createAccount: vi.fn(),
   createTransaction: vi.fn(),
@@ -32,6 +33,7 @@ vi.mock("@/features/finance", () => ({
   FinanceAccountVersionConflictError: class extends Error {},
   FinanceLedgerIntegrityError: class extends Error {},
   FinanceTransactionAlreadyReversedError: class extends Error {},
+  FinanceTransactionBeforeAccountOpeningError: mocks.beforeAccountOpeningError,
   FinanceTransactionFutureDateError: class extends Error {},
   FinanceTransactionIdempotencyConflictError: class extends Error {},
   FinanceTransactionNotFoundError: class extends Error {},
@@ -252,5 +254,20 @@ describe("finance account APIs", () => {
     expect(JSON.stringify(mocks.logError.mock.calls)).not.toContain(
       "sentinel-corrupt-account",
     );
+  });
+
+  it("returns a safe 400 when a movement predates an affected account", async () => {
+    mocks.createTransaction.mockRejectedValueOnce(
+      new mocks.beforeAccountOpeningError("sentinel-account-opening"),
+    );
+    const response = await postTransaction(
+      jsonRequest("https://portal.example/api/finance/account-transactions", {
+        amount: "10",
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ status: "before_account_opening" });
+    expect(JSON.stringify(mocks.logError.mock.calls)).not.toContain("sentinel");
   });
 });

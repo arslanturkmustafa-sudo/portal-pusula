@@ -106,6 +106,47 @@ afterEach(() => {
 });
 
 describe("CustomerWorkspace reliable date writes", () => {
+  it("does not publish one loaded month as the customer's global visit summary", async () => {
+    const onVisitsSaved = vi.fn();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/contracts")) {
+        return jsonResponse({ contracts: [contract] });
+      }
+      if (url.includes("/month-plans/")) {
+        return jsonResponse({
+          monthPlan: {
+            visits: [
+              {
+                committedOn: "2026-09-02",
+                deliveredOn: null,
+                id: "30000000-0000-4000-8000-000000000001",
+                internalDurationMinutes: null,
+                internalPlannedAtUtc: null,
+                resolutionNote: null,
+                resolutionStatus: "planned",
+              },
+            ],
+          },
+        });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <CustomerWorkspace
+        customer={customer}
+        live
+        onContractSaved={vi.fn()}
+        onVisitsSaved={onVisitsSaved}
+      />,
+    );
+
+    expect(await screen.findByDisplayValue("2026-09-02")).toBeInTheDocument();
+    expect(onVisitsSaved).not.toHaveBeenCalled();
+  });
+
   it("updates only changed customer fields and reports the saved customer", async () => {
     const requests: unknown[] = [];
     const onCustomerSaved = vi.fn();
@@ -998,6 +1039,7 @@ describe("CustomerWorkspace reliable date writes", () => {
                 id: "30000000-0000-4000-8000-000000000001",
                 internalDurationMinutes: null,
                 internalPlannedAtUtc: null,
+                locationLabel: body.visits[0].locationLabel,
                 resolutionNote: null,
                 resolutionStatus: "planned",
               },
@@ -1015,6 +1057,10 @@ describe("CustomerWorkspace reliable date writes", () => {
     );
     const planMonth = screen.getByLabelText("Plan ayı") as HTMLInputElement;
     const visitDate = screen.getByLabelText("Ziyaret günü") as HTMLInputElement;
+    await user.type(
+      screen.getByLabelText("Konum / görüşme kanalı"),
+      "Fabrika A",
+    );
     setNativeInputValue(planMonth, "2026-10");
     setNativeInputValue(visitDate, "2026-10-02");
     await user.click(
@@ -1029,6 +1075,7 @@ describe("CustomerWorkspace reliable date writes", () => {
           committedOn: "2026-10-02",
           internalDurationMinutes: null,
           internalStartTime: null,
+          locationLabel: "Fabrika A",
         },
       ],
     });

@@ -94,6 +94,18 @@
   line-height: 1.45;
 }
 
+.location {
+  width: fit-content;
+  margin: 0.45rem 0 0;
+  padding: 0.2rem 0.44rem;
+  border: 1px solid color-mix(in srgb, var(--terracotta) 34%, var(--line));
+  border-radius: 999px;
+  background: var(--sheet);
+  color: var(--ink);
+  font-size: 0.58rem;
+  font-weight: 700;
+}
+
 .meta {
   display: flex;
   flex-wrap: wrap;

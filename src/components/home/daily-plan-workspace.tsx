@@ -26,11 +26,17 @@ type DailyPlanItem = Readonly<{
   customerName: string;
   internalDurationMinutes: number | null;
   internalPlannedAtUtc: string | null;
+  locationLabel: string | null;
   resolutionStatus: VisitResolutionStatus;
   visitId: string;
 }>;
 
 type DailyPlanPayload = Readonly<{
+  customers?: readonly Readonly<{
+    code: string;
+    id: string;
+    name: string;
+  }>[];
   date: string;
   items: readonly DailyPlanItem[];
   range: Readonly<{
@@ -226,6 +232,11 @@ function VisitDetails({
       <p className="daily-plan-entry-meta">
         <span>{durationLabel(item.internalDurationMinutes)}</span>
         <span>Ziyaret</span>
+        {typeof item.locationLabel !== "string" ? null : (
+          <span className="daily-plan-location">
+            Konum · {item.locationLabel}
+          </span>
+        )}
       </p>
       {canComplete ? (
         <DailyPlanVisitCompletion
@@ -351,6 +362,11 @@ export function DailyPlanWorkspace({
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [requestRevision, setRequestRevision] = useState(0);
   const [completionNotice, setCompletionNotice] = useState<string | null>(null);
+  const [customerFilter, setCustomerFilter] = useState("");
+  const [locationFilter, setLocationFilter] = useState("");
+  const [customerOptions, setCustomerOptions] = useState<
+    readonly Readonly<{ code: string | null; id: string; name: string }>[]
+  >([]);
   const completionFocusVisitIdRef = useRef<string | null>(null);
   const today = useMemo(() => istanbulDate(), []);
 
@@ -388,6 +404,14 @@ export function DailyPlanWorkspace({
               item.committedOn > payload.range.endDate,
           ) ||
           (payload.tasks !== undefined && !Array.isArray(payload.tasks)) ||
+          (payload.customers !== undefined &&
+            (!Array.isArray(payload.customers) ||
+              payload.customers.some(
+                (customer) =>
+                  typeof customer.id !== "string" ||
+                  typeof customer.name !== "string" ||
+                  typeof customer.code !== "string",
+              ))) ||
           (payload.tasks ?? []).some(
             (task) =>
               task.calendarOn < payload.range.startDate ||
@@ -398,15 +422,33 @@ export function DailyPlanWorkspace({
         }
         setItems(payload.items);
         setTasks(payload.tasks ?? []);
+        setCustomerOptions((current) => {
+          const options = new Map(
+            (payload.customers ?? current).map((item) => [item.id, item]),
+          );
+          for (const item of payload.items) {
+            options.set(item.customerId, {
+              code: item.customerCode,
+              id: item.customerId,
+              name: item.customerName,
+            });
+          }
+          for (const task of payload.tasks ?? []) {
+            if (task.customerId !== null && task.customerName !== null) {
+              const existing = options.get(task.customerId);
+              options.set(task.customerId, {
+                code: existing?.code ?? null,
+                id: task.customerId,
+                name: task.customerName,
+              });
+            }
+          }
+          return [...options.values()].sort((left, right) =>
+            left.name.localeCompare(right.name, "tr-TR"),
+          );
+        });
         setLoadedRange(payload.range);
         setLoadState("ready");
-        const focusVisitId = completionFocusVisitIdRef.current;
-        if (focusVisitId !== null) {
-          completionFocusVisitIdRef.current = null;
-          window.setTimeout(() => {
-            document.getElementById(`daily-plan-visit-${focusVisitId}`)?.focus();
-          }, 0);
-        }
       })
       .catch((error: unknown) => {
         if (!current) return;
@@ -420,17 +462,70 @@ export function DailyPlanWorkspace({
     };
   }, [requestRevision, selectedDate, selectedView]);
 
+  useEffect(() => {
+    if (loadState !== "ready") return;
+    const focusVisitId = completionFocusVisitIdRef.current;
+    if (focusVisitId === null) return;
+    const target = document.getElementById(`daily-plan-visit-${focusVisitId}`);
+    if (target === null) return;
+    completionFocusVisitIdRef.current = null;
+    target.focus({ preventScroll: true });
+  }, [items, loadState]);
+
+  const customerFilteredItems = useMemo(
+    () =>
+      customerFilter === ""
+        ? items
+        : items.filter((item) => item.customerId === customerFilter),
+    [customerFilter, items],
+  );
+  const customerFilteredTasks = useMemo(
+    () =>
+      customerFilter === ""
+        ? tasks
+        : tasks.filter((task) => task.customerId === customerFilter),
+    [customerFilter, tasks],
+  );
+  const locationOptions = useMemo(() => {
+    const options = new Set<string>();
+    for (const item of customerFilteredItems) {
+      if (typeof item.locationLabel === "string") options.add(item.locationLabel);
+    }
+    for (const task of customerFilteredTasks) {
+      if (typeof task.locationLabel === "string") options.add(task.locationLabel);
+    }
+    if (locationFilter !== "") options.add(locationFilter);
+    return [...options].sort((left, right) => left.localeCompare(right, "tr-TR"));
+  }, [customerFilteredItems, customerFilteredTasks, locationFilter]);
+  const visibleItems = useMemo(
+    () =>
+      locationFilter === ""
+        ? customerFilteredItems
+        : customerFilteredItems.filter(
+            (item) => item.locationLabel === locationFilter,
+          ),
+    [customerFilteredItems, locationFilter],
+  );
+  const visibleTasks = useMemo(
+    () =>
+      locationFilter === ""
+        ? customerFilteredTasks
+        : customerFilteredTasks.filter(
+            (task) => task.locationLabel === locationFilter,
+          ),
+    [customerFilteredTasks, locationFilter],
+  );
   const days = useMemo(() => {
     const grouped = new Map<
       string,
       { items: DailyPlanItem[]; tasks: DailyPlanMonthTask[] }
     >();
-    for (const item of items) {
+    for (const item of visibleItems) {
       const day = grouped.get(item.committedOn) ?? { items: [], tasks: [] };
       day.items.push(item);
       grouped.set(item.committedOn, day);
     }
-    for (const task of tasks) {
+    for (const task of visibleTasks) {
       const day = grouped.get(task.calendarOn) ?? { items: [], tasks: [] };
       day.tasks.push(task);
       grouped.set(task.calendarOn, day);
@@ -438,8 +533,8 @@ export function DailyPlanWorkspace({
     return [...grouped.entries()]
       .sort(([left], [right]) => left.localeCompare(right))
       .map(([date, day]) => ({ date, ...day }));
-  }, [items, tasks]);
-  const completedCount = items.filter(
+  }, [visibleItems, visibleTasks]);
+  const completedCount = visibleItems.filter(
     (item) => item.resolutionStatus === "completed",
   ).length;
   const plannedDayCount = days.length;
@@ -454,6 +549,19 @@ export function DailyPlanWorkspace({
         : "Aylık plan";
   const navigationUnit =
     selectedView === "day" ? "gün" : selectedView === "week" ? "hafta" : "ay";
+  const selectedCustomer =
+    customerOptions.find((customer) => customer.id === customerFilter) ?? null;
+  const exportQuery =
+    customerFilter === ""
+      ? null
+      : new URLSearchParams({
+          customerId: customerFilter,
+          date: selectedDate,
+          view: selectedView,
+        });
+  if (exportQuery !== null && locationFilter !== "") {
+    exportQuery.set("location", locationFilter);
+  }
 
   function openDate(date: string) {
     if (date === selectedDate) return;
@@ -582,6 +690,74 @@ export function DailyPlanWorkspace({
         </div>
       </div>
 
+      <div
+        aria-label="Takvim filtreleri ve çıktılar"
+        className="daily-plan-filter-bar"
+      >
+        <div className="daily-plan-filters">
+          <label>
+            <span>Müşteri</span>
+            <select
+              aria-label="Takvimi müşteriye göre filtrele"
+              value={customerFilter}
+              onChange={(event) => {
+                setCustomerFilter(event.target.value);
+                setLocationFilter("");
+              }}
+            >
+              <option value="">Tüm müşteriler</option>
+              {customerOptions.map((customer) => (
+                <option key={customer.id} value={customer.id}>
+                  {customer.name}
+                  {customer.code ? ` · ${customer.code}` : ""}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>Konum</span>
+            <select
+              aria-label="Takvimi konuma göre filtrele"
+              disabled={locationOptions.length === 0}
+              value={locationFilter}
+              onChange={(event) => setLocationFilter(event.target.value)}
+            >
+              <option value="">Tüm konumlar</option>
+              {locationOptions.map((location) => (
+                <option key={location} value={location}>
+                  {location}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <div className="daily-plan-export-actions">
+          {exportQuery === null ? (
+            <span>Çıktı için bir müşteri seçin.</span>
+          ) : (
+            <>
+              <a
+                download
+                href={`/api/daily-plan/export?${exportQuery.toString()}&format=ics`}
+              >
+                ICS indir
+              </a>
+              <a
+                href={`/api/daily-plan/export?${exportQuery.toString()}&format=print`}
+                rel="noreferrer"
+                target="_blank"
+              >
+                Yazdırılabilir görünüm
+              </a>
+              <span className="sr-only">
+                {selectedCustomer?.name ?? "Seçili müşteri"} için güvenli
+                oturum içi çıktılar
+              </span>
+            </>
+          )}
+        </div>
+      </div>
+
       {loadState === "loading" ? (
         <p className="daily-plan-feedback" role="status">
           Planlanan ziyaretler yükleniyor…
@@ -619,8 +795,8 @@ export function DailyPlanWorkspace({
 
       {loadState === "ready" &&
       selectedView !== "month" &&
-      items.length === 0 &&
-      tasks.length === 0 ? (
+      visibleItems.length === 0 &&
+      visibleTasks.length === 0 ? (
         <div className="daily-plan-empty" role="status">
           <span aria-hidden="true">00</span>
           <div>
@@ -631,14 +807,16 @@ export function DailyPlanWorkspace({
       ) : null}
 
       {loadState === "ready" &&
-      (selectedView === "month" || items.length > 0 || tasks.length > 0) ? (
+      (selectedView === "month" ||
+        visibleItems.length > 0 ||
+        visibleTasks.length > 0) ? (
         <>
           <div className="daily-plan-summary" aria-label="Dönem özeti">
-            <span><strong>{items.length}</strong> ziyaret</span>
+            <span><strong>{visibleItems.length}</strong> ziyaret</span>
             <span><strong>{plannedDayCount}</strong> planlı gün</span>
             <span><strong>{completedCount}</strong> tamamlanan ziyaret</span>
-            {tasks.length > 0 ? (
-              <span><strong>{tasks.length}</strong> görev</span>
+            {visibleTasks.length > 0 ? (
+              <span><strong>{visibleTasks.length}</strong> görev</span>
             ) : null}
           </div>
           {selectedView === "month" && loadedRange !== null ? (
@@ -647,9 +825,9 @@ export function DailyPlanWorkspace({
               onOpenDay={openMonthDay}
               renderVisitAction={renderMonthVisitAction}
               startDate={loadedRange.startDate}
-              tasks={tasks}
+              tasks={visibleTasks}
               today={today}
-              visits={items}
+              visits={visibleItems}
             />
           ) : (
             <div className="daily-plan-days">

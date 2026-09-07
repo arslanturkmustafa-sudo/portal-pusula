@@ -14,16 +14,7 @@ import { monthBounds } from "@/features/finance/period";
 
 export type CreditCardStatus = "active" | "inactive";
 export type ExpenseStatus = "active" | "voided";
-export type ExpenseCategory =
-  | "rent"
-  | "software_subscription"
-  | "transportation"
-  | "meals_hospitality"
-  | "marketing"
-  | "office"
-  | "external_service"
-  | "tax_fee"
-  | "other";
+export type ExpenseCategory = string;
 export type ExpenseDocumentType = "none" | "invoice" | "receipt" | "other";
 export type ExpensePaymentMethod =
   | "cash"
@@ -168,6 +159,8 @@ type InstallmentRow = RowDataPacket & {
   version: number;
 };
 
+const EXPENSE_CATEGORY_PATTERN = /^[a-z][a-z0-9_]{0,31}$/u;
+
 function canonicalDate(value: string | Date): string {
   if (value instanceof Date) return value.toISOString().slice(0, 10);
   return value.slice(0, 10);
@@ -210,17 +203,7 @@ function mapExpenseStatus(value: string): ExpenseStatus {
 }
 
 function mapCategory(value: string): ExpenseCategory {
-  if (
-    value !== "rent" &&
-    value !== "software_subscription" &&
-    value !== "transportation" &&
-    value !== "meals_hospitality" &&
-    value !== "marketing" &&
-    value !== "office" &&
-    value !== "external_service" &&
-    value !== "tax_fee" &&
-    value !== "other"
-  ) {
+  if (!EXPENSE_CATEGORY_PATTERN.test(value)) {
     throw new Error("Expense category is invalid.");
   }
   return value;
@@ -677,6 +660,9 @@ export async function listCardInstallmentRecords(
     clauses.push("e.credit_card_id = ?");
     values.push(filters.cardId);
   }
+  if (filters.status === "open") {
+    clauses.push("ci.status = 'planned'");
+  }
   const [rows] = await connection.execute<InstallmentRow[]>(
     `SELECT ${INSTALLMENT_COLUMNS}
        FROM credit_card_installment ci
@@ -685,6 +671,28 @@ export async function listCardInstallmentRecords(
       WHERE ${clauses.join(" AND ")}
       ORDER BY ci.due_on ASC, cc.display_name ASC, ci.id ASC`,
     values,
+  );
+  return rows.map(mapInstallment);
+}
+
+export async function listCardInstallmentsForBulkUpdate(
+  connection: PoolConnection,
+  cardId: string,
+  month: string,
+): Promise<readonly CardInstallment[]> {
+  const bounds = monthBounds(month);
+  const [rows] = await connection.execute<InstallmentRow[]>(
+    `SELECT ${INSTALLMENT_COLUMNS}
+       FROM credit_card_installment ci
+       JOIN expense e ON e.id = ci.expense_id
+       JOIN credit_card cc ON cc.id = e.credit_card_id
+      WHERE e.status = 'active'
+        AND e.credit_card_id = ?
+        AND ci.due_on >= ?
+        AND ci.due_on < ?
+      ORDER BY ci.due_on ASC, ci.id ASC
+      FOR UPDATE`,
+    [cardId, bounds.monthStart, bounds.nextMonthStart],
   );
   return rows.map(mapInstallment);
 }

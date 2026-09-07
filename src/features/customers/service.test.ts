@@ -45,6 +45,7 @@ import {
   createCustomer,
   CustomerProjectInUseError,
   CustomerProjectUnavailableError,
+  listCustomers,
   updateCustomer,
 } from "@/features/customers/service";
 
@@ -105,6 +106,29 @@ describe("customer service project links", () => {
     mocks.listCustomerProjectLinksForUpdate.mockResolvedValue([]);
     mocks.updateCustomerProjectLinkStatus.mockResolvedValue(true);
     mocks.updateCustomerRecord.mockResolvedValue(true);
+  });
+
+  it("projects visits and contracts with the Europe/Istanbul business date", async () => {
+    mocks.listCustomerRecords.mockResolvedValueOnce([]);
+
+    await expect(
+      listCustomers(
+        {} as Pool,
+        {
+          includeBilling: true,
+          includeContact: true,
+          includeVisits: true,
+        },
+        new Date("2026-09-06T21:30:00.000Z"),
+      ),
+    ).resolves.toEqual([]);
+
+    expect(mocks.listCustomerRecords).toHaveBeenCalledWith({}, {
+      businessDate: "2026-09-07",
+      includeBilling: true,
+      includeContact: true,
+      includeVisits: true,
+    });
   });
 
   it("creates one customer and all selected active links atomically", async () => {

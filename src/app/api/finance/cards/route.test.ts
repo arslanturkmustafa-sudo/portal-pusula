@@ -33,6 +33,8 @@ import { GET, POST } from "@/app/api/finance/cards/route";
 const principal = {
   accountId: "10000000-0000-4000-8000-000000000001",
   kind: "account" as const,
+  permissions: ["finance.cards.read", "finance.cards.write"] as const,
+  role: "member" as const,
 };
 
 describe("credit card collection API", () => {
@@ -74,5 +76,27 @@ describe("credit card collection API", () => {
     );
     expect(response.status).toBe(403);
     expect(mocks.parse).not.toHaveBeenCalled();
+  });
+
+  it("rejects a write-only principal before parsing a card body", async () => {
+    mocks.authenticate.mockResolvedValue({
+      ...principal,
+      permissions: ["finance.cards.write"],
+    });
+
+    const response = await POST(
+      new NextRequest("https://portal.example/api/finance/cards", {
+        body: "{}",
+        headers: {
+          "content-type": "application/json",
+          origin: "https://portal.example",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    expect(mocks.parse).not.toHaveBeenCalled();
+    expect(mocks.create).not.toHaveBeenCalled();
   });
 });

@@ -8,28 +8,38 @@ vi.mock("server-only", () => ({}));
 import { readCashFlowLedger } from "@/features/finance/cash-flow-repository";
 
 describe("cash flow repository", () => {
-  it("projects each physical cash event once and keeps forecast separate", async () => {
+  it("uses the reconciled account ledger for actual cash and keeps forecast separate", async () => {
     const execute = vi
       .fn()
+      .mockResolvedValueOnce([[], []])
+      .mockResolvedValueOnce([[], []])
       .mockResolvedValueOnce([
         [
           {
-            amount: "400.0000",
-            direction: "inflow",
-            entry_count: 1,
-            kind: "customer_collection",
+            account_count: 2,
+            closing_balance_amount: "1325.2500",
+            opening_balance_amount: "1000.0000",
           },
+        ],
+        [],
+      ])
+      .mockResolvedValueOnce([
+        [
           {
-            amount: "600.0000",
-            direction: "inflow",
+            account_count: "1",
+            amount: "250.0000",
+            event_on: "2026-09-12",
+          },
+        ],
+        [],
+      ])
+      .mockResolvedValueOnce([
+        [
+          {
             entry_count: "2",
-            kind: "partner_contribution",
-          },
-          {
-            amount: "600.0000",
-            direction: "outflow",
-            entry_count: 1,
-            kind: "card_installment",
+            event_on: "2026-09-07",
+            inflow_amount: "400.2500",
+            outflow_amount: "75.0000",
           },
         ],
         [],
@@ -41,14 +51,16 @@ describe("cash flow repository", () => {
             bucket: "scheduled",
             direction: "inflow",
             entry_count: 1,
+            event_on: "2026-09-20",
             kind: "customer_receivable",
           },
           {
-            amount: "600.0000",
-            bucket: "scheduled",
-            direction: "outflow",
-            entry_count: 1,
-            kind: "card_installment",
+            amount: "35.0000",
+            bucket: "undated",
+            direction: "inflow",
+            entry_count: "1",
+            event_on: null,
+            kind: "commission_receivable",
           },
         ],
         [],
@@ -58,65 +70,130 @@ describe("cash flow repository", () => {
     await expect(
       readCashFlowLedger(
         { execute } as unknown as PoolConnection,
-        { monthStart: "2026-09-01", nextMonthStart: "2026-10-01" },
+        { endOn: "2026-09-30", startOn: "2026-09-01" },
         "2026-09-15",
       ),
     ).resolves.toEqual({
-      actual: [
+      accountOpenings: [
         {
-          amount: "400.0000",
-          direction: "inflow",
-          entryCount: 1,
-          kind: "customer_collection",
-        },
-        {
-          amount: "600.0000",
-          direction: "inflow",
-          entryCount: 2,
-          kind: "partner_contribution",
-        },
-        {
-          amount: "600.0000",
-          direction: "outflow",
-          entryCount: 1,
-          kind: "card_installment",
+          accountCount: 1,
+          amount: "250.0000",
+          eventOn: "2026-09-12",
         },
       ],
+      actual: [
+        {
+          entryCount: 2,
+          eventOn: "2026-09-07",
+          inflowAmount: "400.2500",
+          outflowAmount: "75.0000",
+        },
+      ],
+      balance: {
+        accountCount: 2,
+        closingBalanceAmount: "1325.2500",
+        openingBalanceAmount: "1000.0000",
+      },
       forecast: [
         {
           amount: "600.0000",
           bucket: "scheduled",
           direction: "inflow",
           entryCount: 1,
+          eventOn: "2026-09-20",
           kind: "customer_receivable",
         },
         {
-          amount: "600.0000",
-          bucket: "scheduled",
-          direction: "outflow",
+          amount: "35.0000",
+          bucket: "undated",
+          direction: "inflow",
           entryCount: 1,
-          kind: "card_installment",
+          eventOn: null,
+          kind: "commission_receivable",
         },
       ],
       unclassifiedExpenseAmount: "50.0000",
       unclassifiedExpenseCount: 1,
     });
 
-    const actualSql = String(execute.mock.calls[0]?.[0]);
-    expect(actualSql).toMatch(/receivable_collection[\s\S]*partnership_contribution_receipt/iu);
-    expect(actualSql).toMatch(/partnership_commission[\s\S]*pc\.paid_on/iu);
-    expect(actualSql).toMatch(/'card_installment'[\s\S]*cci\.amount[\s\S]*FROM credit_card_installment/iu);
-    expect(actualSql).toContain("UNION ALL");
-    expect(actualSql).toMatch(/rc\.entry_type = 'reversal'[\s\S]*'outflow'/iu);
-    expect(actualSql).toMatch(/pcr\.entry_type = 'reversal'[\s\S]*'outflow'/iu);
-    expect(execute.mock.calls[0]?.[1]).toHaveLength(15);
+    expect(execute).toHaveBeenCalledTimes(7);
+    expect(String(execute.mock.calls[0]?.[0])).toContain("finance_transaction");
 
-    const forecastSql = String(execute.mock.calls[1]?.[0]);
+    const balanceSql = String(execute.mock.calls[2]?.[0]);
+    expect(balanceSql).toMatch(/SUM\(a\.opening_balance_amount\)/u);
+    expect(balanceSql).toMatch(
+      /DATE\(CONVERT_TZ\(a\.created_at_utc, '\+00:00', '\+03:00'\)\) < \?/u,
+    );
+    expect(balanceSql).toMatch(
+      /DATE\(CONVERT_TZ\(a\.created_at_utc, '\+00:00', '\+03:00'\)\) <= \?/u,
+    );
+    expect(balanceSql).toMatch(/t\.occurred_on < \?/u);
+    expect(balanceSql).toMatch(/t\.occurred_on <= \?/u);
+    expect(execute.mock.calls[2]?.[1]).toEqual([
+      "2026-09-30",
+      "2026-09-15",
+      "2026-09-01",
+      "2026-09-15",
+      "2026-09-01",
+      "2026-09-15",
+      "2026-09-30",
+      "2026-09-15",
+      "2026-09-30",
+      "2026-09-15",
+    ]);
+
+    const accountOpeningSql = String(execute.mock.calls[3]?.[0]);
+    expect(accountOpeningSql).toMatch(
+      /CONVERT_TZ\(a\.created_at_utc, '\+00:00', '\+03:00'\)/u,
+    );
+    expect(execute.mock.calls[3]?.[1]).toEqual([
+      "2026-09-01",
+      "2026-09-30",
+      "2026-09-15",
+    ]);
+
+    const actualSql = String(execute.mock.calls[4]?.[0]);
+    expect(actualSql).toMatch(/FROM finance_transaction t/u);
+    expect(actualSql).toMatch(/JOIN finance_ledger_entry le/u);
+    expect(actualSql).toMatch(/transaction_type = BINARY 'income'/u);
+    expect(actualSql).toMatch(/transaction_type = BINARY 'expense'/u);
+    expect(actualSql).not.toMatch(/transaction_type = BINARY 'transfer'[\s\S]*THEN le\.amount/u);
+    expect(execute.mock.calls[4]?.[1]).toEqual([
+      "2026-09-01",
+      "2026-09-30",
+      "2026-09-15",
+    ]);
+
+    const forecastSql = String(execute.mock.calls[5]?.[0]);
     expect(forecastSql).toMatch(/total_amount - COALESCE\(rc\.collected_amount/iu);
-    expect(forecastSql).toMatch(/entry_type = 'reversal' THEN -amount/iu);
     expect(forecastSql).toContain("r.record_state = 'active'");
     expect(forecastSql).toMatch(/cci\.status = 'planned'/iu);
     expect(forecastSql).toMatch(/pc\.status = 'agency_collected'/iu);
-    expect(execute.mock.calls[1]?.[1]).toHaveLength(12);
+    expect(forecastSql).toMatch(
+      /r\.due_on < \? OR \(r\.due_on >= \? AND r\.due_on <= \?\)/u,
+    );
+    expect(forecastSql).toMatch(
+      /pc\.due_on < \? OR \(pc\.due_on >= \? AND pc\.due_on <= \?\)/u,
+    );
+    expect(forecastSql).toMatch(
+      /cci\.due_on < \? OR \(cci\.due_on >= \? AND cci\.due_on <= \?\)/u,
+    );
+    expect(execute.mock.calls[5]?.[1]).toEqual([
+      "2026-09-15",
+      "2026-09-15",
+      "2026-09-01",
+      "2026-09-30",
+      "2026-09-15",
+      "2026-09-15",
+      "2026-09-01",
+      "2026-09-30",
+      "2026-09-15",
+      "2026-09-15",
+      "2026-09-01",
+      "2026-09-30",
+      "2026-09-01",
+      "2026-09-30",
+      "2026-09-15",
+    ]);
   });
 });

@@ -15,6 +15,7 @@ const accounts = [
     currency: "TRY",
     displayName: "İşletme hesabı",
     id: "10000000-0000-4000-8000-000000000001",
+    openedOn: "2026-09-01",
     openingBalanceAmount: "100000.0000",
     status: "active",
     version: 1,
@@ -26,6 +27,7 @@ const accounts = [
     currency: "TRY",
     displayName: "Merkez kasa",
     id: "10000000-0000-4000-8000-000000000002",
+    openedOn: "2026-09-05",
     openingBalanceAmount: "20000.0000",
     status: "active",
     version: 1,
@@ -114,6 +116,13 @@ describe("FinanceAccountsWorkspace", () => {
     fireEvent.change(within(form!).getByLabelText("Hedef hesap"), {
       target: { value: accounts[1].id },
     });
+    expect(within(form!).getByLabelText("Tarih")).toHaveAttribute(
+      "min",
+      "2026-09-05",
+    );
+    expect(
+      within(form!).getByText("Seçili hesaplar için en erken 5 Eyl 2026"),
+    ).toBeVisible();
     fireEvent.change(within(form!).getByLabelText("Tutar (₺)"), {
       target: { value: "2500,50" },
     });
@@ -136,6 +145,29 @@ describe("FinanceAccountsWorkspace", () => {
         transactionType: "transfer",
       });
     });
+  });
+
+  it("explains a server-side account-opening date rejection", async () => {
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      if (String(input) === "/api/finance/account-transactions" && init?.method === "POST") {
+        return jsonResponse({ status: "before_account_opening" }, 400);
+      }
+      return jsonResponse(overview);
+    });
+    render(<FinanceAccountsWorkspace canWrite />);
+    await screen.findByText("₺150.000,00");
+    fireEvent.click(screen.getByRole("button", { name: /Hareket kaydet/u }));
+    fireEvent.change(screen.getByLabelText("Tutar (₺)"), {
+      target: { value: "100" },
+    });
+    fireEvent.change(screen.getByLabelText("Açıklama"), {
+      target: { value: "Tarih sınırı doğrulaması" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Hareketi kaydet" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Hareket tarihi seçili hesapların açılış tarihinden önce olamaz.",
+    );
   });
 
   it("creates a reasoned reversal instead of deleting a movement", async () => {

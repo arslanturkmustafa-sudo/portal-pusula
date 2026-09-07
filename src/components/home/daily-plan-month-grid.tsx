@@ -17,6 +17,7 @@ export type DailyPlanMonthVisit = Readonly<{
   customerId: string;
   customerName: string;
   internalPlannedAtUtc: string | null;
+  locationLabel: string | null;
   resolutionStatus: DailyPlanMonthVisitStatus;
   visitId: string;
 }>;
@@ -24,10 +25,12 @@ export type DailyPlanMonthVisit = Readonly<{
 export type DailyPlanMonthTask = Readonly<{
   calendarOn: string;
   calendarSource: "visit" | "due_date";
+  customerId: string | null;
   customerName: string | null;
   dueOn: string;
   id: string;
   linkedVisitId: string | null;
+  locationLabel: string | null;
   projectName: string | null;
   status: "backlog" | "todo" | "in_progress" | "blocked" | "done" | "cancelled";
   title: string;
@@ -50,6 +53,8 @@ type CalendarDay = Readonly<{
 }>;
 
 const DAY_MILLISECONDS = 24 * 60 * 60 * 1000;
+const MAX_VISIBLE_VISITS_PER_DAY = 2;
+const MAX_VISIBLE_TASKS_PER_DAY = 2;
 const weekDays = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"] as const;
 
 const fullDateFormatter = new Intl.DateTimeFormat("tr-TR", {
@@ -238,7 +243,9 @@ export function DailyPlanMonthGrid({
 
                       {day.visits.length > 0 ? (
                         <ul className={styles.visits} aria-label="Ziyaretler">
-                          {day.visits.map((visit) => (
+                          {day.visits
+                            .slice(0, MAX_VISIBLE_VISITS_PER_DAY)
+                            .map((visit) => (
                             <li
                               className={styles.visit}
                               data-status={visit.resolutionStatus}
@@ -252,19 +259,26 @@ export function DailyPlanMonthGrid({
                               </div>
                               <strong title={visit.customerName}>{visit.customerName}</strong>
                               <small>{visit.customerCode}</small>
+                              {typeof visit.locationLabel !== "string" ? null : (
+                                <small className={styles.location}>
+                                  Konum · {visit.locationLabel}
+                                </small>
+                              )}
                               {renderVisitAction ? (
                                 <div className={styles.visitAction}>
                                   {renderVisitAction(visit)}
                                 </div>
                               ) : null}
                             </li>
-                          ))}
+                            ))}
                         </ul>
                       ) : null}
 
                       {day.tasks.length > 0 ? (
                         <ul className={styles.tasks} aria-label="Görevler">
-                          {day.tasks.map((task) => (
+                          {day.tasks
+                            .slice(0, MAX_VISIBLE_TASKS_PER_DAY)
+                            .map((task) => (
                             <li data-status={task.status} key={task.id}>
                               <span aria-hidden="true" />
                               <strong title={task.title}>{task.title}</strong>
@@ -280,9 +294,35 @@ export function DailyPlanMonthGrid({
                                   ? "Ziyarete bağlı"
                                   : "Vade günü"}
                               </small>
+                              {typeof task.locationLabel !== "string" ? null : (
+                                <small className={styles.location}>
+                                  Konum · {task.locationLabel}
+                                </small>
+                              )}
                             </li>
-                          ))}
+                            ))}
                         </ul>
+                      ) : null}
+
+                      {day.visits.length > MAX_VISIBLE_VISITS_PER_DAY ||
+                      day.tasks.length > MAX_VISIBLE_TASKS_PER_DAY ? (
+                        <button
+                          aria-label={`${fullDateFormatter.format(dateAtNoonUtc(day.date))} için kalan ${Math.max(0, day.visits.length - MAX_VISIBLE_VISITS_PER_DAY) + Math.max(0, day.tasks.length - MAX_VISIBLE_TASKS_PER_DAY)} kaydı günlük görünümde aç`}
+                          className={styles.moreButton}
+                          type="button"
+                          onClick={() => onOpenDay(day.date)}
+                        >
+                          +{" "}
+                          {Math.max(
+                            0,
+                            day.visits.length - MAX_VISIBLE_VISITS_PER_DAY,
+                          ) +
+                            Math.max(
+                              0,
+                              day.tasks.length - MAX_VISIBLE_TASKS_PER_DAY,
+                            )}{" "}
+                          kayıt daha
+                        </button>
                       ) : null}
                     </td>
                   ),

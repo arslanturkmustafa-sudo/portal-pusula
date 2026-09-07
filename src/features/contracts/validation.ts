@@ -146,6 +146,11 @@ const nullableDurationSchema = z
   .union([z.number().int().min(15).max(720), z.null()])
   .default(null);
 
+const nullableLocationLabelSchema = z.preprocess(
+  emptyToNull,
+  z.union([z.string().min(1).max(191), z.null()]).default(null),
+);
+
 export const monthlyVisitPlanInputSchema = z
   .object({
     visits: z
@@ -155,6 +160,7 @@ export const monthlyVisitPlanInputSchema = z
             committedOn: isoDateSchema,
             internalDurationMinutes: nullableDurationSchema,
             internalStartTime: nullableClockSchema,
+            locationLabel: nullableLocationLabelSchema,
           })
           .strict()
           .superRefine((value, context) => {

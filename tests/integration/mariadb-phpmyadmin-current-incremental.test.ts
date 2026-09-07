@@ -21,6 +21,8 @@ const lifecycleTag = "0014_record_lifecycle";
 const reversalTag = "0015_financial_reversals";
 const financeAccountsTag = "0016_finance_accounts_ledger";
 const workTaskVisitTag = "0017_work_task_visit";
+const planningExpenseCategoriesTag =
+  "0018_planning_expense_categories";
 const successResult = "PORTAL_PUSULA_INCREMENTAL_MIGRATION_OK";
 const financePermissionMemberId = "10000000-0000-4000-8000-000000000016";
 const validPasswordHash =
@@ -37,6 +39,7 @@ const dropOrder = [
   "partnership_commission",
   "credit_card_installment",
   "expense",
+  "expense_category",
   "credit_card",
   "work_task_project",
   "work_task",
@@ -113,6 +116,31 @@ const workTaskVisitConstraints = [
   "fk_work_task_visit_task",
   "fk_work_task_visit_visit",
 ] as const;
+
+const planningExpenseCategoryChecks = [
+  "chk_expense_category_code",
+  "chk_expense_category_display_name",
+  "chk_expense_category_flags",
+  "chk_expense_category_identity",
+  "chk_expense_category_timeline",
+  "chk_expense_category_version",
+] as const;
+
+const planningExpenseCategoryIndexes = [
+  "PRIMARY",
+  "idx_expense_category_status_name",
+  "uq_expense_category_client_operation",
+  "uq_expense_category_code",
+  "uq_expense_category_display_name",
+] as const;
+
+const planningFixture = Object.freeze({
+  contractId: "c2000000-0000-4000-8000-000000000002",
+  customerId: "c1000000-0000-4000-8000-000000000001",
+  expenseId: "c4000000-0000-4000-8000-000000000004",
+  expenseOperationKey: "c5000000-0000-4000-8000-000000000005",
+  visitId: "c3000000-0000-4000-8000-000000000003",
+});
 
 interface ExpectedMigration {
   createdAt: number;
@@ -311,6 +339,181 @@ async function namedIndexes(
   return rows;
 }
 
+async function tableIndexes(
+  pool: Pool,
+  tableName: string,
+): Promise<readonly RowDataPacket[]> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    `SELECT INDEX_NAME AS index_name, NON_UNIQUE AS non_unique,
+            GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX) AS columns_in_order
+       FROM information_schema.STATISTICS
+      WHERE TABLE_SCHEMA = DATABASE()
+        AND TABLE_NAME = ?
+      GROUP BY INDEX_NAME, NON_UNIQUE
+      ORDER BY BINARY INDEX_NAME`,
+    [tableName],
+  );
+  return rows;
+}
+
+async function namedCheckClauses(
+  pool: Pool,
+  names: readonly string[],
+): Promise<readonly RowDataPacket[]> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    `SELECT tc.TABLE_NAME AS table_name,
+            cc.CONSTRAINT_NAME AS constraint_name,
+            cc.CHECK_CLAUSE AS check_clause
+       FROM information_schema.TABLE_CONSTRAINTS AS tc
+       INNER JOIN information_schema.CHECK_CONSTRAINTS AS cc
+         ON cc.CONSTRAINT_SCHEMA = tc.CONSTRAINT_SCHEMA
+        AND cc.CONSTRAINT_NAME = tc.CONSTRAINT_NAME
+      WHERE tc.TABLE_SCHEMA = DATABASE()
+        AND tc.CONSTRAINT_NAME IN (${sqlList(names)})
+      ORDER BY BINARY tc.TABLE_NAME, BINARY cc.CONSTRAINT_NAME`,
+    [...names],
+  );
+  return rows;
+}
+
+async function planningForeignKey(pool: Pool): Promise<readonly RowDataPacket[]> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    `SELECT kcu.TABLE_NAME AS table_name,
+            kcu.CONSTRAINT_NAME AS constraint_name,
+            kcu.COLUMN_NAME AS column_name,
+            kcu.REFERENCED_TABLE_NAME AS referenced_table_name,
+            kcu.REFERENCED_COLUMN_NAME AS referenced_column_name,
+            rc.DELETE_RULE AS delete_rule,
+            rc.UPDATE_RULE AS update_rule
+       FROM information_schema.KEY_COLUMN_USAGE AS kcu
+       INNER JOIN information_schema.REFERENTIAL_CONSTRAINTS AS rc
+         ON rc.CONSTRAINT_SCHEMA = kcu.CONSTRAINT_SCHEMA
+        AND rc.TABLE_NAME = kcu.TABLE_NAME
+        AND rc.CONSTRAINT_NAME = kcu.CONSTRAINT_NAME
+      WHERE kcu.TABLE_SCHEMA = DATABASE()
+        AND kcu.TABLE_NAME = 'expense'
+        AND kcu.CONSTRAINT_NAME = 'fk_expense_category'`,
+  );
+  return rows;
+}
+
+async function planningColumnMetadata(
+  pool: Pool,
+): Promise<readonly RowDataPacket[]> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    `SELECT TABLE_NAME AS table_name, COLUMN_NAME AS column_name,
+            COLUMN_TYPE AS column_type, IS_NULLABLE AS is_nullable,
+            CHARACTER_SET_NAME AS character_set_name,
+            COLLATION_NAME AS collation_name
+       FROM information_schema.COLUMNS
+      WHERE TABLE_SCHEMA = DATABASE()
+        AND (
+          TABLE_NAME = 'expense_category'
+          OR (TABLE_NAME = 'monthly_visit_commitment'
+              AND COLUMN_NAME = 'location_label')
+        )
+      ORDER BY BINARY TABLE_NAME, ORDINAL_POSITION`,
+  );
+  return rows;
+}
+
+async function expenseCategorySeedRows(
+  pool: Pool,
+): Promise<readonly RowDataPacket[]> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    `SELECT code, display_name, is_system, status, version
+       FROM expense_category
+      ORDER BY BINARY code`,
+  );
+  return rows;
+}
+
+async function showCreateTable(pool: Pool, tableName: string): Promise<string> {
+  if (!/^[a-z0-9_]+$/u.test(tableName)) {
+    throw new Error("Unsafe integration-test table name.");
+  }
+  const [rows] = await pool.query<RowDataPacket[]>(
+    `SHOW CREATE TABLE \`${tableName}\``,
+  );
+  const createSql = rows[0]?.["Create Table"];
+  if (typeof createSql !== "string") {
+    throw new Error("Disposable MariaDB table definition is missing.");
+  }
+  return createSql;
+}
+
+async function planningMigrationState(pool: Pool): Promise<unknown> {
+  const [categoryRows] = await pool.query<RowDataPacket[]>(
+    `SELECT COUNT(*) AS table_count
+       FROM information_schema.TABLES
+      WHERE TABLE_SCHEMA = DATABASE()
+        AND TABLE_NAME = 'expense_category'`,
+  );
+  const categoryTableCount = Number(categoryRows[0]?.table_count);
+  return {
+    categoryCreate:
+      categoryTableCount === 1
+        ? await showCreateTable(pool, "expense_category")
+        : null,
+    categoryTableCount,
+    expenseCreate: await showCreateTable(pool, "expense"),
+    journal: await journalRows(pool),
+    visitCreate: await showCreateTable(pool, "monthly_visit_commitment"),
+  };
+}
+
+async function seedPlanningBusinessRows(pool: Pool): Promise<void> {
+  await pool.execute(
+    `INSERT INTO customer (id, display_name, short_code)
+     VALUES (?, '0018 artımlı geçiş müşterisi', 'INCREMENTAL_0018')`,
+    [planningFixture.customerId],
+  );
+  await pool.execute(
+    `INSERT INTO consulting_contract
+       (id, customer_id, status, starts_on, ends_on, monthly_fee_amount,
+        currency, vat_mode, vat_rate, payment_day, internal_note)
+     VALUES (?, ?, 'active', '2026-01-01', '2026-12-31', 12000.0000,
+             'TRY', 'exclusive', 20.00, 5, 'Geçişte korunacak sözleşme')`,
+    [planningFixture.contractId, planningFixture.customerId],
+  );
+  await pool.execute(
+    `INSERT INTO monthly_visit_commitment
+       (id, contract_id, committed_on, resolution_status, resolution_note)
+     VALUES (?, ?, '2026-09-15', 'planned', 'Geçişte korunacak ziyaret')`,
+    [planningFixture.visitId, planningFixture.contractId],
+  );
+  await pool.execute(
+    `INSERT INTO expense
+       (id, client_operation_key, incurred_on, category, description,
+        payment_method, net_amount, vat_amount, total_amount, currency,
+        installment_count, note)
+     VALUES (?, ?, '2026-09-08', 'rent', 'Geçişte korunacak gider',
+             'cash', 100.0000, 20.0000, 120.0000, 'TRY', 1,
+             'Satır içeriği değişmemeli')`,
+    [planningFixture.expenseId, planningFixture.expenseOperationKey],
+  );
+}
+
+async function planningBusinessRows(pool: Pool): Promise<unknown> {
+  const [expenseRows] = await pool.query<RowDataPacket[]>(
+    `SELECT id, client_operation_key, incurred_on, category, description,
+            payment_method, net_amount, vat_amount, total_amount, currency,
+            installment_count, note, status, version
+       FROM expense
+      WHERE id = ?`,
+    [planningFixture.expenseId],
+  );
+  const [visitRows] = await pool.query<RowDataPacket[]>(
+    `SELECT id, contract_id, committed_on, resolution_status,
+            internal_planned_at_utc, internal_duration_minutes, delivered_on,
+            resolution_note, created_at_utc, updated_at_utc
+       FROM monthly_visit_commitment
+      WHERE id = ?`,
+    [planningFixture.visitId],
+  );
+  return { expenseRows, visitRows };
+}
+
 async function targetColumns(pool: Pool): Promise<readonly RowDataPacket[]> {
   const [rows] = await pool.query<RowDataPacket[]>(
     `SELECT TABLE_NAME AS table_name, COLUMN_NAME AS column_name,
@@ -382,7 +585,7 @@ function rowByKey(
 }
 
 describe.skipIf(!enabled).sequential(
-  "0013 through 0017 target-bound phpMyAdmin incrementals on real MariaDB",
+  "0013 through 0018 target-bound phpMyAdmin incrementals on real MariaDB",
   () => {
     let pool: Pool;
     let outputDirectory = "";
@@ -803,5 +1006,419 @@ describe.skipIf(!enabled).sequential(
       expect(Number(targetAfter[0]?.target_count)).toBe(0);
       expect(Number(triggersAfter[0]?.trigger_count)).toBe(0);
     }, 120_000);
+
+    it("applies exact 0017 to 0018 once without changing existing business rows", async () => {
+      const migrations = await readExpectedMigrations(
+        path.join(repositoryRoot, "drizzle"),
+      );
+      const previous = migrations[17];
+      const planningExpenseCategories = migrations[18];
+      expect(previous?.sqlFileName).toBe(`${workTaskVisitTag}.sql`);
+      expect(planningExpenseCategories?.sqlFileName).toBe(
+        `${planningExpenseCategoriesTag}.sql`,
+      );
+
+      const [identityRows] = await pool.query<DatabaseIdentityRow[]>(
+        "SELECT DATABASE() AS database_name, VERSION() AS server_version",
+      );
+      const identity = identityRows[0];
+      if (!identity) throw new Error("Disposable MariaDB identity is missing.");
+      const summary = await buildIncremental({
+        migrationTag: planningExpenseCategoriesTag,
+        outputDirectory,
+        projectRoot: repositoryRoot,
+        serverVersionSha256: createHash("sha256")
+          .update(identity.server_version, "utf8")
+          .digest("hex"),
+        targetDatabaseSha256: createHash("sha256")
+          .update(identity.database_name, "utf8")
+          .digest("hex"),
+      });
+      const sql = await readFile(
+        path.resolve(repositoryRoot, summary.sqlPath),
+        "utf8",
+      );
+
+      await seedJournalPrefix(pool, migrations, 18);
+      expect(await journalRows(pool)).toHaveLength(18);
+      await seedPlanningBusinessRows(pool);
+      const businessRowsBefore = await planningBusinessRows(pool);
+
+      await expect(executeIncremental(pool, sql, true)).resolves.toEqual({
+        errors: 0,
+        results: [
+          {
+            migrationTag: planningExpenseCategoriesTag,
+            result: successResult,
+          },
+        ],
+      });
+
+      const journal19 = await journalRows(pool);
+      expect(journal19).toHaveLength(19);
+      expect(journal19.at(-1)).toEqual({
+        created_at: planningExpenseCategories?.createdAt,
+        hash: planningExpenseCategories?.hash,
+        id: 19,
+      });
+      expect(await planningBusinessRows(pool)).toEqual(businessRowsBefore);
+
+      const columns = await planningColumnMetadata(pool);
+      expect(columns.map((row) => `${row.table_name}.${row.column_name}`)).toEqual([
+        "expense_category.id",
+        "expense_category.code",
+        "expense_category.client_operation_key",
+        "expense_category.display_name",
+        "expense_category.is_system",
+        "expense_category.status",
+        "expense_category.version",
+        "expense_category.created_at_utc",
+        "expense_category.updated_at_utc",
+        "monthly_visit_commitment.location_label",
+      ]);
+      expect(
+        columns.find(
+          (row) =>
+            row.table_name === "expense_category" && row.column_name === "code",
+        ),
+      ).toEqual(
+        expect.objectContaining({
+          character_set_name: "ascii",
+          collation_name: "ascii_bin",
+          column_type: "varchar(32)",
+          is_nullable: "NO",
+        }),
+      );
+      expect(
+        columns.find(
+          (row) =>
+            row.table_name === "monthly_visit_commitment" &&
+            row.column_name === "location_label",
+        ),
+      ).toEqual(
+        expect.objectContaining({
+          character_set_name: "utf8mb4",
+          collation_name: "utf8mb4_unicode_ci",
+          column_type: "varchar(191)",
+          is_nullable: "YES",
+        }),
+      );
+
+      expect(await tableIndexes(pool, "expense_category")).toEqual([
+        {
+          columns_in_order: "id",
+          index_name: "PRIMARY",
+          non_unique: 0,
+        },
+        {
+          columns_in_order: "status,display_name",
+          index_name: "idx_expense_category_status_name",
+          non_unique: 1,
+        },
+        {
+          columns_in_order: "client_operation_key",
+          index_name: "uq_expense_category_client_operation",
+          non_unique: 0,
+        },
+        {
+          columns_in_order: "code",
+          index_name: "uq_expense_category_code",
+          non_unique: 0,
+        },
+        {
+          columns_in_order: "display_name",
+          index_name: "uq_expense_category_display_name",
+          non_unique: 0,
+        },
+      ]);
+      expect(
+        (await tableIndexes(pool, "expense_category")).map(
+          (row) => row.index_name,
+        ),
+      ).toEqual([...planningExpenseCategoryIndexes]);
+
+      const constraints = await namedConstraints(pool, [
+        ...planningExpenseCategoryChecks,
+        "chk_expense_category",
+        "chk_monthly_visit_optional_fields",
+        "fk_expense_category",
+      ]);
+      expect(constraints).toHaveLength(
+        planningExpenseCategoryChecks.length + 3,
+      );
+      expect(constraints).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            constraint_name: "chk_expense_category",
+            constraint_type: "CHECK",
+            table_name: "expense",
+          }),
+          expect.objectContaining({
+            constraint_name: "chk_monthly_visit_optional_fields",
+            constraint_type: "CHECK",
+            table_name: "monthly_visit_commitment",
+          }),
+          expect.objectContaining({
+            constraint_name: "fk_expense_category",
+            constraint_type: "FOREIGN KEY",
+            table_name: "expense",
+          }),
+        ]),
+      );
+
+      const checkClauses = await namedCheckClauses(pool, [
+        "chk_expense_category",
+        "chk_monthly_visit_optional_fields",
+      ]);
+      expect(checkClauses).toHaveLength(2);
+      expect(
+        String(
+          checkClauses.find(
+            (row) => row.constraint_name === "chk_expense_category",
+          )?.check_clause,
+        ),
+      ).toMatch(/\^\[a-z\]\[a-z0-9_\]\{0,31\}\$/u);
+      expect(
+        String(
+          checkClauses.find(
+            (row) =>
+              row.constraint_name === "chk_monthly_visit_optional_fields",
+          )?.check_clause,
+        ),
+      ).toMatch(/location_label[\s\S]*resolution_note/iu);
+      expect(await planningForeignKey(pool)).toEqual([
+        {
+          column_name: "category",
+          constraint_name: "fk_expense_category",
+          delete_rule: "RESTRICT",
+          referenced_column_name: "code",
+          referenced_table_name: "expense_category",
+          table_name: "expense",
+          update_rule: "RESTRICT",
+        },
+      ]);
+      expect(await expenseCategorySeedRows(pool)).toEqual([
+        {
+          code: "external_service",
+          display_name: "Dış hizmet",
+          is_system: 1,
+          status: "active",
+          version: 1,
+        },
+        {
+          code: "marketing",
+          display_name: "Pazarlama",
+          is_system: 1,
+          status: "active",
+          version: 1,
+        },
+        {
+          code: "meals_hospitality",
+          display_name: "Yemek / ağırlama",
+          is_system: 1,
+          status: "active",
+          version: 1,
+        },
+        {
+          code: "office",
+          display_name: "Ofis",
+          is_system: 1,
+          status: "active",
+          version: 1,
+        },
+        {
+          code: "other",
+          display_name: "Diğer",
+          is_system: 1,
+          status: "active",
+          version: 1,
+        },
+        {
+          code: "rent",
+          display_name: "Kira",
+          is_system: 1,
+          status: "active",
+          version: 1,
+        },
+        {
+          code: "software_subscription",
+          display_name: "Yazılım / abonelik",
+          is_system: 1,
+          status: "active",
+          version: 1,
+        },
+        {
+          code: "tax_fee",
+          display_name: "Vergi / harç",
+          is_system: 1,
+          status: "active",
+          version: 1,
+        },
+        {
+          code: "transportation",
+          display_name: "Ulaşım",
+          is_system: 1,
+          status: "active",
+          version: 1,
+        },
+      ]);
+      const [visitLocationRows] = await pool.query<RowDataPacket[]>(
+        `SELECT location_label
+           FROM monthly_visit_commitment
+          WHERE id = ?`,
+        [planningFixture.visitId],
+      );
+      expect(visitLocationRows).toEqual([{ location_label: null }]);
+
+      const completedState = {
+        business: await planningBusinessRows(pool),
+        migration: await planningMigrationState(pool),
+        seeds: await expenseCategorySeedRows(pool),
+      };
+      await expect(executeIncremental(pool, sql)).resolves.toEqual({
+        errors: 1,
+        results: [],
+      });
+      expect({
+        business: await planningBusinessRows(pool),
+        migration: await planningMigrationState(pool),
+        seeds: await expenseCategorySeedRows(pool),
+      }).toEqual(completedState);
+    }, 180_000);
+
+    it("rejects a wrong 0017 prefix and prerequisite drift before 0018 DDL", async () => {
+      const migrations = await readExpectedMigrations(
+        path.join(repositoryRoot, "drizzle"),
+      );
+      const planningExpenseCategories = migrations[18];
+      expect(planningExpenseCategories?.sqlFileName).toBe(
+        `${planningExpenseCategoriesTag}.sql`,
+      );
+
+      const [identityRows] = await pool.query<DatabaseIdentityRow[]>(
+        "SELECT DATABASE() AS database_name, VERSION() AS server_version",
+      );
+      const identity = identityRows[0];
+      if (!identity) throw new Error("Disposable MariaDB identity is missing.");
+      const summary = await buildIncremental({
+        migrationTag: planningExpenseCategoriesTag,
+        outputDirectory,
+        projectRoot: repositoryRoot,
+        serverVersionSha256: createHash("sha256")
+          .update(identity.server_version, "utf8")
+          .digest("hex"),
+        targetDatabaseSha256: createHash("sha256")
+          .update(identity.database_name, "utf8")
+          .digest("hex"),
+      });
+      const sql = await readFile(
+        path.resolve(repositoryRoot, summary.sqlPath),
+        "utf8",
+      );
+
+      await seedJournalPrefix(pool, migrations, 18);
+      await pool.execute(
+        `UPDATE \`${journalTable}\` SET hash = ? WHERE id = 18`,
+        ["0".repeat(64)],
+      );
+      const wrongPrefixBefore = await planningMigrationState(pool);
+      await expect(executeIncremental(pool, sql)).resolves.toEqual({
+        errors: 1,
+        results: [],
+      });
+      expect(await planningMigrationState(pool)).toEqual(wrongPrefixBefore);
+
+      const driftCases: ReadonlyArray<{
+        mutate: () => Promise<unknown>;
+        name: string;
+      }> = [
+        {
+          mutate: () =>
+            pool.query(
+              "ALTER TABLE `monthly_visit_commitment` DROP CONSTRAINT `chk_monthly_visit_optional_fields`",
+            ),
+          name: "required visit check missing",
+        },
+        {
+          mutate: () =>
+            pool.query(
+              "ALTER TABLE `monthly_visit_commitment` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci",
+            ),
+          name: "visit table default collation drifted",
+        },
+        {
+          mutate: () =>
+            pool.query(
+              "ALTER TABLE `expense` MODIFY `category` varchar(32) CHARACTER SET ascii COLLATE ascii_general_ci NOT NULL",
+            ),
+          name: "expense category column collation drifted",
+        },
+        {
+          mutate: () =>
+            pool.query(
+              "ALTER TABLE `monthly_visit_commitment` ADD `location_label` varchar(191) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci",
+            ),
+          name: "visit location target already exists",
+        },
+        {
+          mutate: async () => {
+            await pool.query(
+              "ALTER TABLE `expense` DROP CONSTRAINT `chk_expense_category`",
+            );
+            return pool.query(
+              "ALTER TABLE `expense` ADD CONSTRAINT `chk_expense_category` CHECK (`category` IS NOT NULL)",
+            );
+          },
+          name: "legacy expense category check clause drifted",
+        },
+        {
+          mutate: async () => {
+            await pool.query(
+              "ALTER TABLE `monthly_visit_commitment` DROP CONSTRAINT `chk_monthly_visit_optional_fields`",
+            );
+            return pool.query(
+              "ALTER TABLE `monthly_visit_commitment` ADD CONSTRAINT `chk_monthly_visit_optional_fields` CHECK (`resolution_note` IS NULL OR CHAR_LENGTH(`resolution_note`) BETWEEN 1 AND 1999)",
+            );
+          },
+          name: "legacy visit optional-fields check clause drifted",
+        },
+        {
+          mutate: async () => {
+            await pool.query(
+              "ALTER TABLE `expense` DROP CONSTRAINT `chk_expense_category`",
+            );
+            await pool.query(
+              "ALTER TABLE `expense` ADD CONSTRAINT `chk_expense_category` CHECK (CHAR_LENGTH(`category`) BETWEEN 1 AND 32)",
+            );
+            return pool.execute(
+              "UPDATE `expense` SET `category` = 'unseeded_category' WHERE `id` = ?",
+              [planningFixture.expenseId],
+            );
+          },
+          name: "expense contains a category outside the exact seed",
+        },
+      ];
+
+      for (const driftCase of driftCases) {
+        await seedJournalPrefix(pool, migrations, 18);
+        await seedPlanningBusinessRows(pool);
+        await driftCase.mutate();
+        const driftedBusinessBefore = await planningBusinessRows(pool);
+        const driftedSchemaBefore = await planningMigrationState(pool);
+
+        await expect(
+          executeIncremental(pool, sql),
+          driftCase.name,
+        ).resolves.toEqual({ errors: 1, results: [] });
+        expect(
+          await planningBusinessRows(pool),
+          driftCase.name,
+        ).toEqual(driftedBusinessBefore);
+        expect(
+          await planningMigrationState(pool),
+          driftCase.name,
+        ).toEqual(driftedSchemaBefore);
+      }
+    }, 240_000);
   },
 );

@@ -24,6 +24,7 @@ export default async function CustomersPage() {
             can("visits.read"),
           canReadBilling: can("contracts.billing.read"),
           canReadProjects: can("projects.read"),
+          canReadReceivables: can("finance.receivables.read"),
           canReadVisits: can("visits.read"),
           canReadAudit: can("audit.read"),
           canLifecycleContracts: can("contracts.lifecycle"),

@@ -264,6 +264,17 @@ function canonicalDate(value: string | Date): string {
   return value.slice(0, 10);
 }
 
+function requireBusinessDate(value: string | undefined): string {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/u.test(value)) {
+    throw new Error("Customer projection business date is invalid.");
+  }
+  const date = new Date(`${value}T00:00:00.000Z`);
+  if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== value) {
+    throw new Error("Customer projection business date is invalid.");
+  }
+  return value;
+}
+
 const CUSTOMER_IDENTITY_COLUMNS = `
   c.id, c.display_name, c.short_code, c.status AS customer_status,
   c.archive_reason, c.archived_at_utc, c.archived_by_user_account_id,
@@ -282,11 +293,16 @@ const CUSTOMER_PROJECT_COLUMNS = `
 export async function listCustomerRecords(
   connection: PoolConnection,
   options: Readonly<{
+    businessDate?: string;
     includeBilling?: boolean;
     includeContact?: boolean;
     includeVisits?: boolean;
   }> = {},
 ): Promise<readonly Customer[]> {
+  const businessDate =
+    options.includeBilling || options.includeVisits
+      ? requireBusinessDate(options.businessDate)
+      : null;
   const contactColumns = options.includeContact
     ? CUSTOMER_CONTACT_COLUMNS
     : REDACTED_CUSTOMER_CONTACT_COLUMNS;
@@ -305,10 +321,10 @@ export async function listCustomerRecords(
                 GROUP_CONCAT(DISTINCT payment_day ORDER BY payment_day SEPARATOR ',') AS payment_days,
                 CASE WHEN COUNT(DISTINCT vat_mode) = 1
                      THEN MIN(vat_mode) ELSE 'mixed' END AS vat_mode
-           FROM consulting_contract
+          FROM consulting_contract
           WHERE status = 'active'
-            AND starts_on <= CURRENT_DATE()
-            AND ends_on >= CURRENT_DATE()
+            AND starts_on <= ?
+            AND ends_on >= ?
           GROUP BY customer_id
        ) billing ON billing.customer_id = c.id`
     : "";
@@ -322,12 +338,11 @@ export async function listCustomerRecords(
            JOIN consulting_contract contract ON contract.id = visit.contract_id
           WHERE contract.status = 'active'
             AND visit.resolution_status IN ('planned', 'makeup_pending')
-            AND visit.committed_on >= CURRENT_DATE()
+            AND visit.committed_on >= ?
           GROUP BY contract.customer_id
        ) upcoming ON upcoming.customer_id = c.id`
     : "";
-  const [rows] = await connection.execute<CustomerWithProjectRow[]>(
-    `SELECT ${CUSTOMER_IDENTITY_COLUMNS}, ${contactColumns},
+  const query = `SELECT ${CUSTOMER_IDENTITY_COLUMNS}, ${contactColumns},
             ${CUSTOMER_PROJECT_COLUMNS}, ${visitColumns}, ${billingColumns}
        FROM customer c
        LEFT JOIN customer_project cp
@@ -336,8 +351,16 @@ export async function listCustomerRecords(
        ${visitJoin}
        ${billingJoin}
       ORDER BY c.status = 'active' DESC, c.display_name ASC, c.id ASC,
-               p.display_name ASC, p.id ASC`,
-  );
+               p.display_name ASC, p.id ASC`;
+  const parameters = [
+    ...(options.includeVisits ? [businessDate as string] : []),
+    ...(options.includeBilling
+      ? [businessDate as string, businessDate as string]
+      : []),
+  ];
+  const [rows] = parameters.length > 0
+    ? await connection.execute<CustomerWithProjectRow[]>(query, parameters)
+    : await connection.execute<CustomerWithProjectRow[]>(query);
 
   const result: Array<{
     customer: Customer;

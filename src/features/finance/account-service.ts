@@ -108,6 +108,13 @@ export class FinanceTransactionFutureDateError extends Error {
   }
 }
 
+export class FinanceTransactionBeforeAccountOpeningError extends Error {
+  constructor() {
+    super("A finance transaction cannot predate an affected account.");
+    this.name = "FinanceTransactionBeforeAccountOpeningError";
+  }
+}
+
 export type FinanceAccountWriteContext = Readonly<{
   actorId?: string;
   correlationId: string;
@@ -121,6 +128,7 @@ export type FinanceAccountView = Readonly<{
   currency: "TRY";
   displayName: string;
   id: string;
+  openedOn: string;
   openingBalanceAmount: string;
   status: "active" | "inactive";
   version: number;
@@ -156,6 +164,16 @@ function fixedMoney(value: string): string {
   return new Decimal(value).toDecimalPlaces(4, Decimal.ROUND_HALF_UP).toFixed(4);
 }
 
+function accountOpenedOn(createdAtUtc: string): string {
+  const instant = new Date(
+    `${createdAtUtc.slice(0, 23).replace(" ", "T")}Z`,
+  );
+  if (Number.isNaN(instant.getTime())) {
+    throw new Error("Finance account creation timestamp is invalid.");
+  }
+  return istanbulDate(instant);
+}
+
 function accountView(account: FinanceAccountBalanceRecord): FinanceAccountView {
   return {
     accountType: account.accountType,
@@ -164,6 +182,7 @@ function accountView(account: FinanceAccountBalanceRecord): FinanceAccountView {
     currency: "TRY",
     displayName: account.displayName,
     id: account.id,
+    openedOn: accountOpenedOn(account.createdAtUtc),
     openingBalanceAmount: fixedMoney(account.openingBalanceAmount),
     status: account.status,
     version: account.version,
@@ -257,6 +276,19 @@ function accountIds(transaction: FinanceTransactionRecord): string[] {
   return [transaction.sourceAccountId, transaction.targetAccountId].filter(
     (id): id is string => id !== null,
   );
+}
+
+function assertTransactionOnOrAfterAccountOpening(
+  transaction: FinanceTransactionRecord,
+  accounts: readonly FinanceAccountRecord[],
+): void {
+  if (
+    accounts.some(
+      (account) => transaction.occurredOn < accountOpenedOn(account.createdAtUtc),
+    )
+  ) {
+    throw new FinanceTransactionBeforeAccountOpeningError();
+  }
 }
 
 function ledgerEntries(transaction: FinanceTransactionRecord, now: string) {
@@ -522,6 +554,7 @@ export async function createFinanceTransaction(
       reversalReason: null,
     };
     const accounts = await transactionAccounts(connection, pending, true);
+    assertTransactionOnOrAfterAccountOpening(pending, accounts);
     const persisted = await insertFinanceTransactionRecordIdempotently(
       connection,
       pending,

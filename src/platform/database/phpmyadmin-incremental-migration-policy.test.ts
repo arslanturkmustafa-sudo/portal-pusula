@@ -62,6 +62,8 @@ const recordLifecycleMigrationTag = "0014_record_lifecycle";
 const financialReversalsMigrationTag = "0015_financial_reversals";
 const financeAccountsLedgerMigrationTag = "0016_finance_accounts_ledger";
 const workTaskVisitMigrationTag = "0017_work_task_visit";
+const planningExpenseCategoriesMigrationTag =
+  "0018_planning_expense_categories";
 const incremental0011Backfills = untyped0011Backfills as {
   consultingContract: string;
   customerProject: string;
@@ -458,6 +460,17 @@ describe.sequential("phpMyAdmin incremental migration bundle policy", () => {
       },
       statementCount: 4,
     },
+    {
+      expectedJournalCount: 18,
+      expectedPreviousTag: workTaskVisitMigrationTag,
+      migrationTag: planningExpenseCategoriesMigrationTag,
+      requiredTarget: {
+        name: "seed_expense_category",
+        tableName: "expense_category",
+        type: "data-seed",
+      },
+      statementCount: 9,
+    },
   ])(
     "builds deterministic guarded $migrationTag artifact",
     async ({
@@ -505,6 +518,126 @@ describe.sequential("phpMyAdmin incremental migration bundle policy", () => {
       }
     },
   );
+
+  it("guards the exact 0018 category catalog, seed, and expense ownership", async () => {
+    const first = await buildCurrentIncremental(
+      planningExpenseCategoriesMigrationTag,
+      await temporaryOutputDirectory(),
+    );
+    const statements = candidateStatements(first.sql);
+    const createCategory = statements.find((statement) =>
+      statement.startsWith("CREATE TABLE `expense_category`"),
+    );
+    const categorySeed = statements.find((statement) =>
+      statement.startsWith("INSERT INTO `expense_category`"),
+    );
+    const initialGuard = first.sql.slice(
+      0,
+      first.sql.indexOf("SET @pp_candidate_sql = 0x"),
+    );
+
+    expect(first.manifest.migration).toMatchObject({
+      createdAt: 1788799557949,
+      hash: "48286e594051f082b85891e043f9578dfa2105fb50aef98b878e8d476cdbba6f",
+      tag: planningExpenseCategoriesMigrationTag,
+    });
+    expect(first.manifest.targetObjects).toEqual(
+      expect.arrayContaining([
+        {
+          name: "expense_category",
+          tableName: "expense_category",
+          type: "create-table",
+        },
+        {
+          name: "seed_expense_category",
+          tableName: "expense_category",
+          type: "data-seed",
+        },
+        {
+          name: "fk_expense_category",
+          tableName: "expense",
+          type: "foreign-key",
+        },
+      ]),
+    );
+    expect(createCategory).toContain(
+      "CONSTRAINT `uq_expense_category_display_name` UNIQUE(`display_name`)",
+    );
+    expect(statements).toContain(
+      "ALTER TABLE `monthly_visit_commitment` ADD `location_label` varchar(191) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci",
+    );
+    expect(categorySeed?.match(/'81000000-/gu)).toHaveLength(9);
+    expect(initialGuard).toContain("TABLE_NAME = 'expense_category'");
+    expect(initialGuard).not.toContain("FROM `expense_category`");
+    expect(initialGuard).toContain(
+      "TABLE_NAME = 'monthly_visit_commitment' AND TABLE_TYPE = 'BASE TABLE' AND ENGINE = 'InnoDB' AND TABLE_COLLATION = 'utf8mb4_unicode_ci') = 1",
+    );
+    expect(initialGuard).toContain(
+      "TABLE_NAME = 'monthly_visit_commitment' AND COLUMN_NAME = 'location_label') = 0",
+    );
+    expect(initialGuard).toContain(
+      "TABLE_NAME = 'expense' AND COLUMN_NAME = 'category' AND DATA_TYPE = 'varchar' AND COLUMN_TYPE = 'varchar(32)' AND CHARACTER_MAXIMUM_LENGTH = 32 AND CHARACTER_SET_NAME = 'ascii' AND COLLATION_NAME = 'ascii_bin' AND IS_NULLABLE = 'NO' AND (COLUMN_DEFAULT IS NULL OR BINARY COLUMN_DEFAULT = BINARY 'NULL') AND EXTRA = '') = 1",
+    );
+    expect(initialGuard).toContain(
+      "FROM `expense` WHERE BINARY `category` NOT IN (BINARY 'rent'",
+    );
+    expect(initialGuard).toContain(
+      "information_schema.CHECK_CONSTRAINTS cc",
+    );
+    expect(initialGuard).toContain(
+      "BINARY cc.CHECK_CLAUSE = BINARY 'cast(`category` as char charset binary) in (cast(''rent'' as char charset binary)",
+    );
+    expect(initialGuard).toContain(
+      "BINARY cc.CHECK_CLAUSE = BINARY '`resolution_note` is null or char_length(`resolution_note`) between 1 and 2000'",
+    );
+    expect(first.sql).toContain(
+      "TABLE_NAME = 'expense_category' AND COLUMN_NAME = 'code' AND DATA_TYPE = 'varchar' AND COLUMN_TYPE = 'varchar(32)' AND CHARACTER_MAXIMUM_LENGTH = 32 AND CHARACTER_SET_NAME = 'ascii' AND COLLATION_NAME = 'ascii_bin' AND IS_NULLABLE = 'NO'",
+    );
+    expect(first.sql).toContain(
+      "TABLE_NAME = 'expense_category' AND CONSTRAINT_NAME = 'uq_expense_category_code' AND CONSTRAINT_TYPE = 'UNIQUE') = 1",
+    );
+    expect(first.sql).toContain(
+      "TABLE_NAME = 'monthly_visit_commitment' AND COLUMN_NAME = 'location_label' AND DATA_TYPE = 'varchar' AND IS_NULLABLE = 'YES' AND EXTRA = '' AND CHARACTER_MAXIMUM_LENGTH = 191 AND COLUMN_TYPE = 'varchar(191)' AND CHARACTER_SET_NAME = 'utf8mb4' AND COLLATION_NAME = 'utf8mb4_unicode_ci'",
+    );
+    expect(first.sql).toContain(
+      "BINARY cc.CHECK_CLAUSE = BINARY 'char_length(`category`) between 1 and 32 and cast(`category` as char charset binary) regexp ''^[a-z][a-z0-9_]{0,31}$'''",
+    );
+    expect(first.sql).toContain(
+      "BINARY cc.CHECK_CLAUSE = BINARY '(`location_label` is null or char_length(`location_label`) between 1 and 191 and `location_label` = trim(`location_label`)) and (`resolution_note` is null or char_length(`resolution_note`) between 1 and 2000)'",
+    );
+    expect(first.sql).not.toContain("INSERT INTO `expense_category`");
+  });
+
+  it("accepts only the explicit utf8mb4 visit-location definition for 0018", () => {
+    const exact =
+      "ALTER TABLE `monthly_visit_commitment` ADD `location_label` varchar(191) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci";
+
+    expect(
+      analyzeIncrementalMigrationStatement(
+        exact,
+        planningExpenseCategoriesMigrationTag,
+      ),
+    ).toMatchObject({
+      columnName: "location_label",
+      columnSpec: {
+        characterSet: "utf8mb4",
+        collation: "utf8mb4_unicode_ci",
+        columnType: "varchar(191)",
+        nullable: true,
+      },
+      tableName: "monthly_visit_commitment",
+      type: "add-column",
+    });
+    expect(() =>
+      analyzeIncrementalMigrationStatement(
+        exact.replace(
+          " CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci",
+          "",
+        ),
+        planningExpenseCategoriesMigrationTag,
+      ),
+    ).toThrow();
+  });
 
   it("guards both 0017 parent identifiers and primary keys before any DDL", async () => {
     const first = await buildCurrentIncremental(

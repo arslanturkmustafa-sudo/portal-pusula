@@ -2,7 +2,7 @@
 
 ## Durum ve kapsam
 
-Portal Pusula, Hostinger Business Node.js Web App üzerinde çalışmak üzere tasarlanan Next.js App Router tabanlı bir modüler monolittir. Bu belge güncel yerel kaynak mimarisini tarif eder; güncel ZIP'in Hostinger'a dağıtıldığı, `0011`/`0012`/`0013` migration'larının canlı DB'ye uygulandığı veya cron'un canlı etkinleştirildiği anlamına gelmez.
+Portal Pusula, Hostinger Business Node.js Web App üzerinde çalışmak üzere tasarlanan Next.js App Router tabanlı bir modüler monolittir. Bu belge güncel yerel kaynak mimarisini tarif eder; güncel ZIP'in Hostinger'a dağıtıldığı, `0018_planning_expense_categories` migration'ının canlı DB'ye uygulandığı veya cron'un canlı etkinleştirildiği anlamına gelmez.
 
 Mevcut kapsam şunlarla sınırlıdır:
 
@@ -13,7 +13,8 @@ Mevcut kapsam şunlarla sınırlıdır:
 - deterministik production ZIP ve secretsız kaynak checkpoint'i.
 - müşteri/sözleşme/ziyaret, proje, görev, finans ve günlük plan domain modülleri;
 - DB tabanlı owner/member hesapları, dayanıklı account/global giriş sınırlaması, modül izinleri ve alan bazlı finansal veri redaksiyonu;
-- firma görev raporu/yazdırma görünümü ve aylık nakit akışı raporu.
+- firma görev raporu/yazdırma görünümü, haftalık/aylık nakit akışı raporu ve kart bazlı borç özeti;
+- müşteri/konum filtreli günlük–haftalık–aylık plan, müşteriyle paylaşım için güvenli dışa aktarım ve yönetilebilir gider kategorileri.
 
 Organization/workspace çoklu-tenant izolasyonu, production job registry ve dış sistem adapter registry'si henüz yoktur.
 
@@ -27,7 +28,7 @@ Araç zinciri [ADR-0003](./adr/0003-node24-npm12-hostinger-webpack.md) ile bağl
 - `next build --webpack` ve Hostinger tarafından yönetilen `next start`/port;
 - kökünde `package.json` olan deterministik ZIP, çıktı dizini `.next`.
 
-Node 24.x ve webpack yolu önceki canlı spike'ta kanıtlandı. Güncel Komut 3C ZIP deploy'u ile canlı migration `UNKNOWN`; secret-safe gerçek rollback ise `BLOCKED` durumundadır.
+Node 24.x ve webpack yolu önceki canlı spike'ta kanıtlandı. Bu yerel özellik paketinin güncel ZIP deploy'u ve `0018` canlı migration sonucu `UNKNOWN`; secret-safe gerçek rollback ise `BLOCKED` durumundadır.
 
 ## Modüller ve bağımlılık yönü
 
@@ -52,16 +53,17 @@ Bağımlılık akışı giriş adaptöründen platform uygulama servisine, orada
 | `GET /api/internal/readiness` | Exact Bearer; yetkisiz generic 404, DB hazır 200, altyapı sorunu generic 503 | Önceki canlı spike'ta gerçek `SELECT 1` PASS |
 | `POST /api/internal/cron/dispatch` | Exact Bearer; kapalı/yetkisiz generic 404; güvenli kabul veya suppression generic 202; altyapı arızası generic 503 | Yalnız yerel aday, varsayılan kapalı; canlı cron UNKNOWN |
 | `GET /sw.js` | Node Route Handler, JS MIME, `private, no-store`, scope `/` | Önceki canlı spike'ta PASS |
-| `POST /api/auth/login` | Production DB auth; account 5/15 dk + global 100/15 dk dayanıklı limiter; invalid/block/altyapı hatası generic `303` + no-store | Yerel unit/MariaDB kapısı; canlı `0013` ve smoke UNKNOWN |
+| `POST /api/auth/login` | Production DB auth; account 5/15 dk + global 100/15 dk dayanıklı limiter; invalid/block/altyapı hatası generic `303` + no-store | Yerel unit/MariaDB kapısı; güncel build canlı smoke'u UNKNOWN |
 | İş API'leri | DB oturumu + allowlist permission; write isteklerinde same-origin, media type, bounded body | Yerel unit/integration adayında mevcut; canlı güncel build UNKNOWN |
 | `GET /api/reports/tasks` | Firma bazlı, 1.000 kayıt sınırı, `tasks.reports.export`, finans alanı yok | Yerel PASS |
-| `GET /api/finance/cash-flow` | `finance.reports.read`, aggregate hareketler, açılış/kapanış bakiyesi yok | Yerel PASS |
+| `GET /api/finance/cash-flow` | `finance.reports.read`, haftalık/aylık aggregate hareketler, açılış/kapanış bakiyesi ve gerçekleşen/tahmin ayrımı | Yerel PASS |
+| `GET /api/daily-plan/export` | DB oturumu ve `daily-plan.read`; seçilen müşterinin yalnız planlı/telafi ziyaretleri; görev/iç saat/süre yok | Yerel PASS adayı |
 
 Machine-to-machine response davranışı [ADR-0002](./adr/0002-internal-endpoint-response-policy.md) ile bağlıdır. Bu politika gelecekteki kullanıcı auth/UI semantiği değildir.
 
 ## Veri ve iş yürütme modeli
 
-Migration'lar teknik platform nesnelerine ek olarak müşteri, sözleşme/ziyaret, alacak/tahsilat, hesap/izin, digest anahtarlı login throttle, görev, proje, gider/kart ve ortaklık tablolarını oluşturur. Para alanları `DECIMAL(19,4)` ve uygulamada string/Decimal ile taşınır; JavaScript `number` finans hesabında kullanılmaz. Operasyon zamanları UTC, kimlik ve idempotency alanları binary-exact/canonical sözleşmelidir.
+Migration'lar teknik platform nesnelerine ek olarak müşteri, sözleşme/ziyaret ve ziyaret konumu, alacak/tahsilat, hesap/izin, digest anahtarlı login throttle, görev, proje, gider/kart, yönetilebilir gider kategorisi ve ortaklık tablolarını oluşturur. Güncel clean zincir 19 migration, 19 journal kaydı, 29 uygulama tablosu ve journal ile toplam 30 fiziksel tablodur. Para alanları `DECIMAL(19,4)` ve uygulamada string/Decimal ile taşınır; JavaScript `number` finans hesabında kullanılmaz. Operasyon zamanları UTC, kimlik ve idempotency alanları binary-exact/canonical sözleşmelidir.
 
 Job yürütme kısa ve tekrar çalıştırılabilir batch'lere ayrılır:
 
@@ -87,7 +89,7 @@ Sabit process belleği, `setInterval`, `node-cron`, Redis veya sürekli worker v
 | Alan | Yerel | Canlı Hostinger |
 | --- | --- | --- |
 | Node 24.x, webpack build, ZIP deploy, liveness/readiness/PWA | Güncel kapılar çalıştırılır | Önceki spike PASS |
-| Güncel migration ve platform job/outbox/audit | Disposable MariaDB PASS | UNKNOWN — uygulanmadı |
+| Güncel `0000`–`0018` migration zinciri ve platform job/outbox/audit | Disposable MariaDB kapısı | UNKNOWN — `0018` canlı kanıtı yok |
 | Cron exact method/header, suppression, overlap ve frekans | Unit/non-DB ve disposable MariaDB PASS | UNKNOWN — cron oluşturulmadı |
 | Güncel production ZIP deploy | Deterministik üretim kapısı | UNKNOWN — dağıtılmadı |
 | Plan-geneli backup kapsamı | Runbook + panel özel yedek kaydı | PANEL PASS |
@@ -95,8 +97,8 @@ Sabit process belleği, `setInterval`, `node-cron`, Redis veya sürekli worker v
 | Yerel şifreli recovery kopyası ve ciphertext checksum | AES-256-GCM/ayrı DPAPI anahtarı | PASS — aynı Windows makinesi/kullanıcı sınırıyla |
 | Komut 3C şema/journal/veri restore'u | Runbook mevcut | UNKNOWN |
 | Güvenli application rollback | Tasarım sınırı mevcut | BLOCKED |
-| Owner/member auth, RBAC ve alan redaksiyonu | Unit/integration PASS adayı | UNKNOWN — `0012` uygulanmadı |
-| Kalıcı login brute-force sınırlaması | DB tabanlı account/global limiter ve `0013` migration kaynakta mevcut | UNKNOWN — `0013` uygulanmadı, canlı 303/no-store/fail-closed smoke yok |
+| Owner/member auth, RBAC ve alan redaksiyonu | Unit/integration PASS adayı | Canlı güncel build smoke'u UNKNOWN |
+| Kalıcı login brute-force sınırlaması | DB tabanlı account/global limiter ve `0013` migration kaynakta mevcut | Canlı 303/no-store/fail-closed smoke'u UNKNOWN |
 | Organization/workspace izolasyonu | Yok | Yok |
 
 Güncel yerel kapıların geçmesi canlı deploy veya Dilim 0 GO anlamına gelmez.

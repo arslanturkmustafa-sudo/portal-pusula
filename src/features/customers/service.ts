@@ -23,6 +23,7 @@ import {
   updateCustomerProjectLinkStatus,
   updateCustomerRecord,
 } from "@/features/customers/repository";
+import { istanbulDate } from "@/features/finance/period";
 import { LifecycleArchivedRecordError } from "@/features/lifecycle";
 import {
   findProjectForUpdate,
@@ -235,9 +236,13 @@ export async function listCustomers(
     includeContact?: boolean;
     includeVisits?: boolean;
   }> = {},
+  now: Date = new Date(),
 ): Promise<readonly Customer[]> {
   return withUtcTransaction(pool, (connection) =>
-    listCustomerRecords(connection, options),
+    listCustomerRecords(connection, {
+      ...options,
+      businessDate: istanbulDate(now),
+    }),
   );
 }
 

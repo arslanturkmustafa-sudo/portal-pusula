@@ -6,6 +6,7 @@ const MONTH_PATTERN = /^\d{4}-\d{2}$/u;
 const MONEY_PATTERN = /^(?:0|[1-9]\d{0,14})(?:\.\d{1,4})?$/u;
 const CANONICAL_UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+const EXPENSE_CATEGORY_PATTERN = /^[a-z][a-z0-9_]{0,31}$/u;
 const MAX_MONEY = new Decimal("999999999999999.9999");
 
 function emptyToNull(value: unknown): unknown {
@@ -70,17 +71,10 @@ const nullablePositiveMoneySchema = z.preprocess(
 
 export const creditCardStatusSchema = z.enum(["active", "inactive"]);
 export const expenseStatusSchema = z.enum(["active", "voided"]);
-export const expenseCategorySchema = z.enum([
-  "rent",
-  "software_subscription",
-  "transportation",
-  "meals_hospitality",
-  "marketing",
-  "office",
-  "external_service",
-  "tax_fee",
-  "other",
-]);
+export const expenseCategorySchema = z
+  .string()
+  .trim()
+  .regex(EXPENSE_CATEGORY_PATTERN, "Geçerli bir gider kategorisi seçin.");
 export const expenseDocumentTypeSchema = z.enum([
   "none",
   "invoice",
@@ -237,6 +231,7 @@ export const installmentListFilterSchema = z
   .object({
     cardId: canonicalUuidSchema.optional(),
     month: z.string().refine(isRealMonth).optional(),
+    status: z.literal("open").optional(),
   })
   .strict();
 
@@ -264,6 +259,35 @@ export const updateCardInstallmentInputSchema = z
     }
   });
 
+export const bulkPayCardInstallmentsInputSchema = z
+  .object({
+    cardId: canonicalUuidSchema,
+    installments: z
+      .array(
+        z
+          .object({
+            id: canonicalUuidSchema,
+            version: z.number().int().min(1).max(4_294_967_294),
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(250),
+    month: z.string().refine(isRealMonth, "Geçerli bir dönem seçin."),
+    paidOn: isoDateSchema,
+  })
+  .strict()
+  .superRefine((value, context) => {
+    const ids = new Set(value.installments.map((installment) => installment.id));
+    if (ids.size !== value.installments.length) {
+      context.addIssue({
+        code: "custom",
+        message: "Aynı taksit birden fazla kez seçilemez.",
+        path: ["installments"],
+      });
+    }
+  });
+
 export type CreateCreditCardInput = z.infer<
   typeof createCreditCardInputSchema
 >;
@@ -278,4 +302,7 @@ export type InstallmentListFilter = z.infer<
 >;
 export type UpdateCardInstallmentInput = z.infer<
   typeof updateCardInstallmentInputSchema
+>;
+export type BulkPayCardInstallmentsInput = z.infer<
+  typeof bulkPayCardInstallmentsInputSchema
 >;

@@ -25,6 +25,7 @@ type AccountDto = Readonly<{
   currency: "TRY";
   displayName: string;
   id: string;
+  openedOn: string;
   openingBalanceAmount: string;
   status: AccountStatus;
   version: number;
@@ -223,6 +224,18 @@ export function FinanceAccountsWorkspace({
     () => accounts.filter((account) => account.status === "active"),
     [accounts],
   );
+  const movementMinimumOn = useMemo(() => {
+    const relevantIds =
+      movementDraft.transactionType === "income"
+        ? [movementDraft.targetAccountId]
+        : movementDraft.transactionType === "expense"
+          ? [movementDraft.sourceAccountId]
+          : [movementDraft.sourceAccountId, movementDraft.targetAccountId];
+    return relevantIds.reduce((latest, id) => {
+      const openedOn = activeAccounts.find((account) => account.id === id)?.openedOn;
+      return openedOn !== undefined && openedOn > latest ? openedOn : latest;
+    }, "1000-01-01");
+  }, [activeAccounts, movementDraft]);
   const summary = overview?.summary ?? EMPTY_SUMMARY;
   const distributionTotal = useMemo(
     () =>
@@ -381,6 +394,12 @@ export function FinanceAccountsWorkspace({
       setFormError("Hareket türü, hesaplar, açıklama ve tutar alanlarını kontrol edin.");
       return;
     }
+    if (draft.occurredOn < movementMinimumOn) {
+      setFormError(
+        `Seçili hesaplar için hareket tarihi ${formatDate(movementMinimumOn)} veya sonrası olmalıdır.`,
+      );
+      return;
+    }
     const base = {
       amount: canonicalMoney(draft.amount),
       description: draft.description.trim(),
@@ -410,6 +429,8 @@ export function FinanceAccountsWorkspace({
       if (!response.ok || payload.transaction === undefined) {
         const message = {
           account_inactive: "Pasif hesaba yeni hareket kaydedilemez.",
+          before_account_opening:
+            "Hareket tarihi seçili hesapların açılış tarihinden önce olamaz.",
           future_date: "İleri tarihli hareket kaydedilemez.",
           validation_error: "Hareket bilgilerini ve tutarı kontrol edin.",
         }[payload.status ?? ""];
@@ -688,8 +709,14 @@ export function FinanceAccountsWorkspace({
             <label>
               <span>Tarih</span>
               <input
+                aria-label="Tarih"
+                aria-describedby={
+                  movementMinimumOn === "1000-01-01"
+                    ? undefined
+                    : "finance-movement-minimum-date"
+                }
                 max={istanbulToday()}
-                min="1000-01-01"
+                min={movementMinimumOn}
                 required
                 type="date"
                 value={movementDraft.occurredOn}
@@ -697,6 +724,11 @@ export function FinanceAccountsWorkspace({
                   setMovementDraft((current) => ({ ...current, occurredOn: event.target.value }))
                 }
               />
+              {movementMinimumOn === "1000-01-01" ? null : (
+                <small id="finance-movement-minimum-date">
+                  Seçili hesaplar için en erken {formatDate(movementMinimumOn)}
+                </small>
+              )}
             </label>
             <label>
               <span>Tutar (₺)</span>

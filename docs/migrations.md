@@ -1,6 +1,6 @@
 # Migration runbook'u — operasyon, proje ve finans şeması
 
-Bu runbook Portal Pusula'nın migration mekanizmasını, platform temelini ve operasyon domain tablolarını kapsar. Sürümlü sıra iki immutable migration ve bunları değiştirmeden eklenen on altı ileri yönlü migration'dan oluşur:
+Bu runbook Portal Pusula'nın migration mekanizmasını, platform temelini ve operasyon domain tablolarını kapsar. Sürümlü sıra iki immutable migration ve bunları değiştirmeden eklenen on yedi ileri yönlü migration'dan oluşur:
 
 - `0000_platform_migration_verification.sql`: yalnız sentetik `DECIMAL(19,4)`, UTC, transaction ve DB-level idempotency doğrulamasına ayrılmış `_platform_migration_verification` tablosu;
 - `0001_platform_job_outbox_audit.sql`: yalnız `scheduled_job`, `job_run`, `outbox_event` ve `audit_event` platform tabloları;
@@ -20,12 +20,13 @@ Bu runbook Portal Pusula'nın migration mekanizmasını, platform temelini ve op
 - `0015_financial_reversals.sql`: alacak için gerekçeli `active`/`voided` lifecycle ve optimistic version alanlarını; alacak tahsilatı ile ortaklık katkı tahsilatında özgün kaydı silmeyen, aynı tutarlı ve tekil self-reference kullanan forward-only ters kayıt sözleşmesini ekler.
 - `0016_finance_accounts_ledger.sql`: kasa/banka hesaplarını, gelir-gider-transfer işlem başlıklarını ve çift taraflı ledger satırlarını ekler; `finance.accounts.read`/`finance.accounts.write` ile izin allowlist'ini exact 37 koda çıkarır.
 - `0017_work_task_visit.sql`: ziyaret tamamlanırken kaydedilen iş maddelerini tamamlanmış görevlere bağlayan, görev başına tek ziyaret ve ziyaret başına çok görev biçimindeki `work_task_visit` ilişki tablosunu ekler.
+- `0018_planning_expense_categories.sql`: ziyaret taahhüdüne isteğe bağlı konum tanımı ekler; dokuz eski kategori kodunu koruyan `expense_category` referans tablosunu seed eder ve gider kategorisini `RESTRICT` FK ile bu tabloya bağlar.
 
-Bu şema müşteri, sözleşme, ziyaret, alacak/tahsilat, hesap/izin, kalıcı giriş sınırlaması, görev, proje portföyü, gider, kredi kartı ödeme planı, ortaklık finansı ve kasa/banka ledger'ını içerir; organization/workspace çoklu-tenant izolasyonu ve resmi vergi beyanı içermez. İlk owner hesabı güvenli geçişte mevcut environment kimliğinden oluşturulur; sonraki hesap, giriş ve parola işlemleri `user_account`/`user_permission` üzerinden yürür. Immutable `0000`/`0001` dosyaları değiştirilmemiştir; `0002`–`0017` ayrı ileri yönlü migration'lardır. Clean zincir 18 migration, migration başına bir olmak üzere 18 journal kaydı ve journal dışında 28 uygulama tablosudur; journal ile toplam fiziksel tablo sayısı 29'dur.
+Bu şema müşteri, sözleşme, ziyaret, alacak/tahsilat, hesap/izin, kalıcı giriş sınırlaması, görev, proje portföyü, gider ve yönetilebilir gider kategorileri, kredi kartı ödeme planı, ortaklık finansı ve kasa/banka ledger'ını içerir; organization/workspace çoklu-tenant izolasyonu ve resmi vergi beyanı içermez. İlk owner hesabı güvenli geçişte mevcut environment kimliğinden oluşturulur; sonraki hesap, giriş ve parola işlemleri `user_account`/`user_permission` üzerinden yürür. Immutable `0000`/`0001` dosyaları değiştirilmemiştir; `0002`–`0018` ayrı ileri yönlü migration'lardır. Clean zincir 19 migration, migration başına bir olmak üzere 19 journal kaydı ve journal dışında 29 uygulama tablosudur; journal ile toplam fiziksel tablo sayısı 30'dur.
 
-Canlı Hostinger veritabanında migration yalnız kullanıcı onaylı DB-first değişiklik penceresinde ve uygulama yazmaları dondurularak uygulanır. Güncel pencerenin ön kabulü canlı journal'ın exact 16 kayıtla `0015_financial_reversals` seviyesinde olmasıdır; sıradaki şema geçişi araya uygulama deploy edilmeden `0016_finance_accounts_ledger` → `0017_work_task_visit` olmalıdır. Daha eski hedefler aşağıdaki tarihsel runbook zinciriyle önce exact `0015`e getirilir. Gerçek veritabanı parolası veya başka bir sır CLI argümanına, komut geçmişine, loga, test çıktısına ya da sürümlü dosyaya yazılmaz.
+Canlı Hostinger veritabanında migration yalnız kullanıcı onaylı DB-first değişiklik penceresinde ve uygulama yazmaları dondurularak uygulanır. Güncel pencerenin ön kabulü canlı journal'ın exact 18 kayıtla `0017_work_task_visit` seviyesinde olmasıdır; sıradaki şema geçişi uygulama deploy edilmeden yalnız `0018_planning_expense_categories` olmalıdır. Daha eski hedefler aşağıdaki tarihsel runbook zinciriyle önce exact `0017`ye getirilir. Gerçek veritabanı parolası veya başka bir sır CLI argümanına, komut geçmişine, loga, test çıktısına ya da sürümlü dosyaya yazılmaz.
 
-SSH/npm erişimi olmayan Hostinger hedefindeki yalnız boş ve disposable staging kurulumu için ayrı [phpMyAdmin clean-only migration runbook'u](./phpmyadmin-clean-migration.md) kullanılır. Bu paket mevcut şemayı yükseltmez. Journal'ı bulunan mevcut hedefte `0011`, `0012` ve `0013` için sırasıyla [0011 incremental runbook'u](./phpmyadmin-incremental-migration.md), [0012 kullanıcı-yetki incremental runbook'u](./phpmyadmin-user-permissions-incremental.md) ve [0013 giriş sınırlama incremental runbook'u](./phpmyadmin-login-throttle-incremental.md) kullanılır. `0014` ve `0015` için tarihsel hedefe bağlı paket sözleşmesi [kendi runbook'unda](./phpmyadmin-lifecycle-reversals-incremental.md), `0016` ve `0017` için güncel iki paketli geçiş [finans/takvim incremental runbook'unda](./phpmyadmin-finance-calendar-incremental.md) tanımlıdır. Canlı DB/server digest'lerine bağlı exact artefakt üretilip onaylanmadan kaynak SQL canlıya doğrudan uygulanmaz ve başarı iddia edilmez.
+SSH/npm erişimi olmayan Hostinger hedefindeki yalnız boş ve disposable staging kurulumu için ayrı [phpMyAdmin clean-only migration runbook'u](./phpmyadmin-clean-migration.md) kullanılır. Bu paket mevcut şemayı yükseltmez. Journal'ı bulunan mevcut hedefte `0011`, `0012` ve `0013` için sırasıyla [0011 incremental runbook'u](./phpmyadmin-incremental-migration.md), [0012 kullanıcı-yetki incremental runbook'u](./phpmyadmin-user-permissions-incremental.md) ve [0013 giriş sınırlama incremental runbook'u](./phpmyadmin-login-throttle-incremental.md) kullanılır. `0014` ve `0015` için tarihsel hedefe bağlı paket sözleşmesi [kendi runbook'unda](./phpmyadmin-lifecycle-reversals-incremental.md), `0016` ve `0017` için korunmuş iki paketli geçiş [finans/takvim incremental runbook'unda](./phpmyadmin-finance-calendar-incremental.md), güncel `0018` geçişi ise [planlama/gider kategorileri incremental runbook'unda](./phpmyadmin-planning-expense-categories-incremental.md) tanımlıdır. Canlı DB/server digest'lerine bağlı exact artefakt üretilip onaylanmadan kaynak SQL canlıya doğrudan uygulanmaz ve başarı iddia edilmez.
 
 ## Ortak MariaDB session sözleşmesi
 
@@ -54,7 +55,7 @@ Test hedefleri iki ayrı kanıt sınıfıdır:
 
 **Migration correctness**
 
-- boş veritabanında `0000` → `0017` sırasıyla 18 migration ile clean migrate, 18 satırlı eksiksiz journal ve journal dışında 28 uygulama tablosu;
+- boş veritabanında `0000` → `0018` sırasıyla 19 migration ile clean migrate, 19 satırlı eksiksiz journal ve journal dışında 29 uygulama tablosu;
 - ikinci runner çalışmasının no-op olması;
 - uyumsuz aynı adlı tablo varken migration'ın ve journal kaydının fail-closed kalması;
 - değiştirilmiş uygulanmış SQL/journal hash'inin şema veya veri değişmeden reddedilmesi;
@@ -135,7 +136,10 @@ Her migration uygulanmadan önce `drizzle/` altındaki yeni SQL sürüm kontrol�
 - `0015` özgün alacak/tahsilat kayıtlarını silmemeli veya tutarı yerinde tersine çevirmemeli; alacak void metadata'sını all-null/all-present biçiminde, tahsilat ters kaydını özgün kayda `RESTRICT` self-FK ve `reversal_of_id` tekilliğiyle, gerekçeyi trimli ve bounded olarak korumalı;
 - `0016` yalnız `finance_account`, `finance_transaction` ve `finance_ledger_entry` tablolarını kurmalı; para alanları `DECIMAL(19,4)`, para birimi exact `TRY`, kimlik/idempotency alanları canonical `ascii_bin`, ilişkiler `RESTRICT` ve gelir/gider/transfer şekli named CHECK'lerle korunmalı; yeni izinler yalnız `finance.accounts.read` ve `finance.accounts.write` olmalı ve final allowlist exact 37 kod olmalı;
 - `0017` yalnız `work_task_visit` tablosunu kurmalı; `task_id` primary key, iki canonical `ascii_bin` kimlik, `work_task` ve `monthly_visit_commitment` için `RESTRICT` FK'ler ile `(visit_id, task_id)` indexi bulunmalı; backfill, seed, trigger veya mevcut satır değişikliği yapmamalı;
-- clean toplamı 193 migration statement, 28 uygulama tablosu ve journal ile 29 fiziksel tablo olmalı; migration sayısı ve journal kaydı exact 18 olmalı.
+- `0018` yalnız `expense_category` referans tablosunu, `monthly_visit_commitment.location_label` kolonunu, ilgili named CHECK/indexleri ve `expense.category` → `expense_category.code` `RESTRICT` FK'sini kurmalı; dokuz tarihsel kategori kodu dışındaki domain verisini değiştirmemeli;
+- `expense_category.id`/`client_operation_key` canonical `ascii_bin` UUID, `code` ise FK tarafıyla uyumlu `ascii_bin` olmalı; görünen ad trimli ve tekil, durum yalnız `active`/`inactive`, version en az 1 ve zaman çizgisi ileri yönlü olmalı;
+- seed exact dokuz mevcut kategori kodunu korumalı; var olan giderlerde eşleşmeyen kategori varsa 0018 DDL başlamadan fail-closed kalmalı; trigger, dinamik SQL, hard-delete veya finansal tutar değişikliği bulunmamalı;
+- clean toplamı 202 migration statement, 29 uygulama tablosu ve journal ile 30 fiziksel tablo olmalı; migration sayısı ve journal kaydı exact 19 olmalı.
 
 Uygulanmış bir SQL dosyası sonradan düzenlenmez; düzeltme yeni ve ileri yönlü bir migration olarak eklenir.
 
@@ -188,7 +192,7 @@ Hedefe bağlı üretim ve doğrulama ayrıntıları [0014/0015 incremental runbo
 
 Zorunlu canlı sıra `0013` → `0014` → `0015`tir; bu sıranın belgelenmesi migration'ların canlıda uygulandığı veya 16 journal kaydının canlıda görüldüğü anlamına gelmez.
 
-## `0016_finance_accounts_ledger` ve `0017_work_task_visit` için güncel DB-first devam kapısı
+## `0016_finance_accounts_ledger` ve `0017_work_task_visit` için korunmuş DB-first devam kapısı
 
 Güncel canlı hedef için başlangıç ön kabulü exact `0015_financial_reversals` seviyesidir. Hedefe bağlı üretim ve doğrulama ayrıntıları [0016/0017 finans/takvim incremental runbook'unda](./phpmyadmin-finance-calendar-incremental.md) tutulur. Kaynak SQL'in, builder'ın veya runbook'un hazır olması canlı hedefin bu seviyede olduğunu ya da migration'ların uygulandığını kanıtlamaz.
 
@@ -199,6 +203,18 @@ Güncel canlı hedef için başlangıç ön kabulü exact `0015_financial_revers
 5. Ancak iki ayrı postflight PASS olduktan sonra aynı final committen üretilmiş uygulama artefaktını dağıt. Finans hesabı/ledger, görev–ziyaret bağı, izin sınırları, audit/redaksiyon, readiness ve mevcut PWA/security davranışı smoke edilmeden yazma dondurmasını kaldırma.
 
 Bir pakette exact başarı satırı yoksa hedefin kısmen değişmiş olabileceği kabul edilir: aynı paket yeniden çalıştırılmaz, journal veya şema elle düzeltilmez ve sonraki migration'a geçilmez. Hedef salt okunur incelenir; gerekiyorsa yeni bir forward-fix migration ve yeni hedefe bağlı paket hazırlanır.
+
+## `0018_planning_expense_categories` için güncel DB-first devam kapısı
+
+Güncel canlı hedefin ön kabulü exact 18 journal kaydıyla `0017_work_task_visit` seviyesidir. Hedefe bağlı üretim, ön kontrol ve postflight ayrıntıları [0018 planlama/gider kategorileri incremental runbook'unda](./phpmyadmin-planning-expense-categories-incremental.md) tutulur.
+
+1. Canlı journal'ın exact 18 kayıtla `0017_work_task_visit` üzerinde bittiğini ve full prefix hash/timestamp zincirinin sürümlü manifestle eşleştiğini salt okunur doğrula. Journal dışında exact 28 uygulama tablosu bulunmalı; `expense_category` tablosu ve `monthly_visit_commitment.location_label` kolonu bulunmamalıdır.
+2. Doğru hedefi, güncel backup'ı, ayrı disposable hedefte başarılı restore provasını, bakım penceresini ve yazma dondurmasını iki bağımsız kanıtla doğrula. Gerçek DB/secret değerlerini belgeye, sohbete, komuta veya genel loga taşıma.
+3. Mevcut tüm `expense.category` değerlerinin dokuz tarihsel kod içinde olduğunu; değiştirilecek iki named CHECK'in beklenen 0017 şekliyle bulunduğunu ve `expense_category` hedef nesnelerinin henüz oluşmadığını salt okunur doğrula. Herhangi bir driftte dur.
+4. Yalnız `0018_planning_expense_categories` için canlı DB/server digest'lerine bağlı exact paket ve manifest üret. Paketi yalnız bir kez uygula; exact başarı satırından sonra 19 journal kaydını, journal dışında 29 uygulama tablosunu, dokuz sistem kategori satırını, gider kategori FK/referans bütünlüğünü, ziyaret konum kolonu/CHECK'ini ve unchanged exact 37 izin kodunu salt okunur doğrula.
+5. Ancak 0018 postflight PASS olduktan sonra aynı final committen üretilmiş uygulama artefaktını dağıt. Müşteri/konum filtreli plan ve güvenli müşteri dışa aktarımı, gider kategorisi oluşturma, kart bazlı borç/ödendi işaretleme, haftalık/aylık nakit akışı, müşteri özeti, izin/redaksiyon, readiness ve PWA/security davranışı smoke edilmeden yazma dondurmasını kaldırma.
+
+Exact başarı satırı yoksa paket yeniden çalıştırılmaz, journal/şema elle düzeltilmez ve uygulama deploy edilmez. Hedef yalnız salt okunur incelenir; gerekiyorsa restore veya yeni immutable forward-fix migration için ayrı onaylı pencere açılır.
 
 ## Geri dönüş sınırları
 

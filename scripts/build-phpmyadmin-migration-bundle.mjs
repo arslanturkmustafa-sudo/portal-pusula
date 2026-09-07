@@ -40,6 +40,25 @@ const RECORD_LIFECYCLE_MIGRATION_TAG = "0014_record_lifecycle";
 const FINANCIAL_REVERSALS_MIGRATION_TAG = "0015_financial_reversals";
 const FINANCE_ACCOUNTS_LEDGER_MIGRATION_TAG =
   "0016_finance_accounts_ledger";
+const PLANNING_EXPENSE_CATEGORIES_MIGRATION_TAG =
+  "0018_planning_expense_categories";
+
+const EXPENSE_CATEGORY_SEED_ROWS = Object.freeze([
+  ["81000000-0000-4000-8000-000000000001", "rent", "82000000-0000-4000-8000-000000000001", "Kira"],
+  ["81000000-0000-4000-8000-000000000002", "software_subscription", "82000000-0000-4000-8000-000000000002", "Yazılım / abonelik"],
+  ["81000000-0000-4000-8000-000000000003", "transportation", "82000000-0000-4000-8000-000000000003", "Ulaşım"],
+  ["81000000-0000-4000-8000-000000000004", "meals_hospitality", "82000000-0000-4000-8000-000000000004", "Yemek / ağırlama"],
+  ["81000000-0000-4000-8000-000000000005", "marketing", "82000000-0000-4000-8000-000000000005", "Pazarlama"],
+  ["81000000-0000-4000-8000-000000000006", "office", "82000000-0000-4000-8000-000000000006", "Ofis"],
+  ["81000000-0000-4000-8000-000000000007", "external_service", "82000000-0000-4000-8000-000000000007", "Dış hizmet"],
+  ["81000000-0000-4000-8000-000000000008", "tax_fee", "82000000-0000-4000-8000-000000000008", "Vergi / harç"],
+  ["81000000-0000-4000-8000-000000000009", "other", "82000000-0000-4000-8000-000000000009", "Diğer"],
+]);
+
+const EXPENSE_CATEGORY_SEED_SQL = `INSERT INTO \`expense_category\` (\`id\`, \`code\`, \`client_operation_key\`, \`display_name\`, \`is_system\`) VALUES ${EXPENSE_CATEGORY_SEED_ROWS.map(
+  ([id, code, operationKey, displayName]) =>
+    `('${id}', '${code}', '${operationKey}', '${displayName}', 1)`,
+).join(", ")}`;
 
 const managedForwardColumns = new Map([
   ...[
@@ -76,6 +95,16 @@ const managedForwardColumns = new Map([
     `${FINANCIAL_REVERSALS_MIGRATION_TAG}:${tableName}:${columnName}`,
     { columnName, definition, tableName },
   ]),
+  ...[
+    [
+      "monthly_visit_commitment",
+      "location_label",
+      "varchar(191) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci",
+    ],
+  ].map(([tableName, columnName, definition]) => [
+    `${PLANNING_EXPENSE_CATEGORIES_MIGRATION_TAG}:${tableName}:${columnName}`,
+    { columnName, definition, tableName },
+  ]),
 ]);
 
 const managedDroppedChecks = new Set([
@@ -89,6 +118,8 @@ const managedDroppedChecks = new Set([
   `${FINANCIAL_REVERSALS_MIGRATION_TAG}:receivable:chk_receivable_timeline`,
   `${FINANCIAL_REVERSALS_MIGRATION_TAG}:receivable_collection:chk_receivable_collection_identity`,
   `${FINANCE_ACCOUNTS_LEDGER_MIGRATION_TAG}:user_permission:chk_user_permission_code`,
+  `${PLANNING_EXPENSE_CATEGORIES_MIGRATION_TAG}:expense:chk_expense_category`,
+  `${PLANNING_EXPENSE_CATEGORIES_MIGRATION_TAG}:monthly_visit_commitment:chk_monthly_visit_optional_fields`,
 ]);
 
 const managedDroppedIndexes = new Map([
@@ -486,16 +517,30 @@ function parseUserPermissionsStatement(statement) {
   return null;
 }
 
+function parsePlanningExpenseCategoriesStatement(statement) {
+  const normalized = statement.replaceAll(/\s+/gu, " ").trim();
+  if (normalized !== EXPENSE_CATEGORY_SEED_SQL) return null;
+  return {
+    name: "seed_expense_category",
+    rows: EXPENSE_CATEGORY_SEED_ROWS.map(([id, code]) => ({ code, id })),
+    tableName: "expense_category",
+    type: "data-seed",
+  };
+}
+
 function managedColumnSpec(definition) {
-  const varchar = /^varchar\((\d+)\)(?: DEFAULT '([^']+)')?( NOT NULL)?$/u.exec(
+  const varchar = /^varchar\((\d+)\)(?: CHARACTER SET (ascii|utf8mb4) COLLATE (ascii_bin|utf8mb4_unicode_ci))?(?: DEFAULT '([^']+)')?( NOT NULL)?$/u.exec(
     definition,
   );
   if (varchar) {
     return {
+      characterSet: varchar[2],
+      collation: varchar[3],
+      columnType: `varchar(${varchar[1]})`,
       dataType: "varchar",
-      defaultValue: varchar[2] ?? null,
+      defaultValue: varchar[4] ?? null,
       maxLength: Number(varchar[1]),
-      nullable: varchar[3] === undefined,
+      nullable: varchar[5] === undefined,
     };
   }
 
@@ -539,7 +584,8 @@ function parseManagedForwardStatement(statement, migrationTag) {
   if (
     migrationTag !== RECORD_LIFECYCLE_MIGRATION_TAG &&
     migrationTag !== FINANCIAL_REVERSALS_MIGRATION_TAG &&
-    migrationTag !== FINANCE_ACCOUNTS_LEDGER_MIGRATION_TAG
+    migrationTag !== FINANCE_ACCOUNTS_LEDGER_MIGRATION_TAG &&
+    migrationTag !== PLANNING_EXPENSE_CATEGORIES_MIGRATION_TAG
   ) {
     return null;
   }
@@ -663,6 +709,14 @@ export function analyzeMigrationStatement(statement, migrationTag) {
     return userPermissionsAnalysis;
   }
 
+  const planningExpenseCategoriesAnalysis =
+    migrationTag === PLANNING_EXPENSE_CATEGORIES_MIGRATION_TAG
+      ? parsePlanningExpenseCategoriesStatement(statement)
+      : null;
+  if (planningExpenseCategoriesAnalysis) {
+    return planningExpenseCategoriesAnalysis;
+  }
+
   const managedForwardAnalysis = parseManagedForwardStatement(
     statement,
     migrationTag,
@@ -706,6 +760,9 @@ function managedColumnVerificationPredicate(analysis) {
   if (spec.maxLength !== undefined) {
     predicates.push(`CHARACTER_MAXIMUM_LENGTH = ${spec.maxLength}`);
   }
+  if (spec.columnType !== undefined) {
+    predicates.push(`COLUMN_TYPE = ${sqlString(spec.columnType)}`);
+  }
   if (spec.characterSet !== undefined) {
     predicates.push(`CHARACTER_SET_NAME = ${sqlString(spec.characterSet)}`);
   }
@@ -725,6 +782,16 @@ function managedColumnVerificationPredicate(analysis) {
   );
   return `(SELECT COUNT(*) FROM information_schema.COLUMNS
              WHERE ${predicates.join("\n               AND ")}) = 1`;
+}
+
+function dataSeedVerificationPredicate(analysis) {
+  const rowPredicates = analysis.rows.map(
+    (row) =>
+      `(BINARY \`id\` = BINARY ${sqlString(row.id)} AND BINARY \`code\` = BINARY ${sqlString(row.code)} AND \`is_system\` = 1)`,
+  );
+  return `(SELECT COUNT(*) FROM ${quotedIdentifier(analysis.tableName)}
+             WHERE ${rowPredicates.join(" OR ")}) = ${analysis.rows.length}
+          AND (SELECT COUNT(*) FROM ${quotedIdentifier(analysis.tableName)}) = ${analysis.rows.length}`;
 }
 
 function statementVerificationPredicate(analysis) {
@@ -794,6 +861,10 @@ function statementVerificationPredicate(analysis) {
 
   if (analysis.type === "data-backfill") {
     return `(SELECT COUNT(*) FROM ${quotedIdentifier(analysis.tableName)}) = 0`;
+  }
+
+  if (analysis.type === "data-seed") {
+    return dataSeedVerificationPredicate(analysis);
   }
 
   if (analysis.type === "drop-index") {
@@ -1098,7 +1169,19 @@ function postflightPredicate(
   );
   const checkNames = schema.checks.map((constraint) => constraint.name);
   const foreignKeyNames = schema.foreignKeys.map((constraint) => constraint.name);
-  const explicitIndexNames = schema.indexes.map((index) => index.name);
+  const explicitIndexPredicates = schema.indexes.map(
+    (index) =>
+      `(BINARY TABLE_NAME = BINARY ${sqlString(index.tableName)} AND BINARY INDEX_NAME = BINARY ${sqlString(index.name)})`,
+  );
+  const seedRowsByTable = new Map();
+  for (const migration of migrations) {
+    for (const item of migration.statements) {
+      if (item.analysis.type !== "data-seed") continue;
+      const rows = seedRowsByTable.get(item.analysis.tableName) ?? [];
+      rows.push(...item.analysis.rows);
+      seedRowsByTable.set(item.analysis.tableName, rows);
+    }
+  }
 
   const predicates = [
     `SHA2(DATABASE(), 256) = ${sqlString(targetDatabaseSha256)}`,
@@ -1130,12 +1213,15 @@ function postflightPredicate(
   ];
 
   for (const [tableName, columns] of Object.entries(schema.tables)) {
+    const seedRows = seedRowsByTable.get(tableName) ?? [];
     predicates.push(
       `(SELECT COUNT(*) FROM information_schema.COLUMNS
           WHERE TABLE_SCHEMA = DATABASE()
             AND TABLE_NAME = ${sqlString(tableName)}
             AND COLUMN_NAME IN (${sqlStringList(columns)})) = ${columns.length}`,
-      `(SELECT COUNT(*) FROM ${quotedIdentifier(tableName)}) = 0`,
+      seedRows.length === 0
+        ? `(SELECT COUNT(*) FROM ${quotedIdentifier(tableName)}) = 0`
+        : dataSeedVerificationPredicate({ rows: seedRows, tableName }),
     );
   }
 
@@ -1173,12 +1259,11 @@ function postflightPredicate(
             AND CONSTRAINT_NAME IN (${sqlStringList(foreignKeyNames)})) = ${foreignKeyNames.length}`,
     );
   }
-  if (explicitIndexNames.length > 0) {
+  if (explicitIndexPredicates.length > 0) {
     predicates.push(
       `(SELECT COUNT(DISTINCT TABLE_NAME, INDEX_NAME) FROM information_schema.STATISTICS
           WHERE TABLE_SCHEMA = DATABASE()
-            AND TABLE_NAME IN (${sqlStringList(applicationTableNames)})
-            AND INDEX_NAME IN (${sqlStringList(explicitIndexNames)})) = ${schema.indexes.length}`,
+            AND (${explicitIndexPredicates.join(" OR ")})) = ${schema.indexes.length}`,
     );
   }
 

@@ -10,7 +10,7 @@ Kaynakta çalışan ilk dikey dilim şunları içerir:
 - DB tabanlı owner/member hesapları, 8 saatlik imzalı oturum ve modül bazlı izin yönetimi;
 - yetkisiz sayfa/API erişiminin engellenmesi ve müşteri iletişim, sözleşme finansı ile finans modüllerinde alan bazlı veri kesme;
 - müşteri oluşturma, listeleme ve güncelleme API'leri;
-- müşteri listesinde karta girmeden aylık ücret, ödeme günü ve sıradaki ziyaret özeti; izinsiz hesapta bu alanların DB sorgusundan itibaren çıkarılması;
+- müşteri listesinde karta girmeden aylık ücret, ödeme günü, sıradaki ziyaret, açık/gecikmiş alacak ve İstanbul iş gününe göre bugünkü ziyaret özeti; izinsiz hesapta hassas alanların DB sorgusundan itibaren çıkarılması;
 - Türkçe metni koruyan MySQL/MariaDB müşteri tablosu;
 - müşteri yazmalarıyla aynı transaction içinde denetim kaydı;
 - müşteri bazlı yıllık danışmanlık sözleşmesi, aylık ücret, KDV biçimi ve ödeme günü kaydı;
@@ -19,18 +19,19 @@ Kaynakta çalışan ilk dikey dilim şunları içerir:
 - sözleşme ve ziyaret yazmalarıyla aynı transaction içinde denetim kaydı;
 - sözleşme ayından sınır aylarda gün oranlı ve idempotent alacak üretme, geçmiş alacak açılışı ve kısmi tahsilat;
 - net/KDV/toplam tutar snapshot'ı, kalan bakiye ve vade durumunun finans ekranında hesaplanması;
-- ziyaretlerin günlük, Pazartesi–Pazar haftalık veya aylık raporlandığı; yetkili hesabın müşteri ekranına geçmeden gerçekleşme günü ve notla tamamlayabildiği plan çalışma alanı;
+- ziyaretlerin günlük, Pazartesi–Pazar haftalık veya aylık raporlandığı; müşteri ve konum tanımıyla filtrelenebildiği; yetkili hesabın müşteri ekranına geçmeden gerçekleşme günü ve notla tamamlayabildiği plan çalışma alanı;
+- müşteriyle paylaşım için yalnız seçilen müşterinin planlı/telafi ziyaretlerini içeren, görevleri ve iç saat/süre bilgisini dışarıda bırakan kimlik doğrulamalı takvim/yazdırma dışa aktarımı;
 - görev oluşturma, düzenleme, durum ve öncelik takibi yapılan Kanban çalışma alanı;
 - Mühendis Kafası, ByPusula, OptiPusula ve 7 Emlak Ajansı için proje portföyü oluşturma ve düzenleme;
 - müşterileri bir veya daha fazla projeye bağlama; sözleşme, alacak ve görevlerde yalnız müşterinin aktif proje bağlarını kullanma;
 - görevleri projeye bağlama, proje rozetiyle gösterme ve projeye göre filtreleme;
 - firma bazlı görev dökümü, tarih/durum filtresi ve Mühendis Kafası logolu tarayıcı yazdırma / “PDF olarak kaydet” görünümü;
-- genel veya proje bağlantılı gider oluşturma, düzenleme, iptal etme ve ay/kategori/ödeme yöntemine göre filtreleme;
-- kredi kartlarını yalnız tanımlayıcı son dört haneyle izleme, kart harcamasından ekstre ayı/vade tarihli kesin taksit planı üretme ve taksit ödeme durumunu yönetme;
+- genel veya proje bağlantılı gider oluşturma, düzenleme, iptal etme, manuel gider kategorisi ekleme ve ay/kategori/ödeme yöntemine göre filtreleme;
+- kredi kartlarını yalnız tanımlayıcı son dört haneyle izleme, kart harcamasından ekstre ayı/vade tarihli kesin taksit planı üretme, borçları kart bazında toplu görme ve seçili açık taksitleri kontrollü biçimde ödendi işaretleme;
 - giderlerde net/KDV/toplam tutar snapshot'ı ile aktif gider, KDV ve kart harcaması özetlerini hesaplama;
 - proje bazında tahakkuk, tahsilat, gider, açık/gecikmiş alacak ve vergi öncesi faaliyet farkı raporu;
-- finans raporlarında gerçek, planlanan, gecikmiş ve tarihi belirsiz hareketleri ayıran aylık nakit akışı; kart ve ortaklık hareketlerinde çift sayım koruması;
-- kasa ve banka hesaplarında açılış bakiyesi, gelir/gider/transfer hareketleri ve silmeden ters kayıt üreten çift taraflı hesap defteri;
+- finans raporlarında gerçek, planlanan, gecikmiş ve tarihi belirsiz hareketleri ayıran haftalık veya aylık nakit akışı; kart ve ortaklık hareketlerinde çift sayım koruması;
+- kasa ve banka hesaplarında açılış bakiyesi, hesap açılış gününden önceye hareket girişini engelleyen gelir/gider/transfer akışı ve silmeden ters kayıt üreten çift taraflı hesap defteri;
 - 7 Emlak için satış/kiralama komisyon matrahından katkı biçimine göre otomatik `%10`, `%25` veya `%50` pay; aylık ortak katkısı ve ayrı tahsilat defteri;
 - owner tarafından kullanıcı oluşturma, hesabı devre dışı bırakma ve 37 allowlist izni modüler atama;
 - müşteri, sözleşme, proje ve görevlerde gerekçeli arşivleme/geri alma; alacak ve giderlerde geçersiz kılma, tahsilat ile ortaklık tahsilatlarında ileri yönlü ters kayıt ve yetkili işlem geçmişi;
@@ -103,10 +104,11 @@ Cron değişkenleri kaynakta varsayılan kapalı altyapı adayıdır; gerçek i�
 - `0015_financial_reversals.sql`
 - `0016_finance_accounts_ledger.sql`
 - `0017_work_task_visit.sql`
+- `0018_planning_expense_categories.sql`
 
-Uygulanmış migration dosyası değiştirilmez; her düzeltme yeni ileri yönlü migration olur. `0011_customer_projects_partnership.sql` müşteri–proje ilişkisi ile ortaklık finans defterini, `0012_user_permissions.sql` `user_account` owner/member alanları ile ilk izin defterini, `0013_login_attempt_throttle.sql` DB tabanlı kalıcı giriş sınırlamasını ekler. `0014_record_lifecycle.sql` kendi dönemindeki allowlist'i 35 izin koduna genişletir ve müşteri/sözleşme/proje/görev kayıtlarına gerekçeli arşivleme, aktör, zaman ve optimistic version alanlarını ekler. `0015_financial_reversals.sql` alacak geçersiz kılma ile tahsilat/ortaklık tahsilatı ters kayıtlarını forward-only biçimde kurar. `0016_finance_accounts_ledger.sql` kasa/banka hesapları ile gelir, gider, transfer ve ters kayıtların ledger temelini kurup güncel allowlist'i 37 koda çıkarır. `0017_work_task_visit.sql` ziyaret sırasında tamamlanan iş maddelerini göreve bağlayan kısıtlı ilişki tablosunu ekler. Kullanıcı tarafından oluşturulan ana kayıtlar hard-delete edilmez; düzeltmeler arşiv, void veya yeni ters kayıtla izlenir. Clean veritabanında zincir 18 migration (`0000`–`0017`), 18 journal kaydı ve journal dışında 28 uygulama tablosudur.
+Uygulanmış migration dosyası değiştirilmez; her düzeltme yeni ileri yönlü migration olur. `0011_customer_projects_partnership.sql` müşteri–proje ilişkisi ile ortaklık finans defterini, `0012_user_permissions.sql` `user_account` owner/member alanları ile ilk izin defterini, `0013_login_attempt_throttle.sql` DB tabanlı kalıcı giriş sınırlamasını ekler. `0014_record_lifecycle.sql` kendi dönemindeki allowlist'i 35 izin koduna genişletir ve müşteri/sözleşme/proje/görev kayıtlarına gerekçeli arşivleme, aktör, zaman ve optimistic version alanlarını ekler. `0015_financial_reversals.sql` alacak geçersiz kılma ile tahsilat/ortaklık tahsilatı ters kayıtlarını forward-only biçimde kurar. `0016_finance_accounts_ledger.sql` kasa/banka hesapları ile gelir, gider, transfer ve ters kayıtların ledger temelini kurup güncel allowlist'i 37 koda çıkarır. `0017_work_task_visit.sql` ziyaret sırasında tamamlanan iş maddelerini göreve bağlayan kısıtlı ilişki tablosunu ekler. `0018_planning_expense_categories.sql` ziyaretlere konum tanımı ekler ve eski gider kategori kodlarını koruyarak manuel kategoriler için referans tablosu/FK sözleşmesini kurar. Kullanıcı tarafından oluşturulan ana kayıtlar hard-delete edilmez; düzeltmeler arşiv, void veya yeni ters kayıtla izlenir. Clean veritabanında zincir 19 migration (`0000`–`0018`), 19 journal kaydı, journal dışında 29 uygulama tablosu ve journal ile toplam 30 fiziksel tablodur.
 
-Journal'ı bulunan mevcut Hostinger hedefinde clean-only paket tekrar yüklenmez. Eski hedefler `0011`–`0015` için korunmuş kendi incremental runbook'larıyla exact `0015` seviyesine getirilir. Güncel canlı değişiklik penceresinin ön kabulü 16 journal kaydı ve son kayıt `0015_financial_reversals` olmasıdır; ardından uygulama deploy edilmeden DB-first `0016_finance_accounts_ledger` → `0017_work_task_visit` uygulanır. Hedefe bağlı iki ayrı paket ve kontrol sözleşmesi [0016/0017 incremental runbook'unda](docs/phpmyadmin-finance-calendar-incremental.md) tanımlıdır. Kaynakta paket üretilebilmesi veya bu belgenin güncel olması, canlı artefakt/import/postflight kanıtı değildir.
+Journal'ı bulunan mevcut Hostinger hedefinde clean-only paket tekrar yüklenmez. Daha eski hedefler korunmuş incremental runbook zinciriyle önce exact `0017_work_task_visit` seviyesine getirilir. Güncel canlı değişiklik penceresinin ön kabulü exact 18 journal kaydı ve son kayıt `0017_work_task_visit` olmasıdır; ardından uygulama deploy edilmeden DB-first yalnız `0018_planning_expense_categories` uygulanır. Hedefe bağlı paket ve kontrol sözleşmesi [0018 planlama/gider kategorileri incremental runbook'unda](docs/phpmyadmin-planning-expense-categories-incremental.md) tanımlıdır. Kaynakta paket üretilebilmesi veya bu belgenin güncel olması, canlı artefakt/import/postflight kanıtı değildir.
 
 ## Yerel geliştirme
 
@@ -137,10 +139,10 @@ npm run package:hostinger
 Canlı kabul sırası:
 
 1. Proje dalının kalite kapılarını ve PR CI sonucunu doğrula; otomatik Hostinger dağıtımını tetikleyebilecek `main` birleştirmesini henüz yapma.
-2. Canlı veritabanının güncel yedeğini doğrula, ayrı disposable hedefte restore kanıtını tamamla ve uygulama yazmalarını dondur. Bu pencerenin ön kabulü journal'ın 16 kayıtla exact `0015_financial_reversals` seviyesinde olmasıdır; farklı durumda dur ve hedefi kendi tarihsel runbook'uyla exact `0015`e getirmeden ilerleme.
-3. [0016/0017 incremental runbook'unu](docs/phpmyadmin-finance-calendar-incremental.md) izleyerek aynı canlı DB/server digest'lerine bağlı iki ayrı paket ve manifesti onayla. Araya uygulama deploy etmeden önce `0016_finance_accounts_ledger` paketini bir kez uygula ve 17 journal/27 uygulama tablosu/37 izin kodu postflight'ını; ardından `0017_work_task_visit` paketini bir kez uygula ve final 18 journal/28 uygulama tablosu postflight'ını salt okunur doğrula. Exact başarı sonucu yoksa aynı paketi yeniden çalıştırma.
+2. Canlı veritabanının güncel yedeğini doğrula, ayrı disposable hedefte restore kanıtını tamamla ve uygulama yazmalarını dondur. Bu pencerenin ön kabulü journal'ın exact 18 kayıtla `0017_work_task_visit` seviyesinde olmasıdır; farklı durumda dur ve hedefi korunmuş tarihsel runbook zinciriyle exact `0017`ye getirmeden ilerleme.
+3. [0018 incremental runbook'unu](docs/phpmyadmin-planning-expense-categories-incremental.md) izleyerek canlı DB/server digest'lerine bağlı paket ve manifesti onayla. `0018_planning_expense_categories` paketini yalnız bir kez uygula; exact başarıdan sonra final 19 journal kaydını, 29 uygulama tablosunu, kategori referans/FK bütünlüğünü ve ziyaret konum alanını salt okunur doğrula. Exact başarı sonucu yoksa aynı paketi yeniden çalıştırma.
 4. PR'ı `main` dalına birleştir; bağlı Git dağıtımını bekle veya aynı kaynakla yeniden üretilmiş güncel ZIP'i dağıt ve build'in `Akım` olmasını bekle.
-5. `/giris`, `/kullanicilar`, müşteri alan redaksiyonu, görev panosu ve `/gorevler/rapor` yazdırma önizlemesi, `/finans/hesaplar`, `/finans/nakit-akisi` ve günlük/haftalık/aylık plan içindeki görev–ziyaret bağlarını; ayrıca 360/390/430 px mobil menü ve takvim/tablo davranışını doğrula. Sonra yazma dondurmasını kaldır.
+5. `/giris`, `/kullanicilar`, doğru müşteri özeti/alan redaksiyonu, görev panosu ve `/gorevler/rapor` yazdırma önizlemesi, kart bazlı borçlar, manuel gider kategorileri, `/finans/hesaplar`, haftalık/aylık `/finans/nakit-akisi`, müşteri/konum filtreli plan ve güvenli müşteri takvim dışa aktarımını; ayrıca 360/390/430 px mobil menü ve takvim/tablo davranışını doğrula. Sonra yazma dondurmasını kaldır.
 6. Sorun çıkarsa yalnız ilgili sınırda hedefli test ve log incelemesi yap; migration başarı satırı yoksa aynı paketi yeniden çalıştırma.
 
 Bu hazırlık ve yerel kanıtlar tek başına canlı kabul veya Dilim 0 GO değildir.
@@ -155,6 +157,7 @@ Bu hazırlık ve yerel kanıtlar tek başına canlı kabul veya Dilim 0 GO deği
 - [0013 giriş sınırlama incremental runbook'u](docs/phpmyadmin-login-throttle-incremental.md)
 - [0014/0015 yaşam döngüsü ve ters kayıt incremental runbook'u](docs/phpmyadmin-lifecycle-reversals-incremental.md)
 - [0016/0017 finans hesabı ve görev–ziyaret incremental runbook'u](docs/phpmyadmin-finance-calendar-incremental.md)
+- [0018 planlama ve gider kategorileri incremental runbook'u](docs/phpmyadmin-planning-expense-categories-incremental.md)
 - [Backup/restore runbook'u](docs/backup-restore.md)
 
 Public kaynak deposu: [arslanturkmustafa-sudo/portal-pusula](https://github.com/arslanturkmustafa-sudo/portal-pusula)

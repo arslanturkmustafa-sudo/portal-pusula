@@ -30,7 +30,12 @@ import { PATCH } from "@/app/api/finance/cards/[id]/route";
 describe("credit card item API", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.authenticate.mockResolvedValue({ accountId: "10000000-0000-4000-8000-000000000001", kind: "account" });
+    mocks.authenticate.mockResolvedValue({
+      accountId: "10000000-0000-4000-8000-000000000001",
+      kind: "account",
+      permissions: ["finance.cards.read", "finance.cards.write"],
+      role: "member",
+    });
     mocks.parse.mockImplementation((value: unknown) => value);
     mocks.update.mockResolvedValue({ id: "20000000-0000-4000-8000-000000000001" });
     mocks.requestLogger.mockReturnValue({ error: vi.fn() });
@@ -48,5 +53,28 @@ describe("credit card item API", () => {
     );
     expect(response.status).toBe(409);
     await expect(response.json()).resolves.toEqual({ status: "version_conflict" });
+  });
+
+  it("rejects write-only access before parsing or updating", async () => {
+    mocks.authenticate.mockResolvedValue({
+      accountId: "10000000-0000-4000-8000-000000000001",
+      kind: "account",
+      permissions: ["finance.cards.write"],
+      role: "member",
+    });
+    const response = await PATCH(
+      new NextRequest("https://portal.example/api/finance/cards/id", {
+        body: "{}",
+        headers: {
+          "content-type": "application/json",
+          origin: "https://portal.example",
+        },
+        method: "PATCH",
+      }),
+      { params: Promise.resolve({ id: "20000000-0000-4000-8000-000000000001" }) },
+    );
+    expect(response.status).toBe(403);
+    expect(mocks.parse).not.toHaveBeenCalled();
+    expect(mocks.update).not.toHaveBeenCalled();
   });
 });

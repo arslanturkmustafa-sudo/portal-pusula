@@ -19,6 +19,7 @@ export default async function ExpensesPage() {
         capabilities={{
           canReadAudit: can("audit.read"),
           canReverseExpenses: can("finance.expenses.reverse"),
+          canWriteExpenses: can("finance.expenses.write"),
         }}
       />
     </PortalPermissionGate>

@@ -15,6 +15,7 @@ const visit: DailyPlanMonthVisit = {
   customerId: "customer-1",
   customerName: "Atlas Makina",
   internalPlannedAtUtc: "2026-09-04 06:30:00.000000",
+  locationLabel: "Atlas saha",
   resolutionStatus: "planned",
   visitId: "visit-1",
 };
@@ -23,10 +24,12 @@ const tasks: readonly DailyPlanMonthTask[] = [
   {
     calendarOn: "2026-09-04",
     calendarSource: "visit",
+    customerId: "customer-1",
     customerName: "Atlas Makina",
     dueOn: "2026-09-20",
     id: "task-1",
     linkedVisitId: "visit-1",
+    locationLabel: "Atlas saha",
     projectName: "Danışmanlık",
     status: "in_progress",
     title: "Saha raporunu hazırla",
@@ -34,10 +37,12 @@ const tasks: readonly DailyPlanMonthTask[] = [
   {
     calendarOn: "2026-09-07",
     calendarSource: "due_date",
+    customerId: null,
     customerName: null,
     dueOn: "2026-09-07",
     id: "task-2",
     linkedVisitId: null,
+    locationLabel: null,
     projectName: "İç operasyon",
     status: "todo",
     title: "Aylık kontrolü kapat",
@@ -86,6 +91,7 @@ describe("DailyPlanMonthGrid", () => {
     expect(fourth).toHaveTextContent("09:30");
     expect(fourth).toHaveTextContent("Saha raporunu hazırla");
     expect(fourth).toHaveTextContent("Ziyarete bağlı");
+    expect(fourth).toHaveTextContent("Atlas saha");
     expect(within(fourth).getByRole("button", { name: "ATLAS işlemi" })).toBeInTheDocument();
 
     const seventh = within(table).getByRole("cell", {
@@ -126,5 +132,42 @@ describe("DailyPlanMonthGrid", () => {
       }),
     );
     expect(onOpenDay).toHaveBeenCalledWith("2026-09-14");
+  });
+
+  it("caps dense calendar cells and opens the full day from the remainder control", async () => {
+    const onOpenDay = vi.fn();
+    const user = userEvent.setup();
+    const denseVisits = [0, 1, 2].map((index) => ({
+      ...visit,
+      customerName: `Müşteri ${index + 1}`,
+      visitId: `visit-${index + 1}`,
+    }));
+    const denseTasks = [0, 1, 2].map((index) => ({
+      ...tasks[0],
+      id: `task-${index + 1}`,
+      title: `Görev ${index + 1}`,
+    }));
+
+    render(
+      <DailyPlanMonthGrid
+        endDate="2026-09-30"
+        onOpenDay={onOpenDay}
+        startDate="2026-09-01"
+        tasks={denseTasks}
+        today="2026-09-07"
+        visits={denseVisits}
+      />,
+    );
+
+    expect(screen.getByText("Müşteri 2")).toBeInTheDocument();
+    expect(screen.queryByText("Müşteri 3")).not.toBeInTheDocument();
+    expect(screen.getByText("Görev 2")).toBeInTheDocument();
+    expect(screen.queryByText("Görev 3")).not.toBeInTheDocument();
+    await user.click(
+      screen.getByRole("button", {
+        name: /4 Eylül 2026 Cuma için kalan 2 kaydı/u,
+      }),
+    );
+    expect(onOpenDay).toHaveBeenCalledWith("2026-09-04");
   });
 });

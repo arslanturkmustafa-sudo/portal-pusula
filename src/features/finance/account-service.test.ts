@@ -52,6 +52,7 @@ vi.mock("@/platform/jobs/mysql-transaction", () => ({
 import {
   createFinanceTransaction,
   FinanceAccountInactiveError,
+  FinanceTransactionBeforeAccountOpeningError,
   listFinanceAccountsOverview,
   reverseFinanceTransaction,
 } from "@/features/finance/account-service";
@@ -109,6 +110,88 @@ describe("finance account service", () => {
     });
     expect(result.accounts[0]).not.toHaveProperty("clientOperationKey");
     expect(result.accounts[0]).not.toHaveProperty("createdAtUtc");
+    expect(result.accounts[0]).toHaveProperty("openedOn", "2026-09-07");
+  });
+
+  it.each(["income", "expense"] as const)(
+    "rejects a backdated %s before the affected account opening",
+    async (transactionType) => {
+      await expect(
+        createFinanceTransaction(
+          {} as Pool,
+          {
+            amount: "25",
+            clientOperationKey: operationKey,
+            description: "Açılış öncesi hareket",
+            occurredOn: "2026-09-06",
+            sourceAccountId: transactionType === "expense" ? bankId : null,
+            targetAccountId: transactionType === "income" ? bankId : null,
+            transactionType,
+          },
+          context,
+        ),
+      ).rejects.toBeInstanceOf(FinanceTransactionBeforeAccountOpeningError);
+      expect(mocks.insertTransaction).not.toHaveBeenCalled();
+      expect(mocks.insertLedger).not.toHaveBeenCalled();
+    },
+  );
+
+  it("uses the latest affected account opening as the transfer boundary", async () => {
+    mocks.lockAccounts.mockResolvedValue([
+      { ...bank, createdAtUtc: "2026-09-05 20:59:00.000000" },
+      cash,
+    ]);
+    await expect(
+      createFinanceTransaction(
+        {} as Pool,
+        {
+          amount: "25",
+          clientOperationKey: operationKey,
+          description: "Açılış öncesi transfer",
+          occurredOn: "2026-09-06",
+          sourceAccountId: bankId,
+          targetAccountId: cashId,
+          transactionType: "transfer",
+        },
+        context,
+      ),
+    ).rejects.toBeInstanceOf(FinanceTransactionBeforeAccountOpeningError);
+    expect(mocks.insertTransaction).not.toHaveBeenCalled();
+  });
+
+  it("keeps an idempotent historical replay readable without reapplying the new rule", async () => {
+    mocks.findTransactionByOperation.mockResolvedValue({
+      amount: "25.0000",
+      clientOperationKey: operationKey,
+      createdAtUtc: nowSql,
+      currency: "TRY",
+      description: "Tarihsel tahsilat",
+      id: transactionId,
+      occurredOn: "2026-09-06",
+      reversalOfId: null,
+      reversalReason: null,
+      sourceAccountId: null,
+      targetAccountId: bankId,
+      transactionType: "income",
+    });
+
+    await expect(
+      createFinanceTransaction(
+        {} as Pool,
+        {
+          amount: "25",
+          clientOperationKey: operationKey,
+          description: "Tarihsel tahsilat",
+          occurredOn: "2026-09-06",
+          sourceAccountId: null,
+          targetAccountId: bankId,
+          transactionType: "income",
+        },
+        context,
+      ),
+    ).resolves.toMatchObject({ created: false });
+    expect(mocks.insertTransaction).not.toHaveBeenCalled();
+    expect(mocks.insertLedger).not.toHaveBeenCalled();
   });
 
   it("records a transfer as one transaction and exactly two opposing ledger legs", async () => {
