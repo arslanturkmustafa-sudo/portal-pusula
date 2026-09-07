@@ -5,7 +5,8 @@ import {
   dailyPlanQuerySchema,
   getDailyAgenda,
 } from "@/features/daily-plan";
-import { isAdminAuthenticated } from "@/platform/auth/server-auth";
+import { hasPermission } from "@/platform/auth/permissions";
+import { authenticateAdminRequest } from "@/platform/auth/server-auth";
 import { getDatabaseProbeEnvironment } from "@/platform/config/readiness-env";
 import { getPlatformDatabasePool } from "@/platform/database/mysql-platform";
 
@@ -26,17 +27,28 @@ function databasePool() {
 }
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  if (!(await isAdminAuthenticated(request))) {
+  const principal = await authenticateAdminRequest(request, "daily-plan.read");
+  if (!principal) {
     return json({ status: "unauthorized" }, 401);
   }
 
   try {
     const queryEntries = [...request.nextUrl.searchParams.entries()];
-    if (queryEntries.length !== 1 || queryEntries[0]?.[0] !== "date") {
+    const queryKeys = queryEntries.map(([key]) => key);
+    if (
+      queryKeys.filter((key) => key === "date").length !== 1 ||
+      queryKeys.filter((key) => key === "view").length > 1 ||
+      queryKeys.some((key) => key !== "date" && key !== "view")
+    ) {
       return json({ status: "validation_error" }, 400);
     }
     const input = dailyPlanQuerySchema.parse(Object.fromEntries(queryEntries));
-    const agenda = await getDailyAgenda(databasePool(), input.date);
+    const agenda = await getDailyAgenda(
+      databasePool(),
+      input.date,
+      input.view,
+      hasPermission(principal, "tasks.read"),
+    );
     return json(agenda);
   } catch (error) {
     if (error instanceof z.ZodError) {

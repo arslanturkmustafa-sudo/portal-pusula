@@ -16,6 +16,7 @@ import {
   spendingDatabasePool,
   spendingJson,
 } from "@/features/finance/spending-route-support";
+import { hasPermission } from "@/platform/auth/permissions";
 import { authenticateAdminRequest } from "@/platform/auth/server-auth";
 import { correlationIdFromHeaders } from "@/platform/http/correlation-id";
 import { requestLogger } from "@/platform/logging/logger";
@@ -31,8 +32,11 @@ export async function PATCH(
   request: NextRequest,
   context: RouteContext,
 ): Promise<NextResponse> {
-  const principal = await authenticateAdminRequest(request);
+  const principal = await authenticateAdminRequest(request, "finance.cards.write");
   if (!principal) return spendingJson({ status: "unauthorized" }, 401);
+  if (!hasPermission(principal, "finance.cards.read")) {
+    return spendingJson({ status: "forbidden" }, 403);
+  }
   if (!isSameOrigin(request)) return spendingJson({ status: "forbidden" }, 403);
   if (!isJsonRequest(request)) {
     return spendingJson({ status: "unsupported_media_type" }, 415);

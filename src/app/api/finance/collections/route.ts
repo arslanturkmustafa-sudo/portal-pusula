@@ -9,7 +9,8 @@ import {
   FinanceIdempotencyConflictError,
   FinanceResourceNotFoundError,
 } from "@/features/finance";
-import { isAdminAuthenticated } from "@/platform/auth/server-auth";
+import { spendingActorId } from "@/features/finance/spending-route-support";
+import { authenticateAdminRequest } from "@/platform/auth/server-auth";
 import { getDatabaseProbeEnvironment } from "@/platform/config/readiness-env";
 import { getPlatformDatabasePool } from "@/platform/database/mysql-platform";
 import { correlationIdFromHeaders } from "@/platform/http/correlation-id";
@@ -32,7 +33,11 @@ function json(body: unknown, status = 200): NextResponse {
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  if (!(await isAdminAuthenticated(request))) {
+  const principal = await authenticateAdminRequest(
+    request,
+    "finance.receivables.write",
+  );
+  if (!principal) {
     return json({ status: "unauthorized" }, 401);
   }
   if (!isSameOriginWriteRequest(request)) return json({ status: "forbidden" }, 403);
@@ -47,7 +52,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const result = await createReceivableCollection(
       getPlatformDatabasePool(getDatabaseProbeEnvironment()),
       input,
-      { correlationId: correlationIdFromHeaders(request.headers) },
+      {
+        actorId: spendingActorId(principal),
+        correlationId: correlationIdFromHeaders(request.headers),
+      },
     );
     return json(result, result.created ? 201 : 200);
   } catch (error) {

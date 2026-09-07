@@ -7,10 +7,11 @@ import {
 } from "@/features/finance/period";
 
 describe("receivable period rules", () => {
-  it("caps payment day to the real final day of the month", () => {
-    expect(dueDateForMonth("2026-02", 31)).toBe("2026-02-28");
-    expect(dueDateForMonth("2028-02", 31)).toBe("2028-02-29");
-    expect(dueDateForMonth("2026-09", 5)).toBe("2026-09-05");
+  it("uses the payment day in the month after the service month", () => {
+    expect(dueDateForMonth("2026-08", 5)).toBe("2026-09-05");
+    expect(dueDateForMonth("2026-03", 31)).toBe("2026-04-30");
+    expect(dueDateForMonth("2028-01", 31)).toBe("2028-02-29");
+    expect(dueDateForMonth("2026-12", 5)).toBe("2027-01-05");
   });
 
   it("accepts only months intersecting the contract period", () => {

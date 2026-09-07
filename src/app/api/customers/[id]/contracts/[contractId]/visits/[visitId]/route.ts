@@ -5,11 +5,12 @@ import {
   ContractClosedError,
   ContractResourceNotFoundError,
   MonthOutsideContractError,
-  updateMonthlyVisit,
-  updateVisitResolutionInputSchema,
+  updateMonthlyVisitWithWorkItems,
+  updateVisitWithWorkItemsInputSchema,
   VisitLockedError,
 } from "@/features/contracts";
-import { isAdminAuthenticated } from "@/platform/auth/server-auth";
+import { hasPermission } from "@/platform/auth/permissions";
+import { authenticateAdminRequest } from "@/platform/auth/server-auth";
 import { getDatabaseProbeEnvironment } from "@/platform/config/readiness-env";
 import { getPlatformDatabasePool } from "@/platform/database/mysql-platform";
 import { correlationIdFromHeaders } from "@/platform/http/correlation-id";
@@ -44,7 +45,8 @@ export async function PATCH(
   request: NextRequest,
   context: VisitRouteContext,
 ): Promise<NextResponse> {
-  if (!(await isAdminAuthenticated(request))) {
+  const principal = await authenticateAdminRequest(request, "visits.write");
+  if (!principal) {
     return json({ status: "unauthorized" }, 401);
   }
 
@@ -55,18 +57,30 @@ export async function PATCH(
 
   try {
     const { contractId, id, visitId } = await context.params;
-    const input = updateVisitResolutionInputSchema.parse(
+    const input = updateVisitWithWorkItemsInputSchema.parse(
       await readJsonWriteBody(request, 16_384),
     );
-    const visit = await updateMonthlyVisit(
+    if (
+      input.workItems.length > 0 &&
+      !hasPermission(principal, "tasks.write")
+    ) {
+      return json({ status: "forbidden" }, 403);
+    }
+    const result = await updateMonthlyVisitWithWorkItems(
       databasePool(),
       id,
       contractId,
       visitId,
       input,
-      { correlationId: correlationIdFromHeaders(request.headers) },
+      {
+        actorId: principal.kind === "account" ? principal.accountId : undefined,
+        correlationId: correlationIdFromHeaders(request.headers),
+      },
     );
-    return json({ visit });
+    return json({
+      createdTaskCount: result.tasks.length,
+      visit: result.visit,
+    });
   } catch (error) {
     if (
       error instanceof z.ZodError ||

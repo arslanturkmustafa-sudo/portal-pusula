@@ -45,6 +45,7 @@ import {
   createCustomer,
   CustomerProjectInUseError,
   CustomerProjectUnavailableError,
+  listCustomers,
   updateCustomer,
 } from "@/features/customers/service";
 
@@ -53,30 +54,44 @@ const projectAId = "20000000-0000-4000-8000-000000000001";
 const projectBId = "20000000-0000-4000-8000-000000000002";
 const now = new Date("2026-09-03T08:00:00.000Z");
 const nowSql = "2026-09-03 08:00:00.000000";
-const context = { correlationId: "customer-service-test", now };
+const actorId = "80000000-0000-4000-8000-000000000001";
+const context = { actorId, correlationId: "customer-service-test", now };
 const projectA = {
+  archiveReason: null,
+  archivedAtUtc: null,
+  archivedByUserAccountId: null,
   displayName: "Mühendis Kafası",
   id: projectAId,
   shortCode: "MUHENDIS_KAFASI",
   status: "active" as const,
+  version: 1,
 };
 const projectB = {
+  archiveReason: null,
+  archivedAtUtc: null,
+  archivedByUserAccountId: null,
   displayName: "ByPusula",
   id: projectBId,
   shortCode: "BYPUSULA",
   status: "planned" as const,
+  version: 1,
 };
 const before = {
+  archiveReason: null,
+  archivedAtUtc: null,
+  archivedByUserAccountId: null,
   contactNote: null,
   createdAtUtc: "2026-09-01 08:00:00.000000",
   displayName: "Öncü Üretim",
   email: null,
   id: customerId,
+  overview: { nextVisitOn: null },
   phone: null,
   projects: [projectA],
   shortCode: "ONCU",
   status: "active" as const,
   updatedAtUtc: "2026-09-01 08:00:00.000000",
+  version: 1,
 };
 
 describe("customer service project links", () => {
@@ -90,6 +105,30 @@ describe("customer service project links", () => {
     );
     mocks.listCustomerProjectLinksForUpdate.mockResolvedValue([]);
     mocks.updateCustomerProjectLinkStatus.mockResolvedValue(true);
+    mocks.updateCustomerRecord.mockResolvedValue(true);
+  });
+
+  it("projects visits and contracts with the Europe/Istanbul business date", async () => {
+    mocks.listCustomerRecords.mockResolvedValueOnce([]);
+
+    await expect(
+      listCustomers(
+        {} as Pool,
+        {
+          includeBilling: true,
+          includeContact: true,
+          includeVisits: true,
+        },
+        new Date("2026-09-06T21:30:00.000Z"),
+      ),
+    ).resolves.toEqual([]);
+
+    expect(mocks.listCustomerRecords).toHaveBeenCalledWith({}, {
+      businessDate: "2026-09-07",
+      includeBilling: true,
+      includeContact: true,
+      includeVisits: true,
+    });
   });
 
   it("creates one customer and all selected active links atomically", async () => {
@@ -107,7 +146,10 @@ describe("customer service project links", () => {
       context,
     );
 
-    expect(created.projects).toEqual([projectB, projectA]);
+    expect(created.projects).toEqual([
+      expect.objectContaining({ id: projectBId }),
+      expect.objectContaining({ id: projectAId }),
+    ]);
     expect(mocks.findProjectForUpdate.mock.calls.map((call) => call[1])).toEqual([
       projectAId,
       projectBId,
@@ -121,6 +163,7 @@ describe("customer service project links", () => {
       expect.anything(),
       expect.objectContaining({
         action: "customer.created",
+        actorId,
         afterSummary: expect.objectContaining({
           projectIds: [projectBId, projectAId],
         }),
@@ -175,11 +218,13 @@ describe("customer service project links", () => {
     const updated = await updateCustomer(
       {} as Pool,
       customerId,
-      { projectIds: [projectBId] },
+      { projectIds: [projectBId], version: 1 },
       context,
     );
 
-    expect(updated.projects).toEqual([projectB]);
+    expect(updated.projects).toEqual([
+      expect.objectContaining({ id: projectBId }),
+    ]);
     expect(mocks.updateCustomerProjectLinkStatus).toHaveBeenCalledTimes(2);
     expect(mocks.updateCustomerProjectLinkStatus).toHaveBeenNthCalledWith(
       1,
@@ -222,7 +267,7 @@ describe("customer service project links", () => {
       updateCustomer(
         {} as Pool,
         customerId,
-        { projectIds: [projectBId] },
+        { projectIds: [projectBId], version: 1 },
         context,
       ),
     ).rejects.toBeInstanceOf(CustomerProjectInUseError);
@@ -249,7 +294,7 @@ describe("customer service project links", () => {
       updateCustomer(
         {} as Pool,
         customerId,
-        { projectIds: [projectAId] },
+        { projectIds: [projectAId], version: 1 },
         context,
       ),
     ).resolves.toMatchObject({

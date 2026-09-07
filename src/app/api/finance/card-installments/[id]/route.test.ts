@@ -25,7 +25,12 @@ import { PATCH } from "@/app/api/finance/card-installments/[id]/route";
 describe("card installment item API", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.authenticate.mockResolvedValue({ accountId: "10000000-0000-4000-8000-000000000001", kind: "account" });
+    mocks.authenticate.mockResolvedValue({
+      accountId: "10000000-0000-4000-8000-000000000001",
+      kind: "account",
+      permissions: ["finance.cards.read", "finance.cards.write"],
+      role: "member",
+    });
     mocks.parse.mockImplementation((value: unknown) => value);
     mocks.requestLogger.mockReturnValue({ error: vi.fn() });
   });
@@ -42,5 +47,28 @@ describe("card installment item API", () => {
     );
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({ status: "payment_date_in_future" });
+  });
+
+  it("rejects write-only access before reading an installment body", async () => {
+    mocks.authenticate.mockResolvedValue({
+      accountId: "10000000-0000-4000-8000-000000000001",
+      kind: "account",
+      permissions: ["finance.cards.write"],
+      role: "member",
+    });
+    const response = await PATCH(
+      new NextRequest("https://portal.example/api/finance/card-installments/id", {
+        body: "{}",
+        headers: {
+          "content-type": "application/json",
+          origin: "https://portal.example",
+        },
+        method: "PATCH",
+      }),
+      { params: Promise.resolve({ id: "60000000-0000-4000-8000-000000000001" }) },
+    );
+    expect(response.status).toBe(403);
+    expect(mocks.parse).not.toHaveBeenCalled();
+    expect(mocks.update).not.toHaveBeenCalled();
   });
 });

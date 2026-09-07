@@ -36,6 +36,7 @@ const customer = {
   name: "Zevahir Home",
   phone: "+90 555 000 00 00",
   projects: [project],
+  version: 4,
 };
 const otherCustomer = {
   contactNote: null,
@@ -59,6 +60,7 @@ const contract = {
   status: "active" as const,
   vatMode: "exempt" as const,
   vatRate: "0.00",
+  version: 6,
 };
 const nextContractId = "20000000-0000-4000-8000-000000000002";
 const nextContract = {
@@ -104,6 +106,47 @@ afterEach(() => {
 });
 
 describe("CustomerWorkspace reliable date writes", () => {
+  it("does not publish one loaded month as the customer's global visit summary", async () => {
+    const onVisitsSaved = vi.fn();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/contracts")) {
+        return jsonResponse({ contracts: [contract] });
+      }
+      if (url.includes("/month-plans/")) {
+        return jsonResponse({
+          monthPlan: {
+            visits: [
+              {
+                committedOn: "2026-09-02",
+                deliveredOn: null,
+                id: "30000000-0000-4000-8000-000000000001",
+                internalDurationMinutes: null,
+                internalPlannedAtUtc: null,
+                resolutionNote: null,
+                resolutionStatus: "planned",
+              },
+            ],
+          },
+        });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <CustomerWorkspace
+        customer={customer}
+        live
+        onContractSaved={vi.fn()}
+        onVisitsSaved={onVisitsSaved}
+      />,
+    );
+
+    expect(await screen.findByDisplayValue("2026-09-02")).toBeInTheDocument();
+    expect(onVisitsSaved).not.toHaveBeenCalled();
+  });
+
   it("updates only changed customer fields and reports the saved customer", async () => {
     const requests: unknown[] = [];
     const onCustomerSaved = vi.fn();
@@ -148,7 +191,7 @@ describe("CustomerWorkspace reliable date writes", () => {
     );
 
     await waitFor(() => expect(requests).toEqual([
-      { displayName: "Zevahir Home Mobilya" },
+      { displayName: "Zevahir Home Mobilya", version: 4 },
     ]));
     expect(onCustomerSaved).toHaveBeenCalledWith(
       expect.objectContaining({ displayName: "Zevahir Home Mobilya" }),
@@ -207,7 +250,7 @@ describe("CustomerWorkspace reliable date writes", () => {
     );
 
     await waitFor(() =>
-      expect(requests).toEqual([{ projectIds: [projectId, otherProjectId] }]),
+      expect(requests).toEqual([{ projectIds: [projectId, otherProjectId], version: 4 }]),
     );
     expect(onCustomerSaved).toHaveBeenCalledWith(
       expect.objectContaining({ projects: [project, otherProject] }),
@@ -520,6 +563,10 @@ describe("CustomerWorkspace reliable date writes", () => {
     expect(
       screen.getByRole("spinbutton", { name: /Ödeme günü/u }),
     ).toHaveValue(5);
+    expect(screen.getByText("İzleyen ayın 5. günü")).toBeInTheDocument();
+    expect(
+      screen.getByText(/Vade, hizmet ayını izleyen ayda/u),
+    ).toBeInTheDocument();
 
     fireEvent.input(screen.getByLabelText("Başlangıç"), {
       target: { value: "2027-01-15" },
@@ -574,6 +621,7 @@ describe("CustomerWorkspace reliable date writes", () => {
       body: expect.objectContaining({
         endsOn: "2026-11-30",
         startsOn: "2026-03-01",
+        version: 6,
       }),
       method: "PATCH",
       url: `/api/customers/${customerId}/contracts/${contractId}`,
@@ -991,6 +1039,7 @@ describe("CustomerWorkspace reliable date writes", () => {
                 id: "30000000-0000-4000-8000-000000000001",
                 internalDurationMinutes: null,
                 internalPlannedAtUtc: null,
+                locationLabel: body.visits[0].locationLabel,
                 resolutionNote: null,
                 resolutionStatus: "planned",
               },
@@ -1008,6 +1057,10 @@ describe("CustomerWorkspace reliable date writes", () => {
     );
     const planMonth = screen.getByLabelText("Plan ayı") as HTMLInputElement;
     const visitDate = screen.getByLabelText("Ziyaret günü") as HTMLInputElement;
+    await user.type(
+      screen.getByLabelText("Konum / görüşme kanalı"),
+      "Fabrika A",
+    );
     setNativeInputValue(planMonth, "2026-10");
     setNativeInputValue(visitDate, "2026-10-02");
     await user.click(
@@ -1022,8 +1075,174 @@ describe("CustomerWorkspace reliable date writes", () => {
           committedOn: "2026-10-02",
           internalDurationMinutes: null,
           internalStartTime: null,
+          locationLabel: "Fabrika A",
         },
       ],
     });
+  });
+
+  it("edits a makeup visit and replaces a planned visit while preserving completion", async () => {
+    const makeupVisitId = "30000000-0000-4000-8000-000000000001";
+    const completedVisitId = "30000000-0000-4000-8000-000000000002";
+    const plannedVisitId = "30000000-0000-4000-8000-000000000003";
+    const replacementVisitId = "30000000-0000-4000-8000-000000000004";
+    const makeupVisit = {
+      committedOn: "2026-09-03",
+      deliveredOn: null,
+      id: makeupVisitId,
+      internalDurationMinutes: 120,
+      internalPlannedAtUtc: "2026-09-03 06:00:00.000000",
+      locationLabel: "Eski konum",
+      resolutionNote: "Telafi planlanacak",
+      resolutionStatus: "makeup_pending" as const,
+    };
+    const completedVisit = {
+      committedOn: "2026-09-10",
+      deliveredOn: "2026-09-10",
+      id: completedVisitId,
+      internalDurationMinutes: null,
+      internalPlannedAtUtc: null,
+      locationLabel: "Merkez ofis",
+      resolutionNote: null,
+      resolutionStatus: "completed" as const,
+    };
+    const editablePlannedVisit = {
+      ...makeupVisit,
+      committedOn: "2026-09-17",
+      id: plannedVisitId,
+      locationLabel: "Planlanan konum",
+      resolutionNote: null,
+      resolutionStatus: "planned" as const,
+    };
+    const putBodies: Array<{
+      visits: Array<{
+        committedOn: string;
+        id?: string;
+        internalDurationMinutes: number | null;
+        internalStartTime: string | null;
+        locationLabel: string | null;
+      }>;
+    }> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (method === "GET" && url.endsWith("/contracts")) {
+        return jsonResponse({ contracts: [contract] });
+      }
+      if (method === "GET" && url.includes("/month-plans/")) {
+        return jsonResponse({
+          monthPlan: {
+            visits: [makeupVisit, editablePlannedVisit, completedVisit],
+          },
+        });
+      }
+      if (method === "PUT" && url.includes("/month-plans/")) {
+        const body = JSON.parse(String(init?.body)) as (typeof putBodies)[number];
+        putBodies.push(body);
+        return jsonResponse({
+          monthPlan: {
+            visits: body.visits.map((visit) => {
+              if (visit.id === completedVisitId) return completedVisit;
+              return {
+                committedOn: visit.committedOn,
+                deliveredOn: null,
+                id: visit.id ?? replacementVisitId,
+                internalDurationMinutes: visit.internalDurationMinutes,
+                internalPlannedAtUtc: null,
+                locationLabel: visit.locationLabel,
+                resolutionNote: visit.id === makeupVisitId ? makeupVisit.resolutionNote : null,
+                resolutionStatus:
+                  visit.id === makeupVisitId ? "makeup_pending" : "planned",
+              };
+            }),
+          },
+        });
+      }
+      throw new Error(`Unexpected request: ${method} ${url}`);
+    });
+    const user = userEvent.setup();
+    renderWorkspace(fetchMock);
+
+    const locations = await screen.findAllByLabelText("Konum / görüşme kanalı");
+    expect(locations[0]).toBeEnabled();
+    expect(locations[1]).toBeEnabled();
+    expect(locations[2]).toBeDisabled();
+    expect(screen.getByRole("button", { name: "+ Ziyaret satırı" })).toBeEnabled();
+    expect(
+      screen.getAllByRole("button", { name: "Ziyaret satırını kaldır" }),
+    ).toHaveLength(1);
+    await user.selectOptions(screen.getAllByLabelText("Durum")[0]!, "planned");
+    expect(
+      screen.getAllByRole("button", { name: "Ziyaret satırını kaldır" }),
+    ).toHaveLength(1);
+    await user.selectOptions(
+      screen.getAllByLabelText("Durum")[0]!,
+      "makeup_pending",
+    );
+
+    await user.clear(locations[0]!);
+    await user.type(locations[0]!, "Yeni konum");
+    await user.click(screen.getByRole("button", { name: "Aylık planı kaydet" }));
+    await waitFor(() => expect(putBodies).toHaveLength(1));
+    expect(putBodies[0]?.visits).toEqual([
+      expect.objectContaining({ id: makeupVisitId, locationLabel: "Yeni konum" }),
+      expect.objectContaining({ id: plannedVisitId }),
+      expect.objectContaining({ id: completedVisitId, locationLabel: "Merkez ofis" }),
+    ]);
+
+    await user.click(
+      await screen.findByRole("button", { name: "Ziyaret satırını kaldır" }),
+    );
+    await user.click(screen.getByRole("button", { name: "+ Ziyaret satırı" }));
+    const visitDates = screen.getAllByLabelText("Ziyaret günü");
+    const replacementDate = visitDates.at(-1) as HTMLInputElement;
+    fireEvent.input(replacementDate, {
+      target: { value: editablePlannedVisit.committedOn },
+    });
+    const nextLocations = screen.getAllByLabelText("Konum / görüşme kanalı");
+    await user.type(nextLocations.at(-1)!, "Yeniden planlandı");
+    await user.click(screen.getByRole("button", { name: "Aylık planı kaydet" }));
+    await waitFor(() => expect(putBodies).toHaveLength(2));
+    expect(putBodies[1]?.visits).toEqual([
+      expect.objectContaining({ id: makeupVisitId }),
+      expect.objectContaining({ id: completedVisitId }),
+      {
+        committedOn: editablePlannedVisit.committedOn,
+        internalDurationMinutes: null,
+        internalStartTime: null,
+        locationLabel: "Yeniden planlandı",
+      },
+    ]);
+  });
+
+  it("keeps editing available but hides lifecycle and audit controls without exact capabilities", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/contracts")) return jsonResponse({ contracts: [contract] });
+      if (url.includes("/month-plans/")) {
+        return jsonResponse({ monthPlan: { visits: [] } });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    }));
+
+    render(
+      <CustomerWorkspace
+        capabilities={{
+          canLifecycleContracts: false,
+          canLifecycleCustomers: false,
+          canReadAudit: false,
+        }}
+        customer={customer}
+        live
+        onContractSaved={vi.fn()}
+        onVisitsSaved={vi.fn()}
+      />,
+    );
+
+    expect(await screen.findByRole("button", { name: "Sözleşmeyi düzenle" }))
+      .toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Müşteri bilgilerini düzenle" }))
+      .toBeInTheDocument();
+    expect(screen.queryByText("İşlemler")).not.toBeInTheDocument();
   });
 });

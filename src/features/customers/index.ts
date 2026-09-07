@@ -1,8 +1,11 @@
 export type {
+  CustomerBillingSummary,
+  CustomerOverview,
   Customer,
   CustomerProjectSummary,
   CustomerStatus,
 } from "./repository";
+export { changeCustomerLifecycle } from "./lifecycle-service";
 export {
   createCustomer,
   CustomerNotFoundError,
@@ -11,6 +14,7 @@ export {
   CustomerProjectUnavailableError,
   CustomerProjectVersionConflictError,
   CustomerShortCodeConflictError,
+  CustomerVersionConflictError,
   listCustomers,
   updateCustomer,
 } from "./service";

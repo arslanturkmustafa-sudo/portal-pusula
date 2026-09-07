@@ -47,11 +47,19 @@ const excludedLocalScripts = new Set([
   "scripts/verify-hostinger-package.mjs",
 ]);
 const allowedPublicFiles = new Set([
+  "public/brand/muhendis-kafasi-logo.png",
   "public/icons/portal-pusula-192-v1.png",
   "public/icons/portal-pusula-512-v1.png",
   "public/icons/portal-pusula-maskable-512-v1.png",
   "public/offline-v1.html",
 ]);
+const officialBrandAsset = Object.freeze({
+  archivePath: "public/brand/muhendis-kafasi-logo.png",
+  bytes: 16_739,
+  height: 100,
+  sha256: "c0c38daafab133838af67f46febc816c897a6da9dc6a1d08579c7ec6d81d49f9",
+  width: 191,
+});
 const drizzleMigrationPattern = /^drizzle\/\d{4}_[a-z0-9][a-z0-9_-]*\.sql$/u;
 const drizzleMetaPattern =
   /^drizzle\/meta\/(?:_journal|\d{4}_snapshot)\.json$/u;
@@ -202,6 +210,28 @@ async function collectEntries() {
   assertUniqueCaseInsensitiveArchivePaths(
     entries.map((entry) => entry.archivePath),
   );
+
+  const brandAsset = entries.find(
+    (entry) => entry.archivePath === officialBrandAsset.archivePath,
+  );
+  const isPng =
+    brandAsset?.content.length >= 24 &&
+    brandAsset.content.subarray(0, 8).equals(
+      Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+    );
+  const hasExpectedIdentity =
+    brandAsset !== undefined &&
+    brandAsset.content.length === officialBrandAsset.bytes &&
+    isPng &&
+    brandAsset.content.readUInt32BE(16) === officialBrandAsset.width &&
+    brandAsset.content.readUInt32BE(20) === officialBrandAsset.height &&
+    createHash("sha256").update(brandAsset.content).digest("hex") ===
+      officialBrandAsset.sha256;
+  if (!hasExpectedIdentity) {
+    throw new Error(
+      "Resmi Mühendis Kafası logo asset'i beklenen kimlikle eşleşmiyor.",
+    );
+  }
 
   if (entries[0]?.archivePath !== "package.json") {
     throw new Error("package.json ZIP kökünde bulunamadı.");

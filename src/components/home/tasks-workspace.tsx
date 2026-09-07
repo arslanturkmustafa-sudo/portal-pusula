@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import {
   useEffect,
   useMemo,
@@ -10,14 +11,18 @@ import {
 } from "react";
 
 import { PortalPageHeader } from "@/components/portal/portal-page-header";
+import { RecordLifecycleControls } from "@/components/portal/record-lifecycle-controls";
+import { redirectToPortalLogin as redirectToLogin } from "@/platform/navigation/portal-return-path";
 
-type TaskStatus = "backlog" | "todo" | "in_progress" | "blocked" | "done";
+type TaskStatus = "backlog" | "todo" | "in_progress" | "blocked" | "done" | "cancelled";
 type TaskPriority = "low" | "normal" | "high" | "urgent";
 type LoadState = "error" | "loading" | "ready";
 type SaveState = "idle" | "saving";
 type DueFilter = "all" | "today" | "overdue";
 
 type TaskDto = Readonly<{
+  archiveReason?: string | null;
+  archivedAtUtc?: string | null;
   assigneeEmail: string | null;
   assigneeUserAccountId: string | null;
   completedAtUtc: string | null;
@@ -36,6 +41,7 @@ type TaskDto = Readonly<{
   title: string;
   updatedAtUtc: string;
   version: number;
+  visitLinked: boolean;
 }>;
 
 type CustomerDto = Readonly<{
@@ -75,6 +81,7 @@ const statusDefinitions: readonly Readonly<{
   { label: "Devam ediyor", status: "in_progress" },
   { label: "Beklemede", status: "blocked" },
   { label: "Tamamlandı", status: "done" },
+  { label: "İptal", status: "cancelled" },
 ];
 
 const statusLabels: Readonly<Record<TaskStatus, string>> = Object.fromEntries(
@@ -149,11 +156,7 @@ function dueDateLabel(value: string, today: string): string {
 }
 
 function isOverdue(task: TaskDto, today: string): boolean {
-  return task.status !== "done" && task.dueOn !== null && task.dueOn < today;
-}
-
-function redirectToLogin(): void {
-  window.location.assign(new URL("/giris", window.location.origin).toString());
+  return task.status !== "done" && task.status !== "cancelled" && task.dueOn !== null && task.dueOn < today;
 }
 
 function canonicalSearch(value: string): string {
@@ -218,9 +221,13 @@ function statusClass(status: TaskStatus): string {
 }
 
 type TaskCardProps = Readonly<{
+  canLifecycle: boolean;
+  canReadHistory: boolean;
+  canWrite: boolean;
   editing: boolean;
   onEdit: (task: TaskDto) => void;
   onStatusChange: (task: TaskDto, status: TaskStatus) => void;
+  onLifecycleSuccess: () => void;
   registerCard: (id: string, element: HTMLElement | null) => void;
   task: TaskDto;
   today: string;
@@ -228,15 +235,20 @@ type TaskCardProps = Readonly<{
 }>;
 
 function TaskCard({
+  canLifecycle,
+  canReadHistory,
+  canWrite,
   editing,
   onEdit,
   onStatusChange,
+  onLifecycleSuccess,
   registerCard,
   task,
   today,
   updating,
 }: TaskCardProps) {
   const titleId = `task-title-${task.id}`;
+  const visitLockId = `task-visit-lock-${task.id}`;
   const overdue = isOverdue(task, today);
 
   return (
@@ -281,6 +293,12 @@ function TaskCard({
         <p className="task-card-description">{task.description}</p>
       )}
 
+      {task.visitLinked ? (
+        <p className="task-card-customer" id={visitLockId}>
+          Ziyarete bağlı · firma, proje, vade ve durum ziyaret kaydınca yönetilir
+        </p>
+      ) : null}
+
       <div className="task-card-meta">
         {task.dueOn === null ? (
           <span>Vade yok</span>
@@ -294,11 +312,12 @@ function TaskCard({
       </div>
 
       <div className="task-card-actions">
-        <label className="task-card-status-field">
+        {canWrite ? <label className="task-card-status-field">
           <span>Durum</span>
           <select
+            aria-describedby={task.visitLinked ? visitLockId : undefined}
             aria-label={`${task.title} durumu`}
-            disabled={updating}
+            disabled={updating || task.visitLinked}
             value={task.status}
             onChange={(event) =>
               onStatusChange(task, event.target.value as TaskStatus)
@@ -310,8 +329,8 @@ function TaskCard({
               </option>
             ))}
           </select>
-        </label>
-        <button
+        </label> : null}
+        {canWrite ? <button
           aria-controls="task-editor"
           aria-expanded={editing}
           aria-label={`${task.title} görevini düzenle`}
@@ -321,13 +340,64 @@ function TaskCard({
           onClick={() => onEdit(task)}
         >
           Düzenle
-        </button>
+        </button> : null}
+        <RecordLifecycleControls
+          actions={!canLifecycle ? [] : task.archivedAtUtc ? [{
+            description: "Görevi arşivden çıkarır; tamamlandı veya iptal durumunu ayrıca değiştirmez.",
+            id: "restore",
+            label: "Arşivden çıkar",
+            request: {
+              action: "restore",
+              endpoint: `/api/tasks/${task.id}/lifecycle`,
+              kind: "lifecycle",
+              version: task.version,
+            },
+          }] : task.status === "done" || task.status === "cancelled" ? [{
+            description: "Görevi aktif panodan kaldırır; geçmiş kaydı korunur.",
+            id: "archive",
+            label: "Arşivle",
+            request: {
+              action: "archive",
+              endpoint: `/api/tasks/${task.id}/lifecycle`,
+              kind: "lifecycle",
+              version: task.version,
+            },
+            tone: "danger",
+          }] : []}
+          canReadHistory={canReadHistory}
+          entityId={task.id}
+          entityLabel={task.title}
+          entityType="work_task"
+          onSuccess={onLifecycleSuccess}
+        />
       </div>
     </article>
   );
 }
 
-export function TasksWorkspace() {
+type TasksWorkspaceProps = Readonly<{
+  capabilities?: Readonly<{
+    canExportReports: boolean;
+    canLifecycleTasks: boolean;
+    canReadAudit: boolean;
+    canReadCustomers: boolean;
+    canReadProjects: boolean;
+    canWriteTasks: boolean;
+  }>;
+}>;
+
+const fullTaskCapabilities: NonNullable<TasksWorkspaceProps["capabilities"]> = {
+  canExportReports: true,
+  canLifecycleTasks: true,
+  canReadAudit: true,
+  canReadCustomers: true,
+  canReadProjects: true,
+  canWriteTasks: true,
+};
+
+export function TasksWorkspace({
+  capabilities = fullTaskCapabilities,
+}: TasksWorkspaceProps) {
   const [tasks, setTasks] = useState<readonly TaskDto[]>([]);
   const [customers, setCustomers] = useState<readonly CustomerDto[]>([]);
   const [projects, setProjects] = useState<readonly ProjectDto[]>([]);
@@ -335,6 +405,7 @@ export function TasksWorkspace() {
   const [requestRevision, setRequestRevision] = useState(0);
   const [query, setQuery] = useState("");
   const [dueFilter, setDueFilter] = useState<DueFilter>("all");
+  const [customerFilter, setCustomerFilter] = useState("all");
   const [projectFilter, setProjectFilter] = useState("all");
   const [mobileStatus, setMobileStatus] = useState<TaskStatus>("todo");
   const [editorOpen, setEditorOpen] = useState(false);
@@ -361,50 +432,76 @@ export function TasksWorkspace() {
         credentials: "same-origin",
         signal: controller.signal,
       });
-      const customersResponse = await fetch("/api/customers", {
-        cache: "no-store",
-        credentials: "same-origin",
-        signal: controller.signal,
-      });
-      const projectsResponse = await fetch("/api/projects", {
-        cache: "no-store",
-        credentials: "same-origin",
-        signal: controller.signal,
-      });
+      const customersResponse = capabilities.canReadCustomers
+        ? await fetch("/api/customers", {
+            cache: "no-store",
+            credentials: "same-origin",
+            signal: controller.signal,
+          })
+        : null;
+      const projectsResponse = capabilities.canReadProjects
+        ? await fetch("/api/projects", {
+            cache: "no-store",
+            credentials: "same-origin",
+            signal: controller.signal,
+          })
+        : null;
 
       return [tasksResponse, customersResponse, projectsResponse] as const;
     })()
       .then(async ([tasksResponse, customersResponse, projectsResponse]) => {
         if (
           tasksResponse.status === 401 ||
-          customersResponse.status === 401 ||
-          projectsResponse.status === 401
+          customersResponse?.status === 401 ||
+          projectsResponse?.status === 401
         ) {
           redirectToLogin();
           return null;
         }
-        if (!tasksResponse.ok || !customersResponse.ok || !projectsResponse.ok) {
+        if (
+          !tasksResponse.ok ||
+          (customersResponse !== null && !customersResponse.ok) ||
+          (projectsResponse !== null && !projectsResponse.ok)
+        ) {
           throw new Error("Task workspace is unavailable.");
         }
-        const [taskPayload, customerPayload, projectPayload] = (await Promise.all([
-          tasksResponse.json(),
-          customersResponse.json(),
-          projectsResponse.json(),
-        ])) as [
-          { tasks?: TaskDto[] },
-          { customers?: CustomerDto[] },
-          { projects?: ProjectDto[] },
-        ];
+        const taskPayload = (await tasksResponse.json()) as { tasks?: TaskDto[] };
+        const customerPayload = customersResponse
+          ? ((await customersResponse.json()) as { customers?: CustomerDto[] })
+          : null;
+        const projectPayload = projectsResponse
+          ? ((await projectsResponse.json()) as { projects?: ProjectDto[] })
+          : null;
         if (
           !Array.isArray(taskPayload.tasks) ||
-          !Array.isArray(customerPayload.customers) ||
-          !Array.isArray(projectPayload.projects)
+          (customerPayload !== null && !Array.isArray(customerPayload.customers)) ||
+          (projectPayload !== null && !Array.isArray(projectPayload.projects))
         ) {
           throw new Error("Task workspace response is invalid.");
         }
+        const taskCustomers = new Map<string, CustomerDto>();
+        const taskProjects = new Map<string, ProjectDto>();
+        for (const task of taskPayload.tasks) {
+          if (task.customerId && task.customerName) {
+            taskCustomers.set(task.customerId, {
+              displayName: task.customerName,
+              id: task.customerId,
+              shortCode: task.customerCode ?? "—",
+              status: "active",
+            });
+          }
+          if (task.projectId && task.projectName) {
+            taskProjects.set(task.projectId, {
+              displayName: task.projectName,
+              id: task.projectId,
+              shortCode: task.projectCode ?? "—",
+              status: "active",
+            });
+          }
+        }
         return {
-          customers: customerPayload.customers,
-          projects: projectPayload.projects,
+          customers: customerPayload?.customers ?? [...taskCustomers.values()],
+          projects: projectPayload?.projects ?? [...taskProjects.values()],
           tasks: taskPayload.tasks,
         };
       })
@@ -432,7 +529,7 @@ export function TasksWorkspace() {
       current = false;
       controller.abort();
     };
-  }, [requestRevision]);
+  }, [capabilities, requestRevision]);
 
   useEffect(() => {
     if (editorOpen) titleInputRef.current?.focus();
@@ -466,9 +563,14 @@ export function TasksWorkspace() {
         (projectFilter === "unassigned"
           ? task.projectId === null
           : task.projectId === projectFilter);
-      return matchesQuery && matchesDue && matchesProject;
+      const matchesCustomer =
+        customerFilter === "all" ||
+        (customerFilter === "unassigned"
+          ? task.customerId === null
+          : task.customerId === customerFilter);
+      return matchesQuery && matchesDue && matchesProject && matchesCustomer;
     });
-  }, [dueFilter, projectFilter, query, tasks, today]);
+  }, [customerFilter, dueFilter, projectFilter, query, tasks, today]);
 
   const editorProjects = useMemo(() => {
     if (draft.customerId === "") return projects;
@@ -583,7 +685,9 @@ export function TasksWorkspace() {
       };
       if (!response.ok || payload.task === undefined) {
         setFormError(
-          payload.status === "customer_project_mismatch"
+          payload.status === "visit_linked_fields_locked"
+            ? "Ziyarete bağlı görevlerde firma, proje, vade ve durum ziyaret kaydından yönetilir."
+            : payload.status === "customer_project_mismatch"
             ? "Seçilen müşteri bu projeye bağlı değil. Müşteri veya proje seçimini değiştirin."
             : response.status === 409
               ? "Görev başka bir işlemde değişti. Sayfayı yenileyip yeniden deneyin."
@@ -602,6 +706,7 @@ export function TasksWorkspace() {
       ]);
       if (existing === null) {
         setQuery("");
+        setCustomerFilter("all");
         setDueFilter("all");
         setProjectFilter("all");
       }
@@ -612,6 +717,14 @@ export function TasksWorkspace() {
           : savedTask.projectId !== projectFilter)
       ) {
         setProjectFilter("all");
+      }
+      if (
+        customerFilter !== "all" &&
+        (customerFilter === "unassigned"
+          ? savedTask.customerId !== null
+          : savedTask.customerId !== customerFilter)
+      ) {
+        setCustomerFilter("all");
       }
       setMobileStatus(savedTask.status);
       setAnnouncement(
@@ -629,7 +742,9 @@ export function TasksWorkspace() {
   }
 
   async function changeTaskStatus(task: TaskDto, status: TaskStatus) {
-    if (task.status === status || updatingTaskId !== null) return;
+    if (task.visitLinked || task.status === status || updatingTaskId !== null) {
+      return;
+    }
     setUpdatingTaskId(task.id);
     setBoardError(null);
     try {
@@ -679,28 +794,54 @@ export function TasksWorkspace() {
   return (
     <div className="tasks-page-workspace">
       <PortalPageHeader
-        actions={(
-          <button
-            aria-controls="task-editor"
-            aria-expanded={editorOpen}
-            className="primary-action"
-            disabled={saveState === "saving"}
-            ref={createButtonRef}
-            type="button"
-            onClick={() => {
-              if (editorOpen) closeEditor();
-              else openCreateEditor();
-            }}
-          >
-            {editorOpen ? "Formu kapat" : "+ Görev ekle"}
-          </button>
-        )}
+        actions={capabilities.canExportReports || capabilities.canWriteTasks ? (
+          <>
+            {capabilities.canExportReports ? (
+              <Link
+                aria-label="Firma görev raporu"
+                className="task-report-action"
+                href={
+                  customerFilter !== "all" && customerFilter !== "unassigned"
+                    ? `/gorevler/rapor?customerId=${encodeURIComponent(customerFilter)}`
+                    : "/gorevler/rapor"
+                }
+              >
+                <svg
+                  aria-hidden="true"
+                  fill="none"
+                  focusable="false"
+                  viewBox="0 0 16 16"
+                >
+                  <path d="M3 13V8.5M8 13V3M13 13V6" />
+                  <path d="M1.75 13.25h12.5" />
+                </svg>
+                <span>Firma raporu</span>
+              </Link>
+            ) : null}
+            {capabilities.canWriteTasks ? (
+              <button
+                aria-controls="task-editor"
+                aria-expanded={editorOpen}
+                className="primary-action"
+                disabled={saveState === "saving"}
+                ref={createButtonRef}
+                type="button"
+                onClick={() => {
+                  if (editorOpen) closeEditor();
+                  else openCreateEditor();
+                }}
+              >
+                {editorOpen ? "Formu kapat" : "+ Görev ekle"}
+              </button>
+            ) : null}
+          </>
+        ) : undefined}
         context="İş takibi"
         note="İşleri proje, müşteri, öncelik ve vade bilgisiyle beş aşamada takip edin."
         title="Görevler"
       />
 
-      {editorOpen ? (
+      {editorOpen && capabilities.canWriteTasks ? (
         <section
           className="task-editor"
           id="task-editor"
@@ -714,7 +855,9 @@ export function TasksWorkspace() {
               {editingTask === null ? "Görev ekle" : "Görevi güncelle"}
             </h2>
             <p>
-              Görevi ilgili proje dosyasına bağlayın; gerekiyorsa müşteri ve vade ekleyin.
+              {editingTask?.visitLinked
+                ? "Bu görev bir ziyaret kaydından üretildi. Firma, proje, vade ve durum ziyaret kaydınca korunur; başlık, açıklama ve öncelik düzenlenebilir."
+                : "Görevi ilgili proje dosyasına bağlayın; gerekiyorsa müşteri ve vade ekleyin."}
             </p>
           </div>
           <form onSubmit={submitTask}>
@@ -731,6 +874,7 @@ export function TasksWorkspace() {
             <label>
               <span>Proje</span>
               <select
+                disabled={editingTask?.visitLinked === true}
                 value={draft.projectId}
                 onChange={(event) =>
                   updateDraft({ projectId: event.target.value })
@@ -758,6 +902,7 @@ export function TasksWorkspace() {
             <label>
               <span>Müşteri</span>
               <select
+                disabled={editingTask?.visitLinked === true}
                 value={draft.customerId}
                 onChange={(event) =>
                   updateDraft({ customerId: event.target.value })
@@ -781,6 +926,7 @@ export function TasksWorkspace() {
             <label>
               <span>Vade</span>
               <input
+                disabled={editingTask?.visitLinked === true}
                 max="9999-12-31"
                 min="1000-01-01"
                 type="date"
@@ -806,6 +952,7 @@ export function TasksWorkspace() {
             <label>
               <span>Durum</span>
               <select
+                disabled={editingTask?.visitLinked === true}
                 value={draft.status}
                 onChange={(event) =>
                   updateDraft({ status: event.target.value as TaskStatus })
@@ -876,6 +1023,22 @@ export function TasksWorkspace() {
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
               />
+            </label>
+            <label className="task-project-filter">
+              <span className="sr-only">Müşteri filtresi</span>
+              <select
+                aria-label="Müşteri filtresi"
+                value={customerFilter}
+                onChange={(event) => setCustomerFilter(event.target.value)}
+              >
+                <option value="all">Tüm müşteriler</option>
+                <option value="unassigned">Müşterisiz görevler</option>
+                {customers.map((customer) => (
+                  <option key={customer.id} value={customer.id}>
+                    {customer.displayName}
+                  </option>
+                ))}
+              </select>
             </label>
             <label className="task-project-filter">
               <span className="sr-only">Proje filtresi</span>
@@ -960,9 +1123,11 @@ export function TasksWorkspace() {
             <div>
               <strong>Henüz görev kaydı yok.</strong>
               <p>İlk işi Havuz veya Yapılacak aşamasına ekleyerek başlayın.</p>
-              <button className="text-action" type="button" onClick={openCreateEditor}>
-                İlk görevi ekle
-              </button>
+              {capabilities.canWriteTasks ? (
+                <button className="text-action" type="button" onClick={openCreateEditor}>
+                  İlk görevi ekle
+                </button>
+              ) : null}
             </div>
           </div>
         ) : null}
@@ -978,6 +1143,7 @@ export function TasksWorkspace() {
                 type="button"
                 onClick={() => {
                   setQuery("");
+                  setCustomerFilter("all");
                   setDueFilter("all");
                   setProjectFilter("all");
                 }}
@@ -1039,10 +1205,16 @@ export function TasksWorkspace() {
                           {columnTasks.map((task) => (
                             <li key={task.id}>
                               <TaskCard
+                                canLifecycle={capabilities.canLifecycleTasks}
+                                canReadHistory={capabilities.canReadAudit}
+                                canWrite={capabilities.canWriteTasks}
                                 editing={editingTask?.id === task.id && editorOpen}
                                 onEdit={openEditEditor}
                                 onStatusChange={(item, status) =>
                                   void changeTaskStatus(item, status)
+                                }
+                                onLifecycleSuccess={() =>
+                                  setRequestRevision((current) => current + 1)
                                 }
                                 registerCard={registerCard}
                                 task={task}

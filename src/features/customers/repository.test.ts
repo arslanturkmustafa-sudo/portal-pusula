@@ -13,6 +13,9 @@ import {
 } from "@/features/customers/repository";
 
 const customerBase = {
+  archive_reason: null,
+  archived_at_utc: null,
+  archived_by_user_account_id: null,
   contact_note: null,
   created_at_utc: "2026-09-01 08:00:00.000000",
   customer_status: "active",
@@ -22,6 +25,7 @@ const customerBase = {
   phone: null,
   short_code: "ONCU",
   updated_at_utc: "2026-09-01 08:00:00.000000",
+  version: 1,
 };
 
 describe("customer repository", () => {
@@ -30,6 +34,12 @@ describe("customer repository", () => {
       [
         {
           ...customerBase,
+          active_contract_count: 2,
+          billing_currency: "TRY",
+          billing_vat_mode: "mixed",
+          monthly_fee_amount: "175000.0000",
+          next_visit_on: "2026-09-10",
+          payment_days: "5,15",
           project_display_name: "ByPusula",
           project_id: "20000000-0000-4000-8000-000000000001",
           project_short_code: "BYPUSULA",
@@ -37,6 +47,12 @@ describe("customer repository", () => {
         },
         {
           ...customerBase,
+          active_contract_count: 2,
+          billing_currency: "TRY",
+          billing_vat_mode: "mixed",
+          monthly_fee_amount: "175000.0000",
+          next_visit_on: "2026-09-10",
+          payment_days: "5,15",
           project_display_name: "Mühendis Kafası",
           project_id: "20000000-0000-4000-8000-000000000002",
           project_short_code: "MUHENDIS_KAFASI",
@@ -47,10 +63,28 @@ describe("customer repository", () => {
     ]);
 
     await expect(
-      listCustomerRecords({ execute } as unknown as PoolConnection),
+      listCustomerRecords(
+        { execute } as unknown as PoolConnection,
+        {
+          businessDate: "2026-09-07",
+          includeBilling: true,
+          includeContact: true,
+          includeVisits: true,
+        },
+      ),
     ).resolves.toEqual([
       expect.objectContaining({
         displayName: "Öncü Üretim",
+        overview: {
+          billing: {
+            activeContractCount: 2,
+            currency: "TRY",
+            monthlyFeeAmount: "175000.0000",
+            paymentDays: [5, 15],
+            vatMode: "mixed",
+          },
+          nextVisitOn: "2026-09-10",
+        },
         projects: [
           {
             displayName: "ByPusula",
@@ -69,8 +103,64 @@ describe("customer repository", () => {
     ]);
     expect(execute).toHaveBeenCalledWith(
       expect.stringMatching(
-        /LEFT JOIN customer_project[\s\S]*cp\.status = 'active'[\s\S]*p\.display_name ASC/iu,
+        /LEFT JOIN customer_project[\s\S]*monthly_visit_commitment[\s\S]*visit\.committed_on >= \?[\s\S]*SUM\(monthly_fee_amount\)[\s\S]*starts_on <= \?[\s\S]*ends_on >= \?[\s\S]*p\.display_name ASC/iu,
       ),
+      ["2026-09-07", "2026-09-07", "2026-09-07"],
+    );
+    expect(String(execute.mock.calls[0]?.[0])).not.toContain("CURRENT_DATE");
+  });
+
+  it("requires an explicit canonical business date for visit or billing projections", async () => {
+    const execute = vi.fn();
+
+    await expect(
+      listCustomerRecords(
+        { execute } as unknown as PoolConnection,
+        { includeVisits: true },
+      ),
+    ).rejects.toThrow("Customer projection business date is invalid.");
+    await expect(
+      listCustomerRecords(
+        { execute } as unknown as PoolConnection,
+        { businessDate: "2026-02-30", includeBilling: true },
+      ),
+    ).rejects.toThrow("Customer projection business date is invalid.");
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("never selects billing columns unless the caller explicitly allows them", async () => {
+    const execute = vi.fn().mockResolvedValue([
+      [
+        {
+          ...customerBase,
+          active_contract_count: null,
+          billing_currency: null,
+          billing_vat_mode: null,
+          monthly_fee_amount: null,
+          next_visit_on: null,
+          payment_days: null,
+          project_display_name: null,
+          project_id: null,
+          project_short_code: null,
+          project_status: null,
+        },
+      ],
+      [],
+    ]);
+
+    const result = await listCustomerRecords(
+      { execute } as unknown as PoolConnection,
+    );
+
+    expect(result[0]?.overview).toEqual({ nextVisitOn: null });
+    expect(JSON.stringify(result)).not.toContain("monthlyFeeAmount");
+    const sql = String(execute.mock.calls[0]?.[0]);
+    expect(sql).toContain("NULL AS contact_note");
+    expect(sql).toContain("NULL AS next_visit_on");
+    expect(sql).not.toContain("monthly_visit_commitment");
+    expect(sql).not.toContain("c.contact_note");
+    expect(execute).toHaveBeenCalledWith(
+      expect.not.stringMatching(/FROM consulting_contract\s+WHERE status = 'active'/u),
     );
   });
 
@@ -127,7 +217,7 @@ describe("customer repository", () => {
     ).resolves.toBe(true);
     expect(execute).toHaveBeenCalledWith(
       expect.stringMatching(
-        /consulting_contract[\s\S]*work_task_project[\s\S]*task\.status <> 'done'/u,
+        /consulting_contract[\s\S]*work_task_project[\s\S]*task\.status NOT IN \('done', 'cancelled'\)/u,
       ),
       [
         customerBase.id,

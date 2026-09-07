@@ -1,6 +1,11 @@
 import Decimal from "decimal.js";
 import { z } from "zod";
 
+import {
+  MAX_VISIT_WORK_ITEM_LENGTH,
+  MAX_VISIT_WORK_ITEMS,
+} from "@/features/contracts/visit-work-items";
+
 const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/u;
 const MONTH_PATTERN = /^\d{4}-\d{2}$/u;
 const CLOCK_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d$/u;
@@ -127,6 +132,7 @@ export const updateContractInputSchema = z
     status: contractStatusSchema,
     vatMode: vatModeSchema,
     vatRate: rateSchema,
+    version: z.number().int().min(1).max(4_294_967_294),
   })
   .strict()
   .superRefine(validateContractTerms);
@@ -140,6 +146,11 @@ const nullableDurationSchema = z
   .union([z.number().int().min(15).max(720), z.null()])
   .default(null);
 
+const nullableLocationLabelSchema = z.preprocess(
+  emptyToNull,
+  z.union([z.string().min(1).max(191), z.null()]).default(null),
+);
+
 export const monthlyVisitPlanInputSchema = z
   .object({
     visits: z
@@ -147,8 +158,10 @@ export const monthlyVisitPlanInputSchema = z
         z
           .object({
             committedOn: isoDateSchema,
+            id: z.string().regex(CANONICAL_UUID_PATTERN).optional(),
             internalDurationMinutes: nullableDurationSchema,
             internalStartTime: nullableClockSchema,
+            locationLabel: nullableLocationLabelSchema,
           })
           .strict()
           .superRefine((value, context) => {
@@ -170,16 +183,25 @@ export const monthlyVisitPlanInputSchema = z
   })
   .strict()
   .superRefine((value, context) => {
-    const seen = new Set<string>();
+    const seenDates = new Set<string>();
+    const seenIds = new Set<string>();
     for (const [index, visit] of value.visits.entries()) {
-      if (seen.has(visit.committedOn)) {
+      if (seenDates.has(visit.committedOn)) {
         context.addIssue({
           code: "custom",
           message: "Aynı gün bir sözleşmede iki kez planlanamaz.",
           path: ["visits", index, "committedOn"],
         });
       }
-      seen.add(visit.committedOn);
+      seenDates.add(visit.committedOn);
+      if (visit.id !== undefined && seenIds.has(visit.id)) {
+        context.addIssue({
+          code: "custom",
+          message: "Aynı ziyaret kaydı iki kez gönderilemez.",
+          path: ["visits", index, "id"],
+        });
+      }
+      if (visit.id !== undefined) seenIds.add(visit.id);
     }
   });
 
@@ -220,6 +242,49 @@ export const updateVisitResolutionInputSchema = z
     }
   });
 
+const visitWorkItemsSchema = z
+  .array(z.string().trim().max(MAX_VISIT_WORK_ITEM_LENGTH))
+  .max(MAX_VISIT_WORK_ITEMS)
+  .transform((items) => items.filter((item) => item.length > 0));
+
+export const updateVisitWithWorkItemsInputSchema = z
+  .object({
+    deliveredOn: z.union([isoDateSchema, z.null()]).default(null),
+    resolutionNote: optionalNoteSchema,
+    resolutionStatus: visitResolutionStatusSchema,
+    workItems: visitWorkItemsSchema.default([]),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (
+      (value.resolutionStatus === "completed") !==
+      (value.deliveredOn !== null)
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Tamamlanan ziyaretin gerçekleşme günü zorunludur.",
+        path: ["deliveredOn"],
+      });
+    }
+    if (
+      value.resolutionStatus === "cancelled_by_agreement" &&
+      value.resolutionNote === null
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Mutabakatla iptal için açıklama zorunludur.",
+        path: ["resolutionNote"],
+      });
+    }
+    if (value.resolutionStatus !== "completed" && value.workItems.length > 0) {
+      context.addIssue({
+        code: "custom",
+        message: "Çalışma maddeleri yalnız tamamlanan ziyarete eklenebilir.",
+        path: ["workItems"],
+      });
+    }
+  });
+
 export type CreateContractInput = z.infer<typeof createContractInputSchema>;
 export type UpdateContractInput = z.infer<typeof updateContractInputSchema>;
 export type MonthlyVisitPlanInput = z.infer<
@@ -227,4 +292,7 @@ export type MonthlyVisitPlanInput = z.infer<
 >;
 export type UpdateVisitResolutionInput = z.infer<
   typeof updateVisitResolutionInputSchema
+>;
+export type UpdateVisitWithWorkItemsInput = z.infer<
+  typeof updateVisitWithWorkItemsInputSchema
 >;

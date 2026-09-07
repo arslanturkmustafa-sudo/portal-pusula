@@ -60,10 +60,25 @@ export {
   type UserAccountRecord,
 } from "./user-account";
 export {
+  loginAttemptThrottle,
+  type LoginAttemptThrottleRecord,
+  type NewLoginAttemptThrottleRecord,
+} from "./login-attempt-throttle";
+export {
+  type NewUserPermissionRecord,
+  userPermission,
+  type UserPermissionRecord,
+} from "./user-permission";
+export {
   workTask,
   type NewWorkTaskRecord,
   type WorkTaskRecord,
 } from "./work-task";
+export {
+  workTaskVisit,
+  type NewWorkTaskVisitRecord,
+  type WorkTaskVisitRecord,
+} from "./work-task-visit";
 export {
   project,
   workTaskProject,
@@ -76,11 +91,14 @@ export {
   creditCard,
   creditCardInstallment,
   expense,
+  expenseCategory,
   type CreditCardInstallmentRecord,
   type CreditCardRecord,
+  type ExpenseCategoryRecord,
   type ExpenseRecord,
   type NewCreditCardInstallmentRecord,
   type NewCreditCardRecord,
+  type NewExpenseCategoryRecord,
   type NewExpenseRecord,
 } from "./finance-spending";
 export {
@@ -94,3 +112,14 @@ export {
   type PartnershipContributionRecord,
   type PartnershipContributionReceiptRecord,
 } from "./partnership-finance";
+export {
+  financeAccount,
+  financeLedgerEntry,
+  financeTransaction,
+  type FinanceAccountRecord,
+  type FinanceLedgerEntryRecord,
+  type FinanceTransactionRecord,
+  type NewFinanceAccountRecord,
+  type NewFinanceLedgerEntryRecord,
+  type NewFinanceTransactionRecord,
+} from "./finance-account";

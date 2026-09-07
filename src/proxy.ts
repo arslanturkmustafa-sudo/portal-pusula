@@ -1,11 +1,13 @@
 import { type NextRequest, NextResponse } from "next/server";
 
 import { sessionCookieName, verifySessionToken } from "@/platform/auth/session";
+import { developmentAuthenticationBypassAllowed } from "@/platform/auth/development-bypass";
 import { parseAuthEnvironment } from "@/platform/config/auth-env.schema";
 import {
   CORRELATION_ID_HEADER,
   createCorrelationId,
 } from "@/platform/http/correlation-id";
+import { safePortalReturnPath } from "@/platform/navigation/portal-return-path";
 
 const PUBLIC_PATHS = new Set([
   "/giris",
@@ -17,17 +19,8 @@ const PUBLIC_PATHS = new Set([
   "/manifest.webmanifest",
 ]);
 
-function developmentAuthenticationBypass(): boolean {
-  return (
-    process.env.NODE_ENV === "development" &&
-    !process.env.ADMIN_EMAIL &&
-    !process.env.ADMIN_PASSWORD_HASH &&
-    !process.env.SESSION_SECRET
-  );
-}
-
 function hasValidAdminSession(request: NextRequest): boolean {
-  if (developmentAuthenticationBypass()) return true;
+  if (developmentAuthenticationBypassAllowed(request.nextUrl.hostname)) return true;
 
   try {
     const environment = parseAuthEnvironment({
@@ -77,6 +70,10 @@ export function proxy(request: NextRequest) {
     loginUrl.pathname = "/giris";
     loginUrl.search = "";
     loginUrl.hash = "";
+    loginUrl.searchParams.set(
+      "next",
+      safePortalReturnPath(`${request.nextUrl.pathname}${request.nextUrl.search}`),
+    );
     return finalizeResponse(
       NextResponse.redirect(loginUrl),
       correlationId,

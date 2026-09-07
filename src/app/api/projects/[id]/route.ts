@@ -10,6 +10,7 @@ import {
   updateProject,
   updateProjectInputSchema,
 } from "@/features/projects";
+import { LifecycleArchivedRecordError } from "@/features/lifecycle";
 import {
   authenticateAdminRequest,
   type AuthenticatedAdmin,
@@ -93,7 +94,7 @@ export async function PATCH(
   request: NextRequest,
   context: ProjectRouteContext,
 ): Promise<NextResponse> {
-  const principal = await authenticateAdminRequest(request);
+  const principal = await authenticateAdminRequest(request, "projects.write");
   if (!principal) return json({ status: "unauthorized" }, 401);
   if (!sameOrigin(request)) return json({ status: "forbidden" }, 403);
   if (!isJsonRequest(request)) {
@@ -127,6 +128,9 @@ export async function PATCH(
     }
     if (error instanceof ProjectVersionConflictError) {
       return json({ status: "version_conflict" }, 409);
+    }
+    if (error instanceof LifecycleArchivedRecordError) {
+      return json({ status: "record_archived" }, 409);
     }
     const mysqlErrorCode = safeMySqlErrorCode(error);
     requestLogger(correlationId).error(

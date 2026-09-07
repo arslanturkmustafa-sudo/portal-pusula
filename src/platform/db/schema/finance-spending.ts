@@ -96,6 +96,69 @@ export const creditCard = mysqlTable(
   ],
 );
 
+export const expenseCategory = mysqlTable(
+  "expense_category",
+  {
+    id: char("id", { length: 36 }).primaryKey(),
+    code: varchar("code", { length: 32 }).notNull(),
+    clientOperationKey: char("client_operation_key", { length: 36 }).notNull(),
+    displayName: varchar("display_name", { length: 191 }).notNull(),
+    isSystem: tinyint("is_system", { unsigned: true }).default(0).notNull(),
+    status: varchar("status", { length: 16 }).default("active").notNull(),
+    version: int("version", { unsigned: true }).default(1).notNull(),
+    createdAtUtc: datetime("created_at_utc", {
+      fsp: 6,
+      mode: "string",
+    })
+      .default(sql`CURRENT_TIMESTAMP(6)`)
+      .notNull(),
+    updatedAtUtc: datetime("updated_at_utc", {
+      fsp: 6,
+      mode: "string",
+    })
+      .default(sql`CURRENT_TIMESTAMP(6)`)
+      .notNull(),
+  },
+  (table) => [
+    check(
+      "chk_expense_category_identity",
+      sql`OCTET_LENGTH(${table.id}) = 36
+        AND BINARY ${table.id} REGEXP '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+        AND OCTET_LENGTH(${table.clientOperationKey}) = 36
+        AND BINARY ${table.clientOperationKey} REGEXP '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'`,
+    ),
+    check(
+      "chk_expense_category_code",
+      sql`CHAR_LENGTH(${table.code}) BETWEEN 1 AND 32
+        AND BINARY ${table.code} REGEXP '^[a-z][a-z0-9_]{0,31}$'`,
+    ),
+    check(
+      "chk_expense_category_display_name",
+      sql`CHAR_LENGTH(${table.displayName}) BETWEEN 1 AND 191
+        AND ${table.displayName} = TRIM(${table.displayName})`,
+    ),
+    check(
+      "chk_expense_category_flags",
+      sql`${table.isSystem} IN (0, 1)
+        AND BINARY ${table.status} IN (BINARY 'active', BINARY 'inactive')`,
+    ),
+    check("chk_expense_category_version", sql`${table.version} >= 1`),
+    check(
+      "chk_expense_category_timeline",
+      sql`${table.createdAtUtc} <= ${table.updatedAtUtc}`,
+    ),
+    uniqueIndex("uq_expense_category_client_operation").on(
+      table.clientOperationKey,
+    ),
+    uniqueIndex("uq_expense_category_code").on(table.code),
+    uniqueIndex("uq_expense_category_display_name").on(table.displayName),
+    index("idx_expense_category_status_name").on(
+      table.status,
+      table.displayName,
+    ),
+  ],
+);
+
 export const expense = mysqlTable(
   "expense",
   {
@@ -156,12 +219,8 @@ export const expense = mysqlTable(
     ),
     check(
       "chk_expense_category",
-      sql`BINARY ${table.category} IN (
-        BINARY 'rent', BINARY 'software_subscription',
-        BINARY 'transportation', BINARY 'meals_hospitality',
-        BINARY 'marketing', BINARY 'office', BINARY 'external_service',
-        BINARY 'tax_fee', BINARY 'other'
-      )`,
+      sql`CHAR_LENGTH(${table.category}) BETWEEN 1 AND 32
+        AND BINARY ${table.category} REGEXP '^[a-z][a-z0-9_]{0,31}$'`,
     ),
     check(
       "chk_expense_description",
@@ -249,6 +308,13 @@ export const expense = mysqlTable(
       name: "fk_expense_credit_card",
       columns: [table.creditCardId],
       foreignColumns: [creditCard.id],
+    })
+      .onDelete("restrict")
+      .onUpdate("restrict"),
+    foreignKey({
+      name: "fk_expense_category",
+      columns: [table.category],
+      foreignColumns: [expenseCategory.code],
     })
       .onDelete("restrict")
       .onUpdate("restrict"),
@@ -361,6 +427,8 @@ export const creditCardInstallment = mysqlTable(
 
 export type CreditCardRecord = typeof creditCard.$inferSelect;
 export type NewCreditCardRecord = typeof creditCard.$inferInsert;
+export type ExpenseCategoryRecord = typeof expenseCategory.$inferSelect;
+export type NewExpenseCategoryRecord = typeof expenseCategory.$inferInsert;
 export type ExpenseRecord = typeof expense.$inferSelect;
 export type NewExpenseRecord = typeof expense.$inferInsert;
 export type CreditCardInstallmentRecord =

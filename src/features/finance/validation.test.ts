@@ -4,6 +4,8 @@ import {
   createCollectionInputSchema,
   generateReceivableInputSchema,
   openingBalanceInputSchema,
+  receivableLifecycleInputSchema,
+  reverseCollectionInputSchema,
 } from "@/features/finance/validation";
 
 const id = "10000000-0000-4000-8000-000000000001";
@@ -106,5 +108,26 @@ describe("finance input validation", () => {
         vatAmount: "0",
       }).success,
     ).toBe(false);
+  });
+
+  it("requires strict lifecycle actions, canonical keys and meaningful reasons", () => {
+    expect(receivableLifecycleInputSchema.parse({
+      action: "void",
+      reason: "  Mükerrer alacak  ",
+      version: 1,
+    })).toEqual({ action: "void", reason: "Mükerrer alacak", version: 1 });
+    expect(reverseCollectionInputSchema.parse({
+      clientOperationKey: operationKey,
+      reason: "  Banka iadesi  ",
+    })).toEqual({ clientOperationKey: operationKey, reason: "Banka iadesi" });
+    expect(receivableLifecycleInputSchema.safeParse({
+      action: "delete",
+      reason: "Kalıcı sil",
+      version: 1,
+    }).success).toBe(false);
+    expect(reverseCollectionInputSchema.safeParse({
+      clientOperationKey: "not-a-uuid",
+      reason: "x",
+    }).success).toBe(false);
   });
 });

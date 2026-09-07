@@ -33,6 +33,17 @@ const card = {
 
 const inactiveCard = { ...card, status: "inactive" as const };
 
+const categories = [
+  { code: "rent", displayName: "Kira", id: "category-rent", isSystem: true },
+  {
+    code: "software_subscription",
+    displayName: "Yazılım / abonelik",
+    id: "category-software",
+    isSystem: true,
+  },
+  { code: "other", displayName: "Diğer", id: "category-other", isSystem: true },
+];
+
 const expense = {
   category: "rent",
   creditCardId: null,
@@ -72,6 +83,9 @@ describe("ExpensesWorkspace", () => {
         requestOrder.push(url);
         if (url === "/api/projects") return jsonResponse({ projects: [project] });
         if (url === "/api/finance/cards") return jsonResponse({ cards: [card] });
+        if (url === "/api/finance/expense-categories") {
+          return jsonResponse({ categories });
+        }
         if (url === "/api/finance/expenses") return jsonResponse({ expenses: [expense], summary: {} });
         throw new Error(`Unexpected request: ${url}`);
       }),
@@ -85,9 +99,77 @@ describe("ExpensesWorkspace", () => {
     expect(requestOrder).toEqual([
       "/api/projects",
       "/api/finance/cards",
+      "/api/finance/expense-categories",
       "/api/finance/expenses",
     ]);
     expect(screen.getAllByText("₺16.500,00").length).toBeGreaterThan(0);
+  });
+
+  it("does not expose void or audit controls without their exact capabilities", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async (input) => {
+        const url = String(input);
+        if (url === "/api/projects") return jsonResponse({ projects: [project] });
+        if (url === "/api/finance/cards") return jsonResponse({ cards: [card] });
+        if (url === "/api/finance/expense-categories") {
+          return jsonResponse({ categories });
+        }
+        if (url === "/api/finance/expenses") return jsonResponse({ expenses: [expense] });
+        throw new Error(`Unexpected request: ${url}`);
+      }),
+    );
+
+    render(
+      <ExpensesWorkspace
+        capabilities={{
+          canReadAudit: false,
+          canReverseExpenses: false,
+          canWriteExpenses: true,
+        }}
+      />,
+    );
+
+    expect(await screen.findByRole("button", { name: "Ofis kirası giderini düzenle" }))
+      .toBeInTheDocument();
+    expect(screen.queryByText("Geçersiz kıl")).not.toBeInTheDocument();
+    expect(screen.queryByText("İşlemler")).not.toBeInTheDocument();
+  });
+
+  it("hides every mutation control from an expense read-only account", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async (input) => {
+        const url = String(input);
+        if (url === "/api/projects") return jsonResponse({ projects: [project] });
+        if (url === "/api/finance/cards") return jsonResponse({ cards: [card] });
+        if (url === "/api/finance/expense-categories") {
+          return jsonResponse({ categories });
+        }
+        if (url === "/api/finance/expenses") return jsonResponse({ expenses: [expense] });
+        throw new Error(`Unexpected request: ${url}`);
+      }),
+    );
+
+    render(
+      <ExpensesWorkspace
+        capabilities={{
+          canReadAudit: false,
+          canReverseExpenses: false,
+          canWriteExpenses: false,
+        }}
+      />,
+    );
+
+    expect(await screen.findByText("Ofis kirası")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "+ Gider ekle" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "+ Kategori ekle" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Ofis kirası giderini düzenle" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Ofis kirası giderini kopyala" }),
+    ).not.toBeInTheDocument();
   });
 
   it("creates a project-linked card expense and sends the selected installment count", async () => {
@@ -98,6 +180,9 @@ describe("ExpensesWorkspace", () => {
       const url = String(input);
       if (url === "/api/projects") return jsonResponse({ projects: [project] });
       if (url === "/api/finance/cards") return jsonResponse({ cards: [card] });
+      if (url === "/api/finance/expense-categories") {
+        return jsonResponse({ categories });
+      }
       if (url === "/api/finance/expenses" && init?.method === "POST") {
         postBody = JSON.parse(String(init.body)) as Record<string, unknown>;
         return jsonResponse({
@@ -160,6 +245,9 @@ describe("ExpensesWorkspace", () => {
         const url = String(input);
         if (url === "/api/projects") return jsonResponse({ projects: [project] });
         if (url === "/api/finance/cards") return jsonResponse({ cards: [card] });
+        if (url === "/api/finance/expense-categories") {
+          return jsonResponse({ categories });
+        }
         if (url === "/api/finance/expenses") return jsonResponse({ expenses: [expense] });
         throw new Error(`Unexpected request: ${url}`);
       }),
@@ -190,6 +278,9 @@ describe("ExpensesWorkspace", () => {
         const url = String(input);
         if (url === "/api/projects") return jsonResponse({ projects: [project] });
         if (url === "/api/finance/cards") return jsonResponse({ cards: [inactiveCard] });
+        if (url === "/api/finance/expense-categories") {
+          return jsonResponse({ categories });
+        }
         if (url === "/api/finance/expenses") return jsonResponse({ expenses: [cardExpense] });
         throw new Error(`Unexpected request: ${url}`);
       }),
@@ -206,5 +297,106 @@ describe("ExpensesWorkspace", () => {
     await user.click(screen.getByRole("button", { name: "Ofis kirası giderini kopyala" }));
     expect(screen.getByLabelText("Kredi kartı")).toHaveValue("");
     expect(screen.queryByRole("option", { name: "İş kartı (pasif)" })).not.toBeInTheDocument();
+  });
+
+  it("adds a manual category and selects it for the next expense", async () => {
+    const categoryOperationKey = "50000000-0000-4000-8000-000000000001";
+    vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue(categoryOperationKey);
+    const customCategory = {
+      code: "custom_5000000000004000800000000",
+      displayName: "Eğitim materyali",
+      id: "50000000-0000-4000-8000-000000000002",
+      isSystem: false,
+    };
+    let categoryBody: Record<string, unknown> | undefined;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async (input, init) => {
+        const url = String(input);
+        if (url === "/api/projects") return jsonResponse({ projects: [project] });
+        if (url === "/api/finance/cards") return jsonResponse({ cards: [card] });
+        if (url === "/api/finance/expense-categories" && init?.method === "POST") {
+          categoryBody = JSON.parse(String(init.body)) as Record<string, unknown>;
+          return jsonResponse({ category: customCategory, created: true }, 201);
+        }
+        if (url === "/api/finance/expense-categories") {
+          return jsonResponse({ categories });
+        }
+        if (url === "/api/finance/expenses") return jsonResponse({ expenses: [] });
+        throw new Error(`Unexpected request: ${url}`);
+      }),
+    );
+    const user = userEvent.setup();
+    render(<ExpensesWorkspace />);
+
+    await screen.findByText("Henüz gider yok. İlk kaydı ekleyerek başlayın.");
+    await user.click(screen.getByRole("button", { name: "+ Kategori ekle" }));
+    await user.type(screen.getByLabelText("Yeni gider kategorisi"), "Eğitim materyali");
+    await user.click(screen.getByRole("button", { name: "Kategoriyi ekle" }));
+
+    await waitFor(() =>
+      expect(categoryBody).toEqual({
+        clientOperationKey: categoryOperationKey,
+        displayName: "Eğitim materyali",
+      }),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "+ Kategori ekle" }),
+      ).toHaveFocus(),
+    );
+    await user.click(screen.getByRole("button", { name: "+ Gider ekle" }));
+    expect(screen.getByLabelText("Kategori")).toHaveValue(customCategory.code);
+    expect(
+      screen.getByRole("option", { name: "Eğitim materyali" }),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps an existing expense edit intact while adding a category", async () => {
+    vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue(
+      "50000000-0000-4000-8000-000000000010",
+    );
+    const customCategory = {
+      code: "custom_5000000000004000800000010",
+      displayName: "Saha ekipmanı",
+      id: "50000000-0000-4000-8000-000000000011",
+      isSystem: false,
+    };
+    const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+      const url = String(input);
+      if (url === "/api/projects") return jsonResponse({ projects: [project] });
+      if (url === "/api/finance/cards") return jsonResponse({ cards: [card] });
+      if (url === "/api/finance/expense-categories" && init?.method === "POST") {
+        return jsonResponse({ category: customCategory, created: true }, 201);
+      }
+      if (url === "/api/finance/expense-categories") {
+        return jsonResponse({ categories });
+      }
+      if (url === "/api/finance/expenses") {
+        return jsonResponse({ expenses: [expense] });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+
+    render(<ExpensesWorkspace />);
+    await screen.findByText("Ofis kirası");
+    await user.click(
+      screen.getByRole("button", { name: "Ofis kirası giderini düzenle" }),
+    );
+    await user.click(screen.getByRole("button", { name: "+ Kategori ekle" }));
+    await user.type(screen.getByLabelText("Yeni gider kategorisi"), "Saha ekipmanı");
+    await user.click(screen.getByRole("button", { name: "Kategoriyi ekle" }));
+
+    expect(screen.getByRole("heading", { name: "Gideri düzenle" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Net tutar (₺)")).toHaveValue("13750");
+    expect(screen.getByLabelText("Kategori")).toHaveValue(customCategory.code);
+    expect(
+      fetchMock.mock.calls.some(
+        ([input, init]) =>
+          String(input) === "/api/finance/expenses" && init?.method === "POST",
+      ),
+    ).toBe(false);
   });
 });

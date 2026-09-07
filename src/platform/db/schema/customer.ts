@@ -3,11 +3,15 @@ import {
   char,
   check,
   datetime,
+  foreignKey,
   index,
+  int,
   mysqlTable,
   uniqueIndex,
   varchar,
 } from "drizzle-orm/mysql-core";
+
+import { userAccount } from "./user-account";
 
 export const customer = mysqlTable(
   "customer",
@@ -19,6 +23,12 @@ export const customer = mysqlTable(
     contactNote: varchar("contact_note", { length: 2000 }),
     email: varchar("email", { length: 254 }),
     phone: varchar("phone", { length: 32 }),
+    archiveReason: varchar("archive_reason", { length: 500 }),
+    archivedAtUtc: datetime("archived_at_utc", { fsp: 6, mode: "string" }),
+    archivedByUserAccountId: char("archived_by_user_account_id", {
+      length: 36,
+    }),
+    version: int("version", { unsigned: true }).default(1).notNull(),
     createdAtUtc: datetime("created_at_utc", {
       fsp: 6,
       mode: "string",
@@ -59,10 +69,44 @@ export const customer = mysqlTable(
     ),
     check(
       "chk_customer_timeline",
-      sql`${table.createdAtUtc} <= ${table.updatedAtUtc}`,
+      sql`${table.createdAtUtc} <= ${table.updatedAtUtc}
+        AND (
+          ${table.archivedAtUtc} IS NULL
+          OR (
+            ${table.createdAtUtc} <= ${table.archivedAtUtc}
+            AND ${table.archivedAtUtc} <= ${table.updatedAtUtc}
+          )
+        )`,
     ),
+    check("chk_customer_version", sql`${table.version} >= 1`),
+    check(
+      "chk_customer_archive",
+      sql`(
+          ${table.archivedAtUtc} IS NULL
+          AND ${table.archivedByUserAccountId} IS NULL
+          AND ${table.archiveReason} IS NULL
+        ) OR (
+          ${table.archivedAtUtc} IS NOT NULL
+          AND ${table.archivedByUserAccountId} IS NOT NULL
+          AND ${table.archiveReason} IS NOT NULL
+          AND CHAR_LENGTH(${table.archiveReason}) BETWEEN 1 AND 500
+          AND ${table.archiveReason} = TRIM(${table.archiveReason})
+          AND BINARY ${table.status} = BINARY 'inactive'
+        )`,
+    ),
+    foreignKey({
+      name: "fk_customer_archived_by",
+      columns: [table.archivedByUserAccountId],
+      foreignColumns: [userAccount.id],
+    })
+      .onDelete("restrict")
+      .onUpdate("restrict"),
     uniqueIndex("uq_customer_short_code").on(table.shortCode),
-    index("idx_customer_status_name").on(table.status, table.displayName),
+    index("idx_customer_status_name").on(
+      table.archivedAtUtc,
+      table.status,
+      table.displayName,
+    ),
   ],
 );
 

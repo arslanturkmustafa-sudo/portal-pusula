@@ -27,9 +27,47 @@ import { PATCH } from "@/app/api/finance/expenses/[id]/route";
 describe("expense item API", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.authenticate.mockResolvedValue({ accountId: "10000000-0000-4000-8000-000000000001", kind: "account" });
+    mocks.authenticate.mockResolvedValue({
+      accountId: "10000000-0000-4000-8000-000000000001",
+      kind: "account",
+      permissions: ["finance.expenses.write", "finance.expenses.reverse"],
+      role: "member",
+    });
     mocks.parse.mockImplementation((value: unknown) => value);
     mocks.requestLogger.mockReturnValue({ error: vi.fn() });
+  });
+
+  it("requires the dedicated reversal permission before voiding an expense", async () => {
+    mocks.authenticate.mockResolvedValue({
+      accountId: "10000000-0000-4000-8000-000000000001",
+      kind: "account",
+      permissions: ["finance.expenses.write"],
+      role: "member",
+    });
+
+    const response = await PATCH(
+      new NextRequest("https://portal.example/api/finance/expenses/id", {
+        body: JSON.stringify({
+          status: "voided",
+          version: 1,
+          voidReason: "Mükerrer",
+        }),
+        headers: {
+          "content-type": "application/json",
+          origin: "https://portal.example",
+        },
+        method: "PATCH",
+      }),
+      {
+        params: Promise.resolve({
+          id: "30000000-0000-4000-8000-000000000001",
+        }),
+      },
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({ status: "forbidden" });
+    expect(mocks.update).not.toHaveBeenCalled();
   });
 
   it("returns a stable conflict when a paid plan locks the expense", async () => {

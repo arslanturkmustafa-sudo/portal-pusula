@@ -188,6 +188,13 @@ export const createContributionReceiptInputSchema = z
   })
   .strict();
 
+export const reverseContributionReceiptInputSchema = z
+  .object({
+    clientOperationKey: uuidSchema,
+    reason: z.string().trim().min(3).max(2000),
+  })
+  .strict();
+
 export const partnershipListFilterSchema = z
   .object({
     month: monthSchema.optional(),
@@ -200,4 +207,7 @@ export type UpdateCommissionInput = z.input<typeof updateCommissionInputSchema>;
 export type CreateContributionInput = z.input<typeof createContributionInputSchema>;
 export type UpdateContributionInput = z.input<typeof updateContributionInputSchema>;
 export type CreateContributionReceiptInput = z.input<typeof createContributionReceiptInputSchema>;
+export type ReverseContributionReceiptInput = z.infer<
+  typeof reverseContributionReceiptInputSchema
+>;
 export type PartnershipListFilter = z.infer<typeof partnershipListFilterSchema>;

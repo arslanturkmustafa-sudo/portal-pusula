@@ -4,6 +4,17 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { HomeScreen } from "@/components/home/home-screen";
 
+function istanbulToday(): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    day: "2-digit",
+    month: "2-digit",
+    timeZone: "Europe/Istanbul",
+    year: "numeric",
+  }).formatToParts(new Date());
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
@@ -23,6 +34,7 @@ describe("HomeScreen", () => {
     const table = screen.getByRole("table", { name: "Müşteri kayıtları" });
     expect(within(table).getAllByRole("row")).toHaveLength(6);
     expect(within(table).getByText("Atlas Makina")).toBeInTheDocument();
+    expect(within(table).getByText("İzleyen ayın 5. günü")).toBeInTheDocument();
     expect(within(table).getAllByText("Gecikti")).toHaveLength(2);
 
     expect(screen.queryByText("Yerel tasarım önizlemesi")).not.toBeInTheDocument();
@@ -92,6 +104,7 @@ describe("HomeScreen", () => {
         displayName: "Zevahir Home",
         email: null,
         id: "10000000-0000-4000-8000-000000000001",
+        overview: { nextVisitOn: istanbulToday() },
         phone: null,
         projects: [muhendisKafasi],
         shortCode: "ZEVAHIR",
@@ -102,10 +115,23 @@ describe("HomeScreen", () => {
         displayName: "Rota Teknoloji",
         email: null,
         id: "10000000-0000-4000-8000-000000000002",
+        overview: { nextVisitOn: null },
         phone: null,
         projects: [byPusula],
         shortCode: "ROTA",
         status: "active" as const,
+      },
+      {
+        archivedAtUtc: "2026-09-01 08:00:00.000000",
+        contactNote: null,
+        displayName: "Arşiv Lojistik",
+        email: null,
+        id: "10000000-0000-4000-8000-000000000003",
+        overview: { nextVisitOn: istanbulToday() },
+        phone: null,
+        projects: [muhendisKafasi],
+        shortCode: "ARSIV",
+        status: "inactive" as const,
       },
     ];
     let postBody: Record<string, unknown> | undefined;
@@ -118,7 +144,7 @@ describe("HomeScreen", () => {
             customer: {
               ...customers[0],
               displayName: postBody.displayName,
-              id: "10000000-0000-4000-8000-000000000003",
+              id: "10000000-0000-4000-8000-000000000004",
               projects: [muhendisKafasi],
               shortCode: postBody.shortCode,
             },
@@ -149,6 +175,28 @@ describe("HomeScreen", () => {
           { headers: { "Content-Type": "application/json" } },
         );
       }
+      if (url === "/api/finance/receivables") {
+        return new Response(
+          JSON.stringify({
+            receivables: [
+              {
+                customerId: customers[0].id,
+                status: "overdue",
+              },
+              {
+                customerId: customers[2].id,
+                status: "overdue",
+              },
+            ],
+            summary: {
+              dueThisMonth: "25000.0000",
+              outstanding: "900719925474099.1249",
+              overdue: "35000.0000",
+            },
+          }),
+          { headers: { "Content-Type": "application/json" } },
+        );
+      }
       throw new Error(`Unexpected request: ${url}`);
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -157,8 +205,24 @@ describe("HomeScreen", () => {
     render(<HomeScreen live />);
 
     const table = await screen.findByRole("table", { name: "Müşteri kayıtları" });
-    expect(within(table).getByText("Mühendis Kafası")).toBeInTheDocument();
+    const summary = screen.getByRole("region", { name: "Müşteri özeti" });
+    expect(within(summary).getByText("Aktif müşteri").parentElement).toHaveTextContent(
+      "02",
+    );
+    expect(
+      within(summary).getByText("Bugün ziyaretli aktif müşteri").parentElement,
+    ).toHaveTextContent("01");
+    expect(screen.getByText("₺35.000,00")).toBeInTheDocument();
+    expect(screen.getByText("₺900.719.925.474.099,12")).toBeInTheDocument();
+    expect(within(table).getAllByText("Mühendis Kafası")).toHaveLength(2);
     expect(within(table).getByText("ByPusula")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /Geciken/u }));
+    expect(within(table).getByText("Zevahir Home")).toBeInTheDocument();
+    expect(within(table).getByText("Arşiv Lojistik")).toBeInTheDocument();
+    expect(within(table).getByText("Pasif · gecikmiş ödeme")).toBeInTheDocument();
+    expect(within(table).queryByText("Rota Teknoloji")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Tümü" }));
 
     await user.selectOptions(
       screen.getByRole("combobox", { name: "Projeye göre filtrele" }),
@@ -200,5 +264,114 @@ describe("HomeScreen", () => {
         expect.objectContaining({ projectIds: [muhendisKafasi.id] }),
       ),
     );
+  });
+
+  it("keeps payment state unknown and disables the overdue filter when finance data fails", async () => {
+    const customer = {
+      contactNote: null,
+      displayName: "Zevahir Home",
+      email: null,
+      id: "10000000-0000-4000-8000-000000000001",
+      overview: { nextVisitOn: null },
+      phone: null,
+      projects: [],
+      shortCode: "ZEVAHIR",
+      status: "active" as const,
+    };
+    const fetchMock = vi.fn<typeof fetch>(async (input) => {
+      const url = String(input);
+      if (url === "/api/customers") {
+        return new Response(JSON.stringify({ customers: [customer] }), {
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      if (url === "/api/finance/receivables") {
+        return new Response(JSON.stringify({ status: "service_unavailable" }), {
+          headers: { "Content-Type": "application/json" },
+          status: 503,
+        });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <HomeScreen
+        capabilities={{
+          canLifecycleContracts: false,
+          canLifecycleCustomers: false,
+          canOpenCustomerDetails: false,
+          canReadAudit: false,
+          canReadBilling: false,
+          canReadProjects: false,
+          canReadReceivables: true,
+          canReadVisits: true,
+          canWriteCustomers: false,
+        }}
+        live
+      />,
+    );
+
+    expect(
+      await screen.findByText("Aktif · ödeme durumu bilinmiyor"),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Geciken" })).toBeDisabled();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Ödeme durumları alınamadı",
+    );
+    expect(screen.queryByText("Gecikmiş ödeme")).not.toBeInTheDocument();
+  });
+
+  it("does not request or infer receivable data without finance permission", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async (input) => {
+      const url = String(input);
+      if (url !== "/api/customers") {
+        throw new Error(`Unexpected request: ${url}`);
+      }
+      return new Response(
+        JSON.stringify({
+          customers: [
+            {
+              contactNote: null,
+              displayName: "Yetki Sınırlı Firma",
+              email: null,
+              id: "10000000-0000-4000-8000-000000000002",
+              overview: { nextVisitOn: null },
+              phone: null,
+              projects: [],
+              shortCode: "SINIRLI",
+              status: "active",
+            },
+          ],
+        }),
+        { headers: { "Content-Type": "application/json" } },
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <HomeScreen
+        capabilities={{
+          canLifecycleContracts: false,
+          canLifecycleCustomers: false,
+          canOpenCustomerDetails: false,
+          canReadAudit: false,
+          canReadBilling: false,
+          canReadProjects: false,
+          canReadReceivables: false,
+          canReadVisits: false,
+          canWriteCustomers: false,
+        }}
+        live
+      />,
+    );
+
+    expect(
+      await screen.findByText("Aktif · ödeme durumu bilinmiyor"),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Geciken" })).toBeDisabled();
+    expect(screen.getAllByText("Kısıtlı")).toHaveLength(3);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("Ödeme durumları alınamadı")).not.toBeInTheDocument();
   });
 });

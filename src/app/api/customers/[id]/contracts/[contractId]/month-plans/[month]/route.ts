@@ -9,8 +9,13 @@ import {
   MonthPlanLockedError,
   monthlyVisitPlanInputSchema,
   replaceMonthlyVisitPlan,
+  VisitDayConflictError,
+  VisitLockedError,
 } from "@/features/contracts";
-import { isAdminAuthenticated } from "@/platform/auth/server-auth";
+import {
+  authenticateAdminRequest,
+  isAdminAuthenticated,
+} from "@/platform/auth/server-auth";
 import { getDatabaseProbeEnvironment } from "@/platform/config/readiness-env";
 import { getPlatformDatabasePool } from "@/platform/database/mysql-platform";
 import { correlationIdFromHeaders } from "@/platform/http/correlation-id";
@@ -61,6 +66,12 @@ function mappedError(error: unknown): NextResponse | null {
   if (error instanceof MonthPlanLockedError) {
     return json({ status: "month_plan_locked" }, 409);
   }
+  if (error instanceof VisitLockedError) {
+    return json({ status: "visit_locked" }, 409);
+  }
+  if (error instanceof VisitDayConflictError) {
+    return json({ status: "visit_day_conflict" }, 409);
+  }
   return null;
 }
 
@@ -68,7 +79,7 @@ export async function GET(
   request: NextRequest,
   context: MonthPlanRouteContext,
 ): Promise<NextResponse> {
-  if (!(await isAdminAuthenticated(request))) {
+  if (!(await isAdminAuthenticated(request, "visits.read"))) {
     return json({ status: "unauthorized" }, 401);
   }
 
@@ -90,7 +101,8 @@ export async function PUT(
   request: NextRequest,
   context: MonthPlanRouteContext,
 ): Promise<NextResponse> {
-  if (!(await isAdminAuthenticated(request))) {
+  const principal = await authenticateAdminRequest(request, "visits.write");
+  if (!principal) {
     return json({ status: "unauthorized" }, 401);
   }
   if (!isSameOriginWriteRequest(request)) return json({ status: "forbidden" }, 403);
@@ -109,7 +121,10 @@ export async function PUT(
       contractId,
       month,
       input,
-      { correlationId: correlationIdFromHeaders(request.headers) },
+      {
+        actorId: principal.kind === "account" ? principal.accountId : undefined,
+        correlationId: correlationIdFromHeaders(request.headers),
+      },
     );
     return json({ monthPlan });
   } catch (error) {

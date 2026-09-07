@@ -11,6 +11,9 @@ import {
 } from "@/features/tasks/repository";
 
 const taskRow = {
+  archive_reason: null,
+  archived_at_utc: null,
+  archived_by_user_account_id: null,
   assignee_email: "yonetici@example.com",
   assignee_user_account_id: "10000000-0000-4000-8000-000000000001",
   completed_at_utc: null,
@@ -21,6 +24,7 @@ const taskRow = {
   description: null,
   due_on: "2026-09-05",
   id: "30000000-0000-4000-8000-000000000001",
+  linked_visit_id: null,
   priority: "high",
   project_code: "BYPUSULA",
   project_id: "40000000-0000-4000-8000-000000000001",
@@ -46,17 +50,35 @@ describe("task repository", () => {
         projectCode: "BYPUSULA",
         projectName: "ByPusula",
         status: "todo",
+        visitLinked: false,
       }),
     ]);
     expect(execute).toHaveBeenCalledWith(
-      expect.stringMatching(/LEFT JOIN project[\s\S]*LEFT JOIN customer[\s\S]*LEFT JOIN user_account/iu),
+      expect.stringMatching(/LEFT JOIN project[\s\S]*LEFT JOIN customer[\s\S]*LEFT JOIN user_account[\s\S]*LEFT JOIN work_task_visit/iu),
     );
     expect(execute).toHaveBeenCalledWith(expect.stringContaining("FIELD(task.status"));
+  });
+
+  it("marks a task projection as visit-linked without exposing the visit id", async () => {
+    const execute = vi.fn().mockResolvedValue([
+      [{ ...taskRow, linked_visit_id: "50000000-0000-4000-8000-000000000001" }],
+      [],
+    ]);
+
+    const result = await listTaskRecords(
+      { execute } as unknown as PoolConnection,
+    );
+
+    expect(result).toEqual([expect.objectContaining({ visitLinked: true })]);
+    expect(result[0]).not.toHaveProperty("linkedVisitId");
   });
 
   it("fences an update with the caller's expected version", async () => {
     const execute = vi.fn().mockResolvedValue([{ affectedRows: 1 }, []]);
     const task = {
+      archiveReason: null,
+      archivedAtUtc: null,
+      archivedByUserAccountId: null,
       assigneeUserAccountId: taskRow.assignee_user_account_id,
       completedAtUtc: null,
       createdAtUtc: taskRow.created_at_utc,

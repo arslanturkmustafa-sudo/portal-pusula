@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   getDatabaseProbeEnvironment: vi.fn(),
   getPlatformDatabasePool: vi.fn(),
   requestLogger: vi.fn(),
+  runLoginAttemptWithThrottle: vi.fn(),
   verifyAdminCredentials: vi.fn(),
   warn: vi.fn(),
 }));
@@ -33,6 +34,9 @@ vi.mock("@/platform/config/readiness-env", () => ({
 vi.mock("@/platform/database/mysql-platform", () => ({
   getPlatformDatabasePool: mocks.getPlatformDatabasePool,
 }));
+vi.mock("@/platform/auth/login-throttle", () => ({
+  runLoginAttemptWithThrottle: mocks.runLoginAttemptWithThrottle,
+}));
 vi.mock("@/platform/logging/logger", () => ({
   requestLogger: mocks.requestLogger,
 }));
@@ -54,7 +58,10 @@ function loginRequest(): NextRequest {
       email: "yonetici@example.com",
       password: "password-input-sentinel",
     }),
-    headers: { "x-correlation-id": correlationId },
+    headers: {
+      origin: "https://portal.example.test",
+      "x-correlation-id": correlationId,
+    },
     method: "POST",
   });
 }
@@ -64,7 +71,11 @@ async function expectFailedLogin(
     | "auth_database_unavailable"
     | "auth_env_invalid"
     | "auth_scrypt_runtime_error"
-    | "credentials_rejected",
+    | "credentials_rejected"
+    | "login_throttled"
+    | "request_body_rejected"
+    | "request_content_type_rejected"
+    | "request_origin_rejected",
 ) {
   const response = await POST(loginRequest());
 
@@ -90,6 +101,14 @@ describe("administrator login diagnostics", () => {
     mocks.getDatabaseProbeEnvironment.mockReturnValue({});
     mocks.getPlatformDatabasePool.mockReturnValue({});
     mocks.requestLogger.mockReturnValue({ warn: mocks.warn });
+    mocks.runLoginAttemptWithThrottle.mockImplementation(
+      async (_pool, input: { verify: () => Promise<unknown> }) => {
+        const value = await input.verify();
+        return value === null
+          ? { status: "rejected" }
+          : { status: "authenticated", value };
+      },
+    );
   });
 
   it("logs an invalid runtime auth environment without exposing credentials", async () => {
@@ -113,6 +132,16 @@ describe("administrator login diagnostics", () => {
     await expectFailedLogin("credentials_rejected");
   });
 
+  it("rejects a durably throttled account before password verification", async () => {
+    mocks.runLoginAttemptWithThrottle.mockResolvedValueOnce({
+      status: "blocked",
+    });
+
+    await expectFailedLogin("login_throttled");
+
+    expect(mocks.authenticateAccountLogin).not.toHaveBeenCalled();
+  });
+
   it("uses explicit environment mode without resolving the database", async () => {
     mocks.getAuthStorageMode.mockReturnValue("environment");
     mocks.verifyAdminCredentials.mockResolvedValue(true);
@@ -120,7 +149,7 @@ describe("administrator login diagnostics", () => {
     const response = await POST(loginRequest());
 
     expect(response.status).toBe(303);
-    expect(response.headers.get("location")).toBe("/musteriler");
+    expect(response.headers.get("location")).toBe("/");
     expect(response.headers.get("set-cookie")).toContain("v1.");
     expect(mocks.authenticateAccountLogin).not.toHaveBeenCalled();
     expect(mocks.getDatabaseProbeEnvironment).not.toHaveBeenCalled();
@@ -134,6 +163,73 @@ describe("administrator login diagnostics", () => {
     expect(mocks.verifyAdminCredentials).not.toHaveBeenCalled();
     expect(JSON.stringify(mocks.warn.mock.calls)).not.toContain(
       "database-error-sentinel",
+    );
+  });
+
+  it("fails closed when the durable throttle store is unavailable", async () => {
+    mocks.runLoginAttemptWithThrottle.mockRejectedValueOnce(
+      new Error("throttle-store-sentinel"),
+    );
+
+    await expectFailedLogin("auth_database_unavailable");
+
+    expect(mocks.authenticateAccountLogin).not.toHaveBeenCalled();
+    expect(JSON.stringify(mocks.warn.mock.calls)).not.toContain(
+      "throttle-store-sentinel",
+    );
+  });
+
+  it("preserves an allowlisted module return path", async () => {
+    mocks.getAuthStorageMode.mockReturnValue("environment");
+    mocks.verifyAdminCredentials.mockResolvedValue(true);
+    const response = await POST(
+      new NextRequest("https://portal.example.test/api/auth/login", {
+        body: new URLSearchParams({
+          email: "yonetici@example.com",
+          next: "/finans/nakit-akisi?month=2026-09",
+          password: "password-input-sentinel",
+        }),
+        headers: { origin: "https://portal.example.test" },
+        method: "POST",
+      }),
+    );
+
+    expect(response.headers.get("location")).toBe(
+      "/finans/nakit-akisi?month=2026-09",
+    );
+  });
+
+  it("rejects a cross-origin form before credential verification", async () => {
+    const request = loginRequest();
+    request.headers.set("origin", "https://attacker.example");
+    const response = await POST(request);
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe("/giris?hata=1");
+    expect(mocks.authenticateAccountLogin).not.toHaveBeenCalled();
+    expect(mocks.warn).toHaveBeenCalledWith(
+      { category: "request_origin_rejected", event: "auth.login.failed" },
+      "Administrator login failed: request_origin_rejected",
+    );
+  });
+
+  it("rejects a chunked body after measuring its actual bytes", async () => {
+    const response = await POST(
+      new NextRequest("https://portal.example.test/api/auth/login", {
+        body: new URLSearchParams({
+          email: "yonetici@example.com",
+          password: "x".repeat(5_000),
+        }),
+        headers: { origin: "https://portal.example.test" },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(303);
+    expect(mocks.authenticateAccountLogin).not.toHaveBeenCalled();
+    expect(mocks.warn).toHaveBeenCalledWith(
+      { category: "request_body_rejected", event: "auth.login.failed" },
+      "Administrator login failed: request_body_rejected",
     );
   });
 });

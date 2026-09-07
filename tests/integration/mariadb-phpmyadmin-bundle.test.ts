@@ -21,15 +21,22 @@ const disposableMariaDbEnabled =
 const repositoryRoot = process.cwd();
 const journalTable = "__drizzle_migrations";
 const knownTablesInDropOrder = [
+  "work_task_visit",
+  "finance_ledger_entry",
+  "finance_transaction",
+  "finance_account",
   "partnership_contribution_receipt",
   "partnership_contribution",
   "partnership_commission",
   "credit_card_installment",
   "expense",
+  "expense_category",
   "credit_card",
   "work_task_project",
   "work_task",
   "project",
+  "login_attempt_throttle",
+  "user_permission",
   "user_account",
   "receivable_collection",
   "receivable",
@@ -55,6 +62,9 @@ interface BundleSummary {
 
 interface BundleManifest {
   formatVersion: number;
+  schema: {
+    indexes: Array<{ name: string; tableName: string }>;
+  };
   sessionPolicy: {
     characterSet: string;
     collation: string;
@@ -470,8 +480,8 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
           },
           sessionRestored: true,
         });
-        expect(await tableNames(pool)).toHaveLength(23);
-        expect(await journalRows(pool)).toHaveLength(12);
+        expect(await tableNames(pool)).toHaveLength(30);
+        expect(await journalRows(pool)).toHaveLength(19);
       } catch (error) {
         reusable = false;
         throw error;
@@ -630,18 +640,30 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
           (SELECT COUNT(DISTINCT TABLE_NAME, INDEX_NAME) FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE()) AS indexes,
           @@SESSION.sql_mode AS sql_mode`,
       );
+      const [indexRows] = await pool.query<RowDataPacket[]>(
+        `SELECT DISTINCT TABLE_NAME AS table_name, INDEX_NAME AS index_name
+           FROM information_schema.STATISTICS
+          WHERE TABLE_SCHEMA = DATABASE()`,
+      );
+      const actualIndexPairs = new Set(
+        indexRows.map((row) => `${String(row.table_name)}:${String(row.index_name)}`),
+      );
+      const missingExpectedIndexes = validManifest.schema.indexes.filter(
+        (index) => !actualIndexPairs.has(`${index.tableName}:${index.name}`),
+      );
       expect({
         diagnostics: diagnostics[0],
         journalCount: journalAfter.length,
+        missingExpectedIndexes,
         outcome,
         tablesAfter,
       }).toEqual({
         diagnostics: {
-          application_columns: 247,
-          checks: 119,
-          foreign_keys: 20,
-          indexes: 77,
-          matching_application_tables: 22,
+          application_columns: 326,
+          checks: 158,
+          foreign_keys: 35,
+          indexes: 110,
+          matching_application_tables: 29,
           matching_journal_tables: 1,
           sql_mode: expect.any(String),
         },
@@ -650,6 +672,7 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
           firstErrorIndex: undefined,
           results: ["PORTAL_PUSULA_MIGRATION_BUNDLE_OK"],
         },
+        missingExpectedIndexes: [],
         tablesAfter: [
           "__drizzle_migrations",
           "_platform_migration_verification",
@@ -661,7 +684,12 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
           "customer",
           "customer_project",
           "expense",
+          "expense_category",
+          "finance_account",
+          "finance_ledger_entry",
+          "finance_transaction",
           "job_run",
+          "login_attempt_throttle",
           "monthly_visit_commitment",
           "outbox_event",
           "partnership_commission",
@@ -672,10 +700,12 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
           "receivable_collection",
           "scheduled_job",
           "user_account",
+          "user_permission",
           "work_task",
           "work_task_project",
+          "work_task_visit",
         ],
-        journalCount: 12,
+        journalCount: 19,
       });
 
       await expect(
@@ -689,7 +719,7 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
 
       const bundleSchema = await schemaDefinitionSnapshot(pool);
       await expect(runMigration()).resolves.toBeUndefined();
-      expect(await journalRows(pool)).toHaveLength(12);
+      expect(await journalRows(pool)).toHaveLength(19);
       expect(await schemaDefinitionSnapshot(pool)).toEqual(bundleSchema);
 
       await resetKnownTables(pool);

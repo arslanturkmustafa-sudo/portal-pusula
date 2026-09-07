@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import {
   char,
   check,
+  customType,
   date,
   datetime,
   decimal,
@@ -16,6 +17,17 @@ import {
 
 import { customer } from "./customer";
 import { customerProject } from "./customer-project";
+import { userAccount } from "./user-account";
+
+const utf8mb4UnicodeVarchar = customType<{
+  config: { length: number };
+  configRequired: true;
+  data: string;
+  driverData: string;
+}>({
+  dataType: ({ length }) =>
+    `varchar(${length}) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
+});
 
 export const consultingContract = mysqlTable(
   "consulting_contract",
@@ -35,6 +47,12 @@ export const consultingContract = mysqlTable(
     vatRate: decimal("vat_rate", { precision: 5, scale: 2 }).notNull(),
     paymentDay: int("payment_day", { unsigned: true }).notNull(),
     internalNote: varchar("internal_note", { length: 2000 }),
+    archiveReason: varchar("archive_reason", { length: 500 }),
+    archivedAtUtc: datetime("archived_at_utc", { fsp: 6, mode: "string" }),
+    archivedByUserAccountId: char("archived_by_user_account_id", {
+      length: 36,
+    }),
+    version: int("version", { unsigned: true }).default(1).notNull(),
     createdAtUtc: datetime("created_at_utc", {
       fsp: 6,
       mode: "string",
@@ -78,12 +96,42 @@ export const consultingContract = mysqlTable(
     ),
     check(
       "chk_consulting_contract_timeline",
-      sql`${table.createdAtUtc} <= ${table.updatedAtUtc}`,
+      sql`${table.createdAtUtc} <= ${table.updatedAtUtc}
+        AND (
+          ${table.archivedAtUtc} IS NULL
+          OR (
+            ${table.createdAtUtc} <= ${table.archivedAtUtc}
+            AND ${table.archivedAtUtc} <= ${table.updatedAtUtc}
+          )
+        )`,
+    ),
+    check("chk_consulting_contract_version", sql`${table.version} >= 1`),
+    check(
+      "chk_consulting_contract_archive",
+      sql`(
+          ${table.archivedAtUtc} IS NULL
+          AND ${table.archivedByUserAccountId} IS NULL
+          AND ${table.archiveReason} IS NULL
+        ) OR (
+          ${table.archivedAtUtc} IS NOT NULL
+          AND ${table.archivedByUserAccountId} IS NOT NULL
+          AND ${table.archiveReason} IS NOT NULL
+          AND CHAR_LENGTH(${table.archiveReason}) BETWEEN 1 AND 500
+          AND ${table.archiveReason} = TRIM(${table.archiveReason})
+          AND BINARY ${table.status} = BINARY 'closed'
+        )`,
     ),
     foreignKey({
       name: "fk_consulting_contract_customer",
       columns: [table.customerId],
       foreignColumns: [customer.id],
+    })
+      .onDelete("restrict")
+      .onUpdate("restrict"),
+    foreignKey({
+      name: "fk_consulting_contract_archived_by",
+      columns: [table.archivedByUserAccountId],
+      foreignColumns: [userAccount.id],
     })
       .onDelete("restrict")
       .onUpdate("restrict"),
@@ -101,6 +149,7 @@ export const consultingContract = mysqlTable(
     ),
     index("idx_consulting_contract_customer_status").on(
       table.customerId,
+      table.archivedAtUtc,
       table.status,
       table.endsOn,
     ),
@@ -129,6 +178,7 @@ export const monthlyVisitCommitment = mysqlTable(
     internalDurationMinutes: smallint("internal_duration_minutes", {
       unsigned: true,
     }),
+    locationLabel: utf8mb4UnicodeVarchar("location_label", { length: 191 }),
     deliveredOn: date("delivered_on", { mode: "string" }),
     resolutionNote: varchar("resolution_note", { length: 2000 }),
     createdAtUtc: datetime("created_at_utc", {
@@ -191,7 +241,11 @@ export const monthlyVisitCommitment = mysqlTable(
     ),
     check(
       "chk_monthly_visit_optional_fields",
-      sql`${table.resolutionNote} IS NULL OR CHAR_LENGTH(${table.resolutionNote}) BETWEEN 1 AND 2000`,
+      sql`(${table.locationLabel} IS NULL OR (
+          CHAR_LENGTH(${table.locationLabel}) BETWEEN 1 AND 191
+          AND ${table.locationLabel} = TRIM(${table.locationLabel})
+        ))
+        AND (${table.resolutionNote} IS NULL OR CHAR_LENGTH(${table.resolutionNote}) BETWEEN 1 AND 2000)`,
     ),
     check(
       "chk_monthly_visit_timeline",

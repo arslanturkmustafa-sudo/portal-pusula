@@ -7,6 +7,7 @@ import { registerMySqlPoolDatabase } from "@/platform/database/mysql-session-con
 
 const PLATFORM_CONNECT_TIMEOUT_MS = 2_000;
 const PLATFORM_IDLE_TIMEOUT_MS = 30_000;
+const PLATFORM_QUEUE_LIMIT = 16;
 
 let platformPool: Pool | undefined;
 
@@ -29,7 +30,8 @@ export function getPlatformDatabasePool(
       connectionLimit: 2,
       maxIdle: 2,
       idleTimeout: PLATFORM_IDLE_TIMEOUT_MS,
-      waitForConnections: false,
+      waitForConnections: true,
+      queueLimit: PLATFORM_QUEUE_LIMIT,
       connectTimeout: PLATFORM_CONNECT_TIMEOUT_MS,
       enableKeepAlive: false,
       multipleStatements: false,

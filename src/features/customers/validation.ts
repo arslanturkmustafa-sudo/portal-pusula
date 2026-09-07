@@ -84,9 +84,10 @@ export const updateCustomerInputSchema = z
     projectIds: projectIdsSchema.optional(),
     shortCode: shortCodeSchema.optional(),
     status: statusSchema.optional(),
+    version: z.number().int().min(1).max(4_294_967_294),
   })
   .strict()
-  .refine((value) => Object.keys(value).length > 0);
+  .refine((value) => Object.keys(value).some((key) => key !== "version"));
 
 export type CreateCustomerInput = z.infer<typeof createCustomerInputSchema>;
 export type UpdateCustomerInput = z.infer<typeof updateCustomerInputSchema>;

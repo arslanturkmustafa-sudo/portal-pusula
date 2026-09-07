@@ -57,6 +57,13 @@ const analyzeIncrementalMigrationStatement = untypedAnalyze as (
 
 const customerProjectsPartnershipMigrationTag =
   "0011_customer_projects_partnership";
+const userPermissionsMigrationTag = "0012_user_permissions";
+const recordLifecycleMigrationTag = "0014_record_lifecycle";
+const financialReversalsMigrationTag = "0015_financial_reversals";
+const financeAccountsLedgerMigrationTag = "0016_finance_accounts_ledger";
+const workTaskVisitMigrationTag = "0017_work_task_visit";
+const planningExpenseCategoriesMigrationTag =
+  "0018_planning_expense_categories";
 const incremental0011Backfills = untyped0011Backfills as {
   consultingContract: string;
   customerProject: string;
@@ -189,6 +196,49 @@ async function build0011(outputDirectory: string) {
   };
 }
 
+async function build0012(outputDirectory: string) {
+  const summary = await buildPhpMyAdminIncrementalMigrationBundle({
+    migrationTag: userPermissionsMigrationTag,
+    outputDirectory,
+    projectRoot,
+    serverVersionSha256,
+    targetDatabaseSha256,
+  });
+  const sql = await readFile(resolve(projectRoot, summary.sqlPath), "utf8");
+  const manifestText = await readFile(
+    resolve(projectRoot, summary.manifestPath),
+    "utf8",
+  );
+  return {
+    manifest: JSON.parse(manifestText) as IncrementalManifest,
+    sql,
+    summary,
+  };
+}
+
+async function buildCurrentIncremental(
+  migrationTag: string,
+  outputDirectory: string,
+) {
+  const summary = await buildPhpMyAdminIncrementalMigrationBundle({
+    migrationTag,
+    outputDirectory,
+    projectRoot,
+    serverVersionSha256,
+    targetDatabaseSha256,
+  });
+  const sql = await readFile(resolve(projectRoot, summary.sqlPath), "utf8");
+  const manifestText = await readFile(
+    resolve(projectRoot, summary.manifestPath),
+    "utf8",
+  );
+  return {
+    manifest: JSON.parse(manifestText) as IncrementalManifest,
+    sql,
+    summary,
+  };
+}
+
 function candidateStatements(sql: string): string[] {
   return [...sql.matchAll(/SET @pp_candidate_sql = 0x([0-9a-f]+);/gu)].map(
     (match) => Buffer.from(match[1], "hex").toString("utf8"),
@@ -267,6 +317,419 @@ describe.sequential("phpMyAdmin incremental migration bundle policy", () => {
         "ALTER TABLE `consulting_contract` ADD CONSTRAINT `fk_consulting_contract_customer_project` FOREIGN KEY (`customer_id`,`project_id`) REFERENCES `customer_project`(`customer_id`,`project_id`) ON DELETE restrict ON UPDATE restrict",
       ),
     );
+  });
+
+  it("builds a target-bound 0012 user-permission artifact with exact transitional guards", async () => {
+    const first = await build0012(await temporaryOutputDirectory());
+    const second = await build0012(await temporaryOutputDirectory());
+    const migrationSql = await readFile(
+      resolve(projectRoot, "drizzle", `${userPermissionsMigrationTag}.sql`),
+      "utf8",
+    );
+    const migrationStatements = migrationSql
+      .split(/--> statement-breakpoint\s*/gu)
+      .map((statement) => statement.trim().replace(/;$/u, ""));
+
+    expect(second.summary).toMatchObject({
+      migrationTag: userPermissionsMigrationTag,
+      statementCount: 7,
+    });
+    expect(first.manifest.expectedJournalCount).toBe(12);
+    expect(first.manifest.expectedPreviousMigration.tag).toBe(
+      customerProjectsPartnershipMigrationTag,
+    );
+    expect(first.manifest.migration.tag).toBe(userPermissionsMigrationTag);
+    expect(first.manifest.migration.statementHashes).toHaveLength(7);
+    expect(candidateStatements(first.sql)).toEqual([
+      ...migrationStatements,
+      expect.stringContaining("INSERT INTO `__drizzle_migrations`"),
+    ]);
+    expect(first.manifest.targetObjects).toEqual(
+      expect.arrayContaining([
+        {
+          name: "chk_user_account_state",
+          tableName: "user_account",
+          type: "drop-check",
+        },
+        {
+          name: "display_name,role",
+          tableName: "user_account",
+          type: "add-user-account-columns",
+        },
+        {
+          name: "display_name,role",
+          tableName: "user_account",
+          type: "modify-user-account-columns",
+        },
+        {
+          name: "user_permission",
+          tableName: "user_permission",
+          type: "create-table",
+        },
+        {
+          name: "idx_user_account_role_status",
+          tableName: "user_account",
+          type: "create-index",
+        },
+      ]),
+    );
+    expect(first.sql).toContain("COLUMN_NAME IN ('display_name', 'role')) = 0");
+    expect(first.sql).toContain("REPLACE(COLUMN_DEFAULT, '''', '') = 'owner'");
+    expect(first.sql).toContain("REPLACE(COLUMN_DEFAULT, '''', '') = 'member'");
+    const initialGuard = first.sql.slice(
+      0,
+      first.sql.indexOf("SET @pp_candidate_sql = 0x"),
+    );
+    expect(initialGuard).toContain(
+      "CONSTRAINT_NAME = 'chk_user_account_state' AND CONSTRAINT_TYPE = 'CHECK') = 1",
+    );
+    expect(initialGuard.match(/chk_user_account_state/gu)).toHaveLength(1);
+    expect(first.sql).not.toContain("PORTAL_PUSULA_INVALID_SQL_MODE");
+  });
+
+  it("accepts only the exact 0012 user-account transition statements", async () => {
+    const migrationSql = await readFile(
+      resolve(projectRoot, "drizzle", `${userPermissionsMigrationTag}.sql`),
+      "utf8",
+    );
+    const statements = migrationSql
+      .split(/--> statement-breakpoint\s*/gu)
+      .map((statement) => statement.trim().replace(/;$/u, ""));
+
+    expect(
+      statements.map((statement) =>
+        analyzeIncrementalMigrationStatement(statement, userPermissionsMigrationTag),
+      ),
+    ).toHaveLength(7);
+    expect(() =>
+      analyzeIncrementalMigrationStatement(
+        statements[0].replace("chk_user_account_state", "chk_other"),
+        userPermissionsMigrationTag,
+      ),
+    ).toThrow();
+    expect(() =>
+      analyzeIncrementalMigrationStatement(
+        statements[1].replace("DEFAULT 'owner'", "DEFAULT 'member'"),
+        userPermissionsMigrationTag,
+      ),
+    ).toThrow();
+  });
+
+  it.each([
+    {
+      expectedJournalCount: 14,
+      expectedPreviousTag: "0013_login_attempt_throttle",
+      migrationTag: recordLifecycleMigrationTag,
+      requiredTarget: {
+        name: "archive_reason",
+        tableName: "customer",
+        type: "add-column",
+      },
+      statementCount: 44,
+    },
+    {
+      expectedJournalCount: 15,
+      expectedPreviousTag: recordLifecycleMigrationTag,
+      migrationTag: financialReversalsMigrationTag,
+      requiredTarget: {
+        name: "uq_receivable_collection_reversal",
+        tableName: "receivable_collection",
+        type: "create-index",
+      },
+      statementCount: 26,
+    },
+    {
+      expectedJournalCount: 16,
+      expectedPreviousTag: financialReversalsMigrationTag,
+      migrationTag: financeAccountsLedgerMigrationTag,
+      requiredTarget: {
+        name: "finance_account",
+        tableName: "finance_account",
+        type: "create-table",
+      },
+      statementCount: 15,
+    },
+    {
+      expectedJournalCount: 17,
+      expectedPreviousTag: financeAccountsLedgerMigrationTag,
+      migrationTag: workTaskVisitMigrationTag,
+      requiredTarget: {
+        name: "work_task_visit",
+        tableName: "work_task_visit",
+        type: "create-table",
+      },
+      statementCount: 4,
+    },
+    {
+      expectedJournalCount: 18,
+      expectedPreviousTag: workTaskVisitMigrationTag,
+      migrationTag: planningExpenseCategoriesMigrationTag,
+      requiredTarget: {
+        name: "seed_expense_category",
+        tableName: "expense_category",
+        type: "data-seed",
+      },
+      statementCount: 9,
+    },
+  ])(
+    "builds deterministic guarded $migrationTag artifact",
+    async ({
+      expectedJournalCount,
+      expectedPreviousTag,
+      migrationTag,
+      requiredTarget,
+      statementCount,
+    }) => {
+      const first = await buildCurrentIncremental(
+        migrationTag,
+        await temporaryOutputDirectory(),
+      );
+      const second = await buildCurrentIncremental(
+        migrationTag,
+        await temporaryOutputDirectory(),
+      );
+
+      expect(second.summary).toMatchObject({ migrationTag, statementCount });
+      expect(first.summary.sqlSha256).toBe(second.summary.sqlSha256);
+      expect(first.manifest.expectedJournalCount).toBe(expectedJournalCount);
+      expect(first.manifest.expectedPreviousMigration.tag).toBe(
+        expectedPreviousTag,
+      );
+      expect(first.manifest.targetObjects).toContainEqual(requiredTarget);
+      expect(first.manifest.migration.statementHashes).toHaveLength(
+        statementCount,
+      );
+      expect(first.sql).toContain(
+        Buffer.from("PORTAL_PUSULA_INCREMENTAL_MIGRATION_OK", "utf8").toString(
+          "hex",
+        ),
+      );
+      if (migrationTag === recordLifecycleMigrationTag) {
+        const initialGuard = first.sql.slice(
+          0,
+          first.sql.indexOf("SET @pp_candidate_sql = 0x"),
+        );
+        expect(initialGuard).toContain(
+          "INDEX_NAME = 'idx_customer_status_name') = 2",
+        );
+        expect(initialGuard).not.toContain(
+          "TABLE_NAME = 'customer' AND INDEX_NAME = 'idx_customer_status_name') = 0",
+        );
+      }
+    },
+  );
+
+  it("guards the exact 0018 category catalog, seed, and expense ownership", async () => {
+    const first = await buildCurrentIncremental(
+      planningExpenseCategoriesMigrationTag,
+      await temporaryOutputDirectory(),
+    );
+    const statements = candidateStatements(first.sql);
+    const createCategory = statements.find((statement) =>
+      statement.startsWith("CREATE TABLE `expense_category`"),
+    );
+    const categorySeed = statements.find((statement) =>
+      statement.startsWith("INSERT INTO `expense_category`"),
+    );
+    const initialGuard = first.sql.slice(
+      0,
+      first.sql.indexOf("SET @pp_candidate_sql = 0x"),
+    );
+
+    expect(first.manifest.migration).toMatchObject({
+      createdAt: 1788799557949,
+      hash: "48286e594051f082b85891e043f9578dfa2105fb50aef98b878e8d476cdbba6f",
+      tag: planningExpenseCategoriesMigrationTag,
+    });
+    expect(first.manifest.targetObjects).toEqual(
+      expect.arrayContaining([
+        {
+          name: "expense_category",
+          tableName: "expense_category",
+          type: "create-table",
+        },
+        {
+          name: "seed_expense_category",
+          tableName: "expense_category",
+          type: "data-seed",
+        },
+        {
+          name: "fk_expense_category",
+          tableName: "expense",
+          type: "foreign-key",
+        },
+      ]),
+    );
+    expect(createCategory).toContain(
+      "CONSTRAINT `uq_expense_category_display_name` UNIQUE(`display_name`)",
+    );
+    expect(statements).toContain(
+      "ALTER TABLE `monthly_visit_commitment` ADD `location_label` varchar(191) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci",
+    );
+    expect(categorySeed?.match(/'81000000-/gu)).toHaveLength(9);
+    expect(initialGuard).toContain("TABLE_NAME = 'expense_category'");
+    expect(initialGuard).not.toContain("FROM `expense_category`");
+    expect(initialGuard).toContain(
+      "TABLE_NAME = 'monthly_visit_commitment' AND TABLE_TYPE = 'BASE TABLE' AND ENGINE = 'InnoDB' AND TABLE_COLLATION = 'utf8mb4_unicode_ci') = 1",
+    );
+    expect(initialGuard).toContain(
+      "TABLE_NAME = 'monthly_visit_commitment' AND COLUMN_NAME = 'location_label') = 0",
+    );
+    expect(initialGuard).toContain(
+      "TABLE_NAME = 'expense' AND COLUMN_NAME = 'category' AND DATA_TYPE = 'varchar' AND COLUMN_TYPE = 'varchar(32)' AND CHARACTER_MAXIMUM_LENGTH = 32 AND CHARACTER_SET_NAME = 'ascii' AND COLLATION_NAME = 'ascii_bin' AND IS_NULLABLE = 'NO' AND (COLUMN_DEFAULT IS NULL OR BINARY COLUMN_DEFAULT = BINARY 'NULL') AND EXTRA = '') = 1",
+    );
+    expect(initialGuard).toContain(
+      "FROM `expense` WHERE BINARY `category` NOT IN (BINARY 'rent'",
+    );
+    expect(initialGuard).toContain(
+      "information_schema.CHECK_CONSTRAINTS cc",
+    );
+    expect(initialGuard).toContain(
+      "BINARY cc.CHECK_CLAUSE = BINARY 'cast(`category` as char charset binary) in (cast(''rent'' as char charset binary)",
+    );
+    expect(initialGuard).toContain(
+      "BINARY cc.CHECK_CLAUSE = BINARY '`resolution_note` is null or char_length(`resolution_note`) between 1 and 2000'",
+    );
+    expect(first.sql).toContain(
+      "TABLE_NAME = 'expense_category' AND COLUMN_NAME = 'code' AND DATA_TYPE = 'varchar' AND COLUMN_TYPE = 'varchar(32)' AND CHARACTER_MAXIMUM_LENGTH = 32 AND CHARACTER_SET_NAME = 'ascii' AND COLLATION_NAME = 'ascii_bin' AND IS_NULLABLE = 'NO'",
+    );
+    expect(first.sql).toContain(
+      "TABLE_NAME = 'expense_category' AND CONSTRAINT_NAME = 'uq_expense_category_code' AND CONSTRAINT_TYPE = 'UNIQUE') = 1",
+    );
+    expect(first.sql).toContain(
+      "TABLE_NAME = 'monthly_visit_commitment' AND COLUMN_NAME = 'location_label' AND DATA_TYPE = 'varchar' AND IS_NULLABLE = 'YES' AND EXTRA = '' AND CHARACTER_MAXIMUM_LENGTH = 191 AND COLUMN_TYPE = 'varchar(191)' AND CHARACTER_SET_NAME = 'utf8mb4' AND COLLATION_NAME = 'utf8mb4_unicode_ci'",
+    );
+    expect(first.sql).toContain(
+      "BINARY cc.CHECK_CLAUSE = BINARY 'char_length(`category`) between 1 and 32 and cast(`category` as char charset binary) regexp ''^[a-z][a-z0-9_]{0,31}$'''",
+    );
+    expect(first.sql).toContain(
+      "BINARY cc.CHECK_CLAUSE = BINARY '(`location_label` is null or char_length(`location_label`) between 1 and 191 and `location_label` = trim(`location_label`)) and (`resolution_note` is null or char_length(`resolution_note`) between 1 and 2000)'",
+    );
+    expect(first.sql).not.toContain("INSERT INTO `expense_category`");
+  });
+
+  it("accepts only the explicit utf8mb4 visit-location definition for 0018", () => {
+    const exact =
+      "ALTER TABLE `monthly_visit_commitment` ADD `location_label` varchar(191) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci";
+
+    expect(
+      analyzeIncrementalMigrationStatement(
+        exact,
+        planningExpenseCategoriesMigrationTag,
+      ),
+    ).toMatchObject({
+      columnName: "location_label",
+      columnSpec: {
+        characterSet: "utf8mb4",
+        collation: "utf8mb4_unicode_ci",
+        columnType: "varchar(191)",
+        nullable: true,
+      },
+      tableName: "monthly_visit_commitment",
+      type: "add-column",
+    });
+    expect(() =>
+      analyzeIncrementalMigrationStatement(
+        exact.replace(
+          " CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci",
+          "",
+        ),
+        planningExpenseCategoriesMigrationTag,
+      ),
+    ).toThrow();
+  });
+
+  it("guards both 0017 parent identifiers and primary keys before any DDL", async () => {
+    const first = await buildCurrentIncremental(
+      workTaskVisitMigrationTag,
+      await temporaryOutputDirectory(),
+    );
+    const second = await buildCurrentIncremental(
+      workTaskVisitMigrationTag,
+      await temporaryOutputDirectory(),
+    );
+    const initialGuard = first.sql.slice(
+      0,
+      first.sql.indexOf("SET @pp_candidate_sql = 0x"),
+    );
+
+    expect(first.summary).toMatchObject({
+      migrationTag: workTaskVisitMigrationTag,
+      statementCount: 4,
+    });
+    expect(first.summary.sqlSha256).toBe(second.summary.sqlSha256);
+    expect(first.manifest.migration.statementHashes).toHaveLength(4);
+    expect(initialGuard).not.toContain("TRIGGER");
+
+    for (const tableName of ["work_task", "monthly_visit_commitment"]) {
+      expect(initialGuard).toContain(
+        `TABLE_NAME = '${tableName}' AND COLUMN_NAME = 'id' AND DATA_TYPE = 'char' AND COLUMN_TYPE = 'char(36)' AND CHARACTER_MAXIMUM_LENGTH = 36 AND CHARACTER_SET_NAME = 'ascii' AND COLLATION_NAME = 'ascii_bin' AND IS_NULLABLE = 'NO'`,
+      );
+      expect(initialGuard).toContain(
+        `TABLE_NAME = '${tableName}' AND CONSTRAINT_NAME = 'PRIMARY' AND CONSTRAINT_TYPE = 'PRIMARY KEY') = 1`,
+      );
+      expect(initialGuard).toContain(
+        `TABLE_NAME = '${tableName}' AND INDEX_NAME = 'PRIMARY') = 1`,
+      );
+      expect(initialGuard).toContain(
+        `TABLE_NAME = '${tableName}' AND INDEX_NAME = 'PRIMARY' AND NON_UNIQUE = 0 AND INDEX_TYPE = 'BTREE') = 1`,
+      );
+      expect(initialGuard).toContain(
+        `TABLE_NAME = '${tableName}' AND INDEX_NAME = 'PRIMARY' AND SEQ_IN_INDEX = 1 AND COLUMN_NAME = 'id' AND NON_UNIQUE = 0) = 1`,
+      );
+    }
+
+    expect(
+      candidateStatements(first.sql).filter((statement) =>
+        /\b(?:CREATE|ALTER|DROP)\b/iu.test(statement),
+      ),
+    ).toHaveLength(4);
+    expect(candidateStatements(first.sql).join("\n")).not.toMatch(
+      /\bTRIGGER\b/iu,
+    );
+  });
+
+  it("rejects mutated lifecycle and reversal column definitions", () => {
+    expect(() =>
+      analyzeIncrementalMigrationStatement(
+        "ALTER TABLE `customer` ADD `archive_reason` varchar(500) NOT NULL",
+        recordLifecycleMigrationTag,
+      ),
+    ).toThrow();
+    expect(() =>
+      analyzeIncrementalMigrationStatement(
+        "ALTER TABLE `receivable` ADD `record_state` varchar(16) DEFAULT 'voided' NOT NULL",
+        financialReversalsMigrationTag,
+      ),
+    ).toThrow();
+  });
+
+  it("allows the exact finance permission check replacement only in 0016", () => {
+    const statement =
+      "ALTER TABLE `user_permission` DROP CONSTRAINT `chk_user_permission_code`";
+
+    expect(
+      analyzeIncrementalMigrationStatement(
+        statement,
+        financeAccountsLedgerMigrationTag,
+      ),
+    ).toMatchObject({
+      constraintName: "chk_user_permission_code",
+      tableName: "user_permission",
+      type: "drop-check",
+    });
+    expect(() =>
+      analyzeIncrementalMigrationStatement(
+        statement.replace("chk_user_permission_code", "chk_other"),
+        financeAccountsLedgerMigrationTag,
+      ),
+    ).toThrow();
+    expect(() =>
+      analyzeIncrementalMigrationStatement(
+        statement,
+        workTaskVisitMigrationTag,
+      ),
+    ).toThrow();
   });
 
   it("requires the exact previous journal and records the selected hash", async () => {

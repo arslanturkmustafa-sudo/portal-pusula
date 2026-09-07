@@ -24,7 +24,7 @@ function json(body: unknown, status = 200): NextResponse {
 }
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  if (!(await isAdminAuthenticated(request))) {
+  if (!(await isAdminAuthenticated(request, "finance.receivables.read"))) {
     return json({ status: "unauthorized" }, 401);
   }
 

@@ -7,6 +7,10 @@ import type {
 } from "mysql2/promise";
 
 import type { ProjectStatus } from "@/features/projects/repository";
+import {
+  mapArchiveMetadata,
+  type ArchiveMetadata,
+} from "@/features/lifecycle";
 
 export type CustomerStatus = "active" | "inactive";
 export type CustomerProjectLinkStatus = "active" | "inactive";
@@ -18,12 +22,26 @@ export type CustomerProjectSummary = Readonly<{
   status: ProjectStatus;
 }>;
 
-export type Customer = Readonly<{
+export type CustomerBillingSummary = Readonly<{
+  activeContractCount: number;
+  currency: "TRY";
+  monthlyFeeAmount: string;
+  paymentDays: readonly number[];
+  vatMode: "exempt" | "exclusive" | "inclusive" | "mixed";
+}>;
+
+export type CustomerOverview = Readonly<{
+  billing?: CustomerBillingSummary;
+  nextVisitOn: string | null;
+}>;
+
+export type Customer = ArchiveMetadata & Readonly<{
   contactNote: string | null;
   createdAtUtc: string;
   displayName: string;
   email: string | null;
   id: string;
+  overview: CustomerOverview;
   phone: string | null;
   projects: readonly CustomerProjectSummary[];
   shortCode: string;
@@ -41,6 +59,9 @@ export type CustomerProjectLink = Readonly<{
 }>;
 
 type CustomerRow = RowDataPacket & {
+  archive_reason: string | null;
+  archived_at_utc: string | Date | null;
+  archived_by_user_account_id: string | null;
   contact_note: string | null;
   created_at_utc: string | Date;
   customer_status: string;
@@ -50,6 +71,7 @@ type CustomerRow = RowDataPacket & {
   phone: string | null;
   short_code: string;
   updated_at_utc: string | Date;
+  version: number;
 };
 
 type CustomerProjectRow = RowDataPacket & {
@@ -59,7 +81,18 @@ type CustomerProjectRow = RowDataPacket & {
   project_status: string | null;
 };
 
-type CustomerWithProjectRow = CustomerRow & CustomerProjectRow;
+type CustomerOverviewRow = RowDataPacket & {
+  active_contract_count: number | string | null;
+  billing_currency: string | null;
+  billing_vat_mode: string | null;
+  monthly_fee_amount: string | null;
+  next_visit_on: string | Date | null;
+  payment_days: string | null;
+};
+
+type CustomerWithProjectRow = CustomerRow &
+  CustomerProjectRow &
+  CustomerOverviewRow;
 
 type CustomerProjectLinkRow = RowDataPacket & {
   created_at_utc: string | Date;
@@ -72,6 +105,10 @@ type CustomerProjectLinkRow = RowDataPacket & {
 
 type CustomerProjectUsageRow = RowDataPacket & {
   in_use: number | string;
+};
+
+type CustomerLifecycleDependencyRow = RowDataPacket & {
+  has_dependencies: number | string;
 };
 
 function canonicalDateTime(value: string | Date): string {
@@ -118,18 +155,75 @@ function validVersion(value: number): number {
 function mapCustomer(
   row: CustomerRow,
   projects: readonly CustomerProjectSummary[],
+  overview: CustomerOverview = { nextVisitOn: null },
 ): Customer {
   return {
+    ...mapArchiveMetadata(row),
     contactNote: row.contact_note,
     createdAtUtc: canonicalDateTime(row.created_at_utc),
     displayName: row.display_name,
     email: row.email,
     id: row.id,
+    overview,
     phone: row.phone,
     projects,
     shortCode: row.short_code,
     status: customerStatus(row.customer_status),
     updatedAtUtc: canonicalDateTime(row.updated_at_utc),
+  };
+}
+
+function mapBillingSummary(
+  row: CustomerOverviewRow,
+): CustomerBillingSummary | undefined {
+  if (
+    row.active_contract_count === null &&
+    row.billing_currency === null &&
+    row.billing_vat_mode === null &&
+    row.monthly_fee_amount === null &&
+    row.payment_days === null
+  ) {
+    return undefined;
+  }
+  if (
+    row.active_contract_count === null ||
+    row.billing_currency !== "TRY" ||
+    row.billing_vat_mode === null ||
+    row.monthly_fee_amount === null ||
+    row.payment_days === null
+  ) {
+    throw new Error("Customer billing projection is invalid.");
+  }
+  const activeContractCount = Number(row.active_contract_count);
+  const paymentDays = row.payment_days.split(",").map(Number);
+  if (
+    !Number.isSafeInteger(activeContractCount) ||
+    activeContractCount < 1 ||
+    paymentDays.length === 0 ||
+    paymentDays.some(
+      (day) => !Number.isSafeInteger(day) || day < 1 || day > 31,
+    ) ||
+    !["exempt", "exclusive", "inclusive", "mixed"].includes(
+      row.billing_vat_mode,
+    )
+  ) {
+    throw new Error("Customer billing projection is invalid.");
+  }
+  return {
+    activeContractCount,
+    currency: "TRY",
+    monthlyFeeAmount: row.monthly_fee_amount,
+    paymentDays,
+    vatMode: row.billing_vat_mode as CustomerBillingSummary["vatMode"],
+  };
+}
+
+function mapOverview(row: CustomerOverviewRow): CustomerOverview {
+  const billing = mapBillingSummary(row);
+  return {
+    ...(billing ? { billing } : {}),
+    nextVisitOn:
+      row.next_visit_on === null ? null : canonicalDate(row.next_visit_on),
   };
 }
 
@@ -165,9 +259,32 @@ function mapCustomerProjectLink(row: CustomerProjectLinkRow): CustomerProjectLin
   };
 }
 
-const CUSTOMER_COLUMNS = `
+function canonicalDate(value: string | Date): string {
+  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  return value.slice(0, 10);
+}
+
+function requireBusinessDate(value: string | undefined): string {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/u.test(value)) {
+    throw new Error("Customer projection business date is invalid.");
+  }
+  const date = new Date(`${value}T00:00:00.000Z`);
+  if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== value) {
+    throw new Error("Customer projection business date is invalid.");
+  }
+  return value;
+}
+
+const CUSTOMER_IDENTITY_COLUMNS = `
   c.id, c.display_name, c.short_code, c.status AS customer_status,
-  c.contact_note, c.email, c.phone, c.created_at_utc, c.updated_at_utc`;
+  c.archive_reason, c.archived_at_utc, c.archived_by_user_account_id,
+  c.version, c.created_at_utc, c.updated_at_utc`;
+
+const CUSTOMER_CONTACT_COLUMNS =
+  "c.contact_note, c.email, c.phone";
+
+const REDACTED_CUSTOMER_CONTACT_COLUMNS =
+  "NULL AS contact_note, NULL AS email, NULL AS phone";
 
 const CUSTOMER_PROJECT_COLUMNS = `
   p.id AS project_id, p.display_name AS project_display_name,
@@ -175,16 +292,75 @@ const CUSTOMER_PROJECT_COLUMNS = `
 
 export async function listCustomerRecords(
   connection: PoolConnection,
+  options: Readonly<{
+    businessDate?: string;
+    includeBilling?: boolean;
+    includeContact?: boolean;
+    includeVisits?: boolean;
+  }> = {},
 ): Promise<readonly Customer[]> {
-  const [rows] = await connection.execute<CustomerWithProjectRow[]>(
-    `SELECT ${CUSTOMER_COLUMNS}, ${CUSTOMER_PROJECT_COLUMNS}
+  const businessDate =
+    options.includeBilling || options.includeVisits
+      ? requireBusinessDate(options.businessDate)
+      : null;
+  const contactColumns = options.includeContact
+    ? CUSTOMER_CONTACT_COLUMNS
+    : REDACTED_CUSTOMER_CONTACT_COLUMNS;
+  const billingColumns = options.includeBilling
+    ? `billing.active_contract_count, billing.currency AS billing_currency,
+       billing.monthly_fee_amount, billing.payment_days,
+       billing.vat_mode AS billing_vat_mode`
+    : `NULL AS active_contract_count, NULL AS billing_currency,
+       NULL AS monthly_fee_amount, NULL AS payment_days,
+       NULL AS billing_vat_mode`;
+  const billingJoin = options.includeBilling
+    ? `LEFT JOIN (
+         SELECT customer_id, COUNT(*) AS active_contract_count,
+                MIN(currency) AS currency,
+                CAST(SUM(monthly_fee_amount) AS DECIMAL(19, 4)) AS monthly_fee_amount,
+                GROUP_CONCAT(DISTINCT payment_day ORDER BY payment_day SEPARATOR ',') AS payment_days,
+                CASE WHEN COUNT(DISTINCT vat_mode) = 1
+                     THEN MIN(vat_mode) ELSE 'mixed' END AS vat_mode
+          FROM consulting_contract
+          WHERE status = 'active'
+            AND starts_on <= ?
+            AND ends_on >= ?
+          GROUP BY customer_id
+       ) billing ON billing.customer_id = c.id`
+    : "";
+  const visitColumns = options.includeVisits
+    ? "upcoming.next_visit_on"
+    : "NULL AS next_visit_on";
+  const visitJoin = options.includeVisits
+    ? `LEFT JOIN (
+         SELECT contract.customer_id, MIN(visit.committed_on) AS next_visit_on
+           FROM monthly_visit_commitment visit
+           JOIN consulting_contract contract ON contract.id = visit.contract_id
+          WHERE contract.status = 'active'
+            AND visit.resolution_status IN ('planned', 'makeup_pending')
+            AND visit.committed_on >= ?
+          GROUP BY contract.customer_id
+       ) upcoming ON upcoming.customer_id = c.id`
+    : "";
+  const query = `SELECT ${CUSTOMER_IDENTITY_COLUMNS}, ${contactColumns},
+            ${CUSTOMER_PROJECT_COLUMNS}, ${visitColumns}, ${billingColumns}
        FROM customer c
        LEFT JOIN customer_project cp
          ON cp.customer_id = c.id AND cp.status = 'active'
        LEFT JOIN project p ON p.id = cp.project_id
+       ${visitJoin}
+       ${billingJoin}
       ORDER BY c.status = 'active' DESC, c.display_name ASC, c.id ASC,
-               p.display_name ASC, p.id ASC`,
-  );
+               p.display_name ASC, p.id ASC`;
+  const parameters = [
+    ...(options.includeVisits ? [businessDate as string] : []),
+    ...(options.includeBilling
+      ? [businessDate as string, businessDate as string]
+      : []),
+  ];
+  const [rows] = parameters.length > 0
+    ? await connection.execute<CustomerWithProjectRow[]>(query, parameters)
+    : await connection.execute<CustomerWithProjectRow[]>(query);
 
   const result: Array<{
     customer: Customer;
@@ -195,7 +371,7 @@ export async function listCustomerRecords(
     let entry = byId.get(row.id);
     if (!entry) {
       const projects: CustomerProjectSummary[] = [];
-      entry = { customer: mapCustomer(row, projects), projects };
+      entry = { customer: mapCustomer(row, projects, mapOverview(row)), projects };
       byId.set(row.id, entry);
       result.push(entry);
     }
@@ -229,7 +405,7 @@ export async function findCustomerForUpdate(
   id: string,
 ): Promise<Customer | null> {
   const [rows] = await connection.execute<CustomerRow[]>(
-    `SELECT ${CUSTOMER_COLUMNS}
+    `SELECT ${CUSTOMER_IDENTITY_COLUMNS}, ${CUSTOMER_CONTACT_COLUMNS}
        FROM customer c
       WHERE c.id = ?
       FOR UPDATE`,
@@ -262,10 +438,13 @@ export async function findActiveCustomerProjectForUpdate(
   projectId: string,
 ): Promise<CustomerProjectLink | null> {
   const [rows] = await connection.execute<CustomerProjectLinkRow[]>(
-    `SELECT customer_id, project_id, status, version,
-            created_at_utc, updated_at_utc
-       FROM customer_project
-      WHERE customer_id = ? AND project_id = ? AND status = 'active'
+    `SELECT cp.customer_id, cp.project_id, cp.status, cp.version,
+            cp.created_at_utc, cp.updated_at_utc
+       FROM customer_project cp
+       JOIN project p ON p.id = cp.project_id
+      WHERE cp.customer_id = ? AND cp.project_id = ? AND cp.status = 'active'
+        AND p.archived_at_utc IS NULL
+        AND p.status IN ('planned', 'active', 'on_hold')
       FOR UPDATE`,
     [customerId, projectId],
   );
@@ -292,7 +471,7 @@ export async function customerProjectLinkIsInUse(
              ON task_project.task_id = task.id
           WHERE task.customer_id = ?
             AND task_project.project_id = ?
-            AND task.status <> 'done'
+            AND task.status NOT IN ('done', 'cancelled')
        )
      ) AS in_use`,
     [customerId, projectId, customerId, projectId],
@@ -304,6 +483,48 @@ export async function customerProjectLinkIsInUse(
   return value === 1;
 }
 
+export async function customerHasLifecycleDependencies(
+  connection: PoolConnection,
+  customerId: string,
+): Promise<boolean> {
+  const [rows] = await connection.execute<CustomerLifecycleDependencyRow[]>(
+    `SELECT (
+       EXISTS(
+         SELECT 1
+           FROM consulting_contract
+          WHERE customer_id = ?
+            AND status IN ('draft', 'active')
+       ) OR EXISTS(
+         SELECT 1
+           FROM work_task
+          WHERE customer_id = ?
+            AND status NOT IN ('done', 'cancelled')
+       ) OR EXISTS(
+         SELECT 1
+           FROM receivable r
+           LEFT JOIN (
+             SELECT receivable_id,
+                    SUM(CASE
+                          WHEN entry_type = 'reversal' THEN -amount
+                          ELSE amount
+                        END) AS collected_amount
+               FROM receivable_collection
+              GROUP BY receivable_id
+           ) rc ON rc.receivable_id = r.id
+          WHERE r.customer_id = ?
+            AND r.record_state = 'active'
+            AND r.total_amount > COALESCE(rc.collected_amount, 0.0000)
+       )
+     ) AS has_dependencies`,
+    [customerId, customerId, customerId],
+  );
+  const value = Number(rows[0]?.has_dependencies ?? -1);
+  if (value !== 0 && value !== 1) {
+    throw new Error("Customer lifecycle dependency query is invalid.");
+  }
+  return value === 1;
+}
+
 export async function insertCustomerRecord(
   connection: PoolConnection,
   customer: Customer,
@@ -311,8 +532,9 @@ export async function insertCustomerRecord(
   const [result] = await connection.execute<ResultSetHeader>(
     `INSERT INTO customer
        (id, display_name, short_code, status, contact_note, email, phone,
+        archive_reason, archived_at_utc, archived_by_user_account_id, version,
         created_at_utc, updated_at_utc)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       customer.id,
       customer.displayName,
@@ -321,6 +543,10 @@ export async function insertCustomerRecord(
       customer.contactNote,
       customer.email,
       customer.phone,
+      customer.archiveReason,
+      customer.archivedAtUtc,
+      customer.archivedByUserAccountId,
+      customer.version,
       customer.createdAtUtc,
       customer.updatedAtUtc,
     ],
@@ -331,12 +557,14 @@ export async function insertCustomerRecord(
 export async function updateCustomerRecord(
   connection: PoolConnection,
   customer: Customer,
-): Promise<void> {
+  expectedVersion: number,
+): Promise<boolean> {
   const [result] = await connection.execute<ResultSetHeader>(
     `UPDATE customer
         SET display_name = ?, short_code = ?, status = ?, contact_note = ?,
-            email = ?, phone = ?, updated_at_utc = ?
-      WHERE id = ?`,
+            email = ?, phone = ?, archive_reason = ?, archived_at_utc = ?,
+            archived_by_user_account_id = ?, version = ?, updated_at_utc = ?
+      WHERE id = ? AND version = ?`,
     [
       customer.displayName,
       customer.shortCode,
@@ -344,11 +572,16 @@ export async function updateCustomerRecord(
       customer.contactNote,
       customer.email,
       customer.phone,
+      customer.archiveReason,
+      customer.archivedAtUtc,
+      customer.archivedByUserAccountId,
+      customer.version,
       customer.updatedAtUtc,
       customer.id,
+      expectedVersion,
     ],
   );
-  if (result.affectedRows !== 1) throw new Error("Customer update failed.");
+  return result.affectedRows === 1;
 }
 
 export async function insertCustomerProjectLink(

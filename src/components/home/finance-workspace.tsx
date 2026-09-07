@@ -9,10 +9,13 @@ import {
   type FormEvent,
 } from "react";
 
+import { redirectToPortalLogin as redirectToLogin } from "@/platform/navigation/portal-return-path";
+import { RecordLifecycleControls } from "@/components/portal/record-lifecycle-controls";
+
 type FinanceAction = "collection" | "generate" | "opening";
 type LoadState = "error" | "loading" | "ready";
 type SaveState = "error" | "idle" | "saving" | "success";
-type ReceivableStatus = "open" | "overdue" | "paid" | "partial";
+type ReceivableStatus = "open" | "overdue" | "paid" | "partial" | "voided";
 
 type FinanceCustomer = Readonly<{
   id: string;
@@ -36,8 +39,20 @@ type ContractOption = Readonly<{
   status: "active" | "closed" | "draft";
 }>;
 
+type ReceivableCollection = Readonly<{
+  amount: string;
+  collectedOn: string;
+  entryType: "collection" | "reversal";
+  id: string;
+  reasonSummary: string | null;
+  receivableId: string;
+  reversalOfId: string | null;
+  reversed: boolean;
+}>;
+
 type Receivable = Readonly<{
   collectedAmount: string;
+  collections?: readonly ReceivableCollection[];
   contractId: string | null;
   createdAtUtc: string;
   customerId: string;
@@ -55,6 +70,9 @@ type Receivable = Readonly<{
   status: ReceivableStatus;
   totalAmount: string;
   vatAmount: string;
+  version?: number;
+  recordState?: "active" | "voided";
+  voidReason?: string | null;
 }>;
 
 type FinanceSummary = Readonly<{
@@ -72,10 +90,19 @@ type ReceivablePayload = Readonly<{
 }>;
 
 type FinanceWorkspaceProps = Readonly<{
+  capabilities?: Readonly<{
+    canReadAudit: boolean;
+    canReverseReceivables: boolean;
+  }>;
   customers: readonly FinanceCustomer[];
   live: boolean;
   projects?: readonly FinanceProject[];
 }>;
+
+const fullFinanceCapabilities: NonNullable<FinanceWorkspaceProps["capabilities"]> = {
+  canReadAudit: true,
+  canReverseReceivables: true,
+};
 
 const emptySummary: FinanceSummary = {
   collectedThisMonth: "0",
@@ -92,12 +119,12 @@ const samplePayload: ReceivablePayload = {
       createdAtUtc: "2026-09-01T06:00:00.000Z",
       customerId: "sample-1",
       customerName: "Atlas Makina",
-      description: "Eylül 2026 danışmanlık bedeli",
+      description: "Ağustos 2026 danışmanlık bedeli",
       dueOn: "2026-09-05",
       id: "sample-receivable-1",
       netAmount: "120000.0000",
       outstandingAmount: "0.0000",
-      periodMonth: "2026-09",
+      periodMonth: "2026-08",
       projectId: "sample-project-1",
       projectName: "Mühendis Kafası",
       projectShortCode: "MUHENDIS_KAFASI",
@@ -112,12 +139,12 @@ const samplePayload: ReceivablePayload = {
       createdAtUtc: "2026-09-01T06:00:00.000Z",
       customerId: "sample-2",
       customerName: "Vega Endüstri",
-      description: "Eylül 2026 danışmanlık bedeli",
+      description: "Ağustos 2026 danışmanlık bedeli",
       dueOn: "2026-09-10",
       id: "sample-receivable-2",
       netAmount: "50000.0000",
       outstandingAmount: "35000.0000",
-      periodMonth: "2026-09",
+      periodMonth: "2026-08",
       projectId: "sample-project-1",
       projectName: "Mühendis Kafası",
       projectShortCode: "MUHENDIS_KAFASI",
@@ -222,6 +249,7 @@ function statusLabel(status: ReceivableStatus): string {
     overdue: "Gecikmiş",
     paid: "Tahsil edildi",
     partial: "Kısmi tahsilat",
+    voided: "Geçersiz",
   }[status];
 }
 
@@ -245,10 +273,6 @@ function financeWriteErrorMessage(status: string | undefined): string {
   return messages[status ?? ""] ?? "İşlem tamamlanamadı. Bağlantıyı kontrol edip yeniden deneyin.";
 }
 
-function redirectToLogin(): void {
-  window.location.assign(new URL("/giris", window.location.origin).toString());
-}
-
 async function fetchReceivablePayload(
   projectFilter: string,
   signal?: AbortSignal,
@@ -270,6 +294,7 @@ async function fetchReceivablePayload(
 }
 
 export function FinanceWorkspace({
+  capabilities = fullFinanceCapabilities,
   customers,
   live,
   projects = [],
@@ -290,6 +315,7 @@ export function FinanceWorkspace({
   const [contractLoadState, setContractLoadState] =
     useState<LoadState>("ready");
   const [projectFilter, setProjectFilter] = useState("all");
+  const [loadRevision, setLoadRevision] = useState(0);
   const pendingWrite = useRef<Readonly<{
     fingerprint: string;
     key: string;
@@ -323,7 +349,7 @@ export function FinanceWorkspace({
         setLoadState("error");
       });
     return () => controller.abort();
-  }, [live, projectFilter]);
+  }, [live, projectFilter, loadRevision]);
 
   useEffect(() => {
     if (!live || activeAction !== "generate" || generateCustomerId === "") return;
@@ -571,7 +597,7 @@ export function FinanceWorkspace({
             </h3>
             <p>
               {activeAction === "generate"
-                ? "Seçilen sözleşme ve dönem için hakedişi bir kez üretir."
+                ? "Seçilen sözleşme ve hizmet ayı için hakedişi bir kez üretir; vade, sözleşmedeki ödeme gününe göre izleyen ayda oluşur."
                 : activeAction === "opening"
                   ? "Sisteme başlamadan önce doğmuş açık bakiyeyi kaydeder."
                   : "Ödemenin tamamını veya bir bölümünü açık alacağa işler."}
@@ -617,7 +643,7 @@ export function FinanceWorkspace({
                 </select>
               </label>
               <label>
-                <span>Dönem</span>
+                <span>Hizmet ayı</span>
                 <input defaultValue={currentIstanbulMonth()} name="month" required type="month" />
               </label>
               {contractLoadState === "error" ? (
@@ -820,12 +846,56 @@ export function FinanceWorkspace({
                 <td data-label="Dönem">{formatPeriod(receivable.periodMonth)}</td>
                 <td data-label="Vade">{formatDate(receivable.dueOn)}</td>
                 <td data-label="Toplam">{formatMoney(receivable.totalAmount)}</td>
-                <td data-label="Tahsil">{formatMoney(receivable.collectedAmount)}</td>
+                <td data-label="Tahsil">
+                  {formatMoney(receivable.collectedAmount)}
+                  {receivable.collections?.map((collection) => (
+                    <div key={collection.id}>
+                      <small>
+                        {formatDate(collection.collectedOn)} · {formatMoney(collection.amount)}
+                      </small>
+                      <RecordLifecycleControls
+                        actions={capabilities.canReverseReceivables && collection.entryType === "collection" && !collection.reversed ? [{
+                          description: "Tahsilatı silmeden ters kayıtla dengeler ve alacak bakiyesini yeniden açar.",
+                          id: "reverse",
+                          label: "Tahsilatı ters kaydet",
+                          request: {
+                            endpoint: `/api/finance/collections/${collection.id}/reverse`,
+                            kind: "reverse",
+                          },
+                          tone: "danger",
+                        }] : []}
+                        canReadHistory={capabilities.canReadAudit}
+                        entityId={collection.id}
+                        entityLabel={`${receivable.customerName} tahsilatı`}
+                        entityType="receivable_collection"
+                        onSuccess={() => setLoadRevision((current) => current + 1)}
+                      />
+                    </div>
+                  ))}
+                </td>
                 <td data-label="Kalan">{formatMoney(receivable.outstandingAmount)}</td>
                 <td data-label="Durum">
                   <span className={`finance-status finance-status-${receivable.status}`}>
                     {statusLabel(receivable.status)}
                   </span>
+                  {live ? <RecordLifecycleControls
+                    actions={capabilities.canReverseReceivables && receivable.status !== "voided" && typeof receivable.version === "number" ? [{
+                      description: "Alacağı silmeden finansal toplamlardan çıkarır. Tahsilatı bulunan kayıt önce ters kayıtla kapatılmalıdır.",
+                      id: "void",
+                      label: "Geçersiz kıl",
+                      request: {
+                        endpoint: `/api/finance/receivables/${receivable.id}/lifecycle`,
+                        kind: "receivable-void",
+                        version: receivable.version,
+                      },
+                      tone: "danger",
+                    }] : []}
+                    canReadHistory={capabilities.canReadAudit}
+                    entityId={receivable.id}
+                    entityLabel={`${receivable.customerName} · ${receivable.description}`}
+                    entityType="receivable"
+                    onSuccess={() => setLoadRevision((current) => current + 1)}
+                  /> : null}
                 </td>
               </tr>
             ))}

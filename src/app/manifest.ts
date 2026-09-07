@@ -8,12 +8,12 @@ export default function manifest(): MetadataRoute.Manifest {
     description:
       "Müşteri, planlama, görev ve finans süreçleri için güvenli yönetim çalışma alanı.",
     lang: "tr",
-    start_url: "/musteriler",
+    start_url: "/",
     scope: "/",
     display: "standalone",
-    background_color: "#f3efe6",
-    theme_color: "#102c2a",
-    orientation: "portrait-primary",
+    background_color: "#f4f6fa",
+    theme_color: "#101728",
+    orientation: "any",
     icons: [
       {
         src: "/icons/portal-pusula-192-v1.png",

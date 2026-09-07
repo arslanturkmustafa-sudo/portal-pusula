@@ -13,9 +13,10 @@ import {
   TaskProjectNotFoundError,
 } from "@/features/tasks";
 import {
-  authenticateAdminRequest,
-  type AuthenticatedAdmin,
+  authenticatePrincipalRequest,
+  type AuthenticatedPrincipal,
 } from "@/platform/auth/server-auth";
+import { hasPermission } from "@/platform/auth/permissions";
 import { getDatabaseProbeEnvironment } from "@/platform/config/readiness-env";
 import { getPlatformDatabasePool } from "@/platform/database/mysql-platform";
 import { correlationIdFromHeaders } from "@/platform/http/correlation-id";
@@ -89,13 +90,15 @@ async function readBody(request: NextRequest): Promise<unknown> {
   return JSON.parse(text) as unknown;
 }
 
-function actorId(principal: AuthenticatedAdmin): string | undefined {
+function actorId(principal: AuthenticatedPrincipal): string | undefined {
   return principal.kind === "account" ? principal.accountId : undefined;
 }
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  if (!(await authenticateAdminRequest(request))) {
-    return json({ status: "unauthorized" }, 401);
+  const principal = await authenticatePrincipalRequest(request);
+  if (!principal) return json({ status: "unauthorized" }, 401);
+  if (!hasPermission(principal, "tasks.read")) {
+    return json({ status: "forbidden" }, 403);
   }
   if ([...request.nextUrl.searchParams].length > 0) {
     return json({ status: "validation_error" }, 400);
@@ -109,8 +112,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  const principal = await authenticateAdminRequest(request);
+  const principal = await authenticatePrincipalRequest(request);
   if (!principal) return json({ status: "unauthorized" }, 401);
+  if (!hasPermission(principal, "tasks.write")) {
+    return json({ status: "forbidden" }, 403);
+  }
   if (!sameOrigin(request)) return json({ status: "forbidden" }, 403);
   if (!isJsonRequest(request)) {
     return json({ status: "unsupported_media_type" }, 415);
@@ -119,6 +125,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const correlationId = correlationIdFromHeaders(request.headers);
   try {
     const input = createTaskInputSchema.parse(await readBody(request));
+    if (
+      Object.prototype.hasOwnProperty.call(input, "assigneeUserAccountId") &&
+      !hasPermission(principal, "tasks.assign")
+    ) {
+      return json({ status: "forbidden" }, 403);
+    }
     const task = await createTask(databasePool(), input, {
       actorId: actorId(principal),
       correlationId,

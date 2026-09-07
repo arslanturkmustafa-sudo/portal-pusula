@@ -1,8 +1,14 @@
 import Link from "next/link";
 
 import { PortalNavigation } from "@/components/portal/portal-navigation";
+import type { PermissionPrincipal } from "@/platform/auth/permissions";
 
-export function PortalShell({ children }: Readonly<{ children: React.ReactNode }>) {
+type PortalShellProps = Readonly<{
+  children: React.ReactNode;
+  principal: PermissionPrincipal & Readonly<{ displayName: string; email: string }>;
+}>;
+
+export function PortalShell({ children, principal }: PortalShellProps) {
   return (
     <>
       <a className="skip-link" href="#ana-icerik">
@@ -13,13 +19,13 @@ export function PortalShell({ children }: Readonly<{ children: React.ReactNode }
         <aside className="ledger-rail">
           <Link
             className="ledger-brand"
-            href="/musteriler"
-            aria-label="Portal Pusula müşteri sayfası"
+            href="/"
+            aria-label="Portal Pusula ana sayfası"
           >
             <span className="ledger-brand-mark" aria-hidden="true">PP</span>
             <span>
               <strong>Portal Pusula</strong>
-              <small>İş kayıt defteri</small>
+              <small>Operasyon merkezi</small>
             </span>
           </Link>
 
@@ -28,13 +34,13 @@ export function PortalShell({ children }: Readonly<{ children: React.ReactNode }
             <strong>Mühendis Kafası</strong>
           </div>
 
-          <PortalNavigation />
+          <PortalNavigation principal={principal} />
 
           <div className="ledger-rail-footer">
             <span className="connection-dot" aria-hidden="true" />
             <span>
-              <strong>İç kullanım</strong>
-              <small>Yetkili erişim</small>
+              <strong>Güvenli çalışma alanı</strong>
+              <small title={principal.email}>{principal.displayName}</small>
             </span>
           </div>
         </aside>

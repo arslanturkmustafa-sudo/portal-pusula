@@ -102,7 +102,11 @@ describe.skipIf(!enabled)("MariaDB customer persistence", () => {
     const updated = await updateCustomer(
       pool,
       created.id,
-      { displayName: "Öncü Üretim ve Dağıtım", status: "inactive" },
+      {
+        displayName: "Öncü Üretim ve Dağıtım",
+        status: "inactive",
+        version: created.version,
+      },
       { correlationId, now: new Date("2026-09-01T09:45:00.456Z") },
     );
     expect(updated.displayName).toBe("Öncü Üretim ve Dağıtım");

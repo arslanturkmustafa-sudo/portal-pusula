@@ -85,6 +85,55 @@
       "when": 1788435178955,
       "tag": "0011_customer_projects_partnership",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "5",
+      "when": 1788457473182,
+      "tag": "0012_user_permissions",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "5",
+      "when": 1788504772177,
+      "tag": "0013_login_attempt_throttle",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "5",
+      "when": 1788512254928,
+      "tag": "0014_record_lifecycle",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "5",
+      "when": 1788512602613,
+      "tag": "0015_financial_reversals",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "5",
+      "when": 1788765657335,
+      "tag": "0016_finance_accounts_ledger",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "5",
+      "when": 1788765868726,
+      "tag": "0017_work_task_visit",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "5",
+      "when": 1788799557949,
+      "tag": "0018_planning_expense_categories",
+      "breakpoints": true
     }
   ]
 }

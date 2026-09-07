@@ -15,10 +15,10 @@ import { authenticateAdminRequest } from "@/platform/auth/server-auth";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-const FILTERS = new Set(["cardId", "month"]);
+const FILTERS = new Set(["cardId", "month", "status"]);
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  if (!(await authenticateAdminRequest(request))) {
+  if (!(await authenticateAdminRequest(request, "finance.cards.read"))) {
     return spendingJson({ status: "unauthorized" }, 401);
   }
   try {

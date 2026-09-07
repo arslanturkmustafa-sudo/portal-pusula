@@ -88,7 +88,7 @@ function actorId(principal: AuthenticatedAdmin): string | undefined {
 }
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  if (!(await authenticateAdminRequest(request))) {
+  if (!(await authenticateAdminRequest(request, "projects.read"))) {
     return json({ status: "unauthorized" }, 401);
   }
   if ([...request.nextUrl.searchParams].length > 0) {
@@ -102,7 +102,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  const principal = await authenticateAdminRequest(request);
+  const principal = await authenticateAdminRequest(request, "projects.write");
   if (!principal) return json({ status: "unauthorized" }, 401);
   if (!sameOrigin(request)) return json({ status: "forbidden" }, 403);
   if (!isJsonRequest(request)) {

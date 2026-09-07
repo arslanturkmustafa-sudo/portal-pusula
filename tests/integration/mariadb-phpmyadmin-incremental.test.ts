@@ -16,6 +16,10 @@ const repositoryRoot = process.cwd();
 const migrationTag = "0011_customer_projects_partnership";
 const journalTable = "__drizzle_migrations";
 const dropOrder = [
+  "work_task_visit",
+  "finance_ledger_entry",
+  "finance_transaction",
+  "finance_account",
   "partnership_contribution_receipt",
   "partnership_contribution",
   "partnership_commission",

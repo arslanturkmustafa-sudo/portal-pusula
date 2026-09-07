@@ -13,7 +13,7 @@ const mocks = vi.hoisted(() => {
     AccountInitializationConflictError,
     AccountSessionInvalidError,
     CurrentPasswordInvalidError,
-    authenticateAdminRequest: vi.fn(),
+    authenticatePrincipalRequest: vi.fn(),
     changeAccountPassword: vi.fn(),
     getAuthStorageMode: vi.fn(),
     initializeAccountFromLegacySession: vi.fn(),
@@ -37,7 +37,7 @@ vi.mock("@/features/account", () => ({
   passwordChangeInputSchema: { parse: (value: unknown) => value },
 }));
 vi.mock("@/platform/auth/server-auth", () => ({
-  authenticateAdminRequest: mocks.authenticateAdminRequest,
+  authenticatePrincipalRequest: mocks.authenticatePrincipalRequest,
 }));
 vi.mock("@/platform/config/auth-env", () => ({
   getAuthEnvironment: () => ({
@@ -61,10 +61,12 @@ import { PATCH } from "@/app/api/account/password/route";
 const account = {
   createdAtUtc: "2026-09-01 09:00:00.000000",
   credentialVersion: 2,
+  displayName: "Portal Yöneticisi",
   email: "yonetici@example.com",
   id: "11111111-1111-4111-8111-111111111111",
   passwordChangedAtUtc: "2026-09-01 09:00:00.000000",
   passwordHash: "password-hash-must-not-be-returned",
+  role: "owner" as const,
   status: "active",
   updatedAtUtc: "2026-09-01 09:00:00.000000",
 };
@@ -107,10 +109,10 @@ describe("account password endpoint", () => {
   });
 
   it("rejects an unauthenticated or cross-origin write", async () => {
-    mocks.authenticateAdminRequest.mockResolvedValueOnce(null);
+    mocks.authenticatePrincipalRequest.mockResolvedValueOnce(null);
     expect((await PATCH(request({}))).status).toBe(401);
 
-    mocks.authenticateAdminRequest.mockResolvedValueOnce({
+    mocks.authenticatePrincipalRequest.mockResolvedValueOnce({
       accountId: account.id,
       credentialVersion: 1,
       email: account.email,
@@ -122,7 +124,7 @@ describe("account password endpoint", () => {
   });
 
   it("accepts the public Host origin behind a reverse proxy", async () => {
-    mocks.authenticateAdminRequest.mockResolvedValue({
+    mocks.authenticatePrincipalRequest.mockResolvedValue({
       accountId: account.id,
       credentialVersion: 1,
       email: account.email,
@@ -151,7 +153,7 @@ describe("account password endpoint", () => {
   });
 
   it("does not trust a forwarded host supplied by a cross-site request", async () => {
-    mocks.authenticateAdminRequest.mockResolvedValue({
+    mocks.authenticatePrincipalRequest.mockResolvedValue({
       accountId: account.id,
       credentialVersion: 1,
       email: account.email,
@@ -182,7 +184,7 @@ describe("account password endpoint", () => {
   });
 
   it("bootstraps a legacy session without requesting its current password", async () => {
-    mocks.authenticateAdminRequest.mockResolvedValue({
+    mocks.authenticatePrincipalRequest.mockResolvedValue({
       email: account.email,
       kind: "legacy",
     });
@@ -210,7 +212,7 @@ describe("account password endpoint", () => {
   });
 
   it("keeps password management unavailable in environment mode", async () => {
-    mocks.authenticateAdminRequest.mockResolvedValue({
+    mocks.authenticatePrincipalRequest.mockResolvedValue({
       email: account.email,
       kind: "legacy",
     });
@@ -226,7 +228,7 @@ describe("account password endpoint", () => {
   });
 
   it("requires the established account path and rotates to its next version", async () => {
-    mocks.authenticateAdminRequest.mockResolvedValue({
+    mocks.authenticatePrincipalRequest.mockResolvedValue({
       accountId: account.id,
       credentialVersion: 1,
       email: account.email,

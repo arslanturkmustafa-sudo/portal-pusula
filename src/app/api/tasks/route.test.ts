@@ -11,7 +11,7 @@ const mocks = vi.hoisted(() => {
   class TaskCustomerProjectMismatchError extends Error {}
   class TaskProjectNotFoundError extends Error {}
   return {
-    authenticateAdminRequest: vi.fn(),
+    authenticatePrincipalRequest: vi.fn(),
     createTask: vi.fn(),
     error: vi.fn(),
     listTasks: vi.fn(),
@@ -34,7 +34,7 @@ vi.mock("@/features/tasks", () => ({
   TaskProjectNotFoundError: mocks.TaskProjectNotFoundError,
 }));
 vi.mock("@/platform/auth/server-auth", () => ({
-  authenticateAdminRequest: mocks.authenticateAdminRequest,
+  authenticatePrincipalRequest: mocks.authenticatePrincipalRequest,
 }));
 vi.mock("@/platform/config/readiness-env", () => ({
   getDatabaseProbeEnvironment: () => ({}),
@@ -72,9 +72,12 @@ const task = {
 const principal = {
   accountId,
   credentialVersion: 1,
+  displayName: "Yönetici",
   email: "yonetici@example.com",
   kind: "account" as const,
   passwordChangedAtUtc: "2026-09-01 09:00:00.000000",
+  permissions: [] as const,
+  role: "owner" as const,
 };
 
 function postRequest(origin = "https://portal.example.test") {
@@ -92,7 +95,7 @@ function postRequest(origin = "https://portal.example.test") {
 describe("task collection API", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.authenticateAdminRequest.mockResolvedValue(principal);
+    mocks.authenticatePrincipalRequest.mockResolvedValue(principal);
     mocks.createTask.mockResolvedValue(task);
     mocks.listTasks.mockResolvedValue([task]);
     mocks.parseCreate.mockImplementation((value: unknown) => value);
@@ -125,11 +128,28 @@ describe("task collection API", () => {
   });
 
   it("rejects unauthenticated and cross-origin writes before mutation", async () => {
-    mocks.authenticateAdminRequest.mockResolvedValueOnce(null);
+    mocks.authenticatePrincipalRequest.mockResolvedValueOnce(null);
     expect((await POST(postRequest())).status).toBe(401);
 
-    mocks.authenticateAdminRequest.mockResolvedValueOnce(principal);
+    mocks.authenticatePrincipalRequest.mockResolvedValueOnce(principal);
     expect((await POST(postRequest("https://attacker.example"))).status).toBe(403);
+    expect(mocks.createTask).not.toHaveBeenCalled();
+  });
+
+  it("requires the separate assignment permission when an assignee is supplied", async () => {
+    mocks.authenticatePrincipalRequest.mockResolvedValueOnce({
+      ...principal,
+      permissions: ["tasks.read", "tasks.write"],
+      role: "member",
+    });
+    mocks.parseCreate.mockReturnValueOnce({
+      assigneeUserAccountId: accountId,
+      title: "Atanmış görev",
+    });
+
+    const response = await POST(postRequest());
+
+    expect(response.status).toBe(403);
     expect(mocks.createTask).not.toHaveBeenCalled();
   });
 

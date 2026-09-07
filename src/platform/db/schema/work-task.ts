@@ -29,6 +29,11 @@ export const workTask = mysqlTable(
       fsp: 6,
       mode: "string",
     }),
+    archiveReason: varchar("archive_reason", { length: 500 }),
+    archivedAtUtc: datetime("archived_at_utc", { fsp: 6, mode: "string" }),
+    archivedByUserAccountId: char("archived_by_user_account_id", {
+      length: 36,
+    }),
     version: int("version", { unsigned: true }).default(1).notNull(),
     createdAtUtc: datetime("created_at_utc", {
       fsp: 6,
@@ -71,7 +76,7 @@ export const workTask = mysqlTable(
       "chk_work_task_status",
       sql`BINARY ${table.status} IN (
         BINARY 'backlog', BINARY 'todo', BINARY 'in_progress',
-        BINARY 'blocked', BINARY 'done'
+        BINARY 'blocked', BINARY 'done', BINARY 'cancelled'
       )`,
     ),
     check(
@@ -92,6 +97,21 @@ export const workTask = mysqlTable(
     ),
     check("chk_work_task_version", sql`${table.version} >= 1`),
     check(
+      "chk_work_task_archive",
+      sql`(
+          ${table.archivedAtUtc} IS NULL
+          AND ${table.archivedByUserAccountId} IS NULL
+          AND ${table.archiveReason} IS NULL
+        ) OR (
+          ${table.archivedAtUtc} IS NOT NULL
+          AND ${table.archivedByUserAccountId} IS NOT NULL
+          AND ${table.archiveReason} IS NOT NULL
+          AND CHAR_LENGTH(${table.archiveReason}) BETWEEN 1 AND 500
+          AND ${table.archiveReason} = TRIM(${table.archiveReason})
+          AND BINARY ${table.status} IN (BINARY 'done', BINARY 'cancelled')
+        )`,
+    ),
+    check(
       "chk_work_task_timeline",
       sql`${table.createdAtUtc} <= ${table.updatedAtUtc}
         AND (
@@ -99,6 +119,13 @@ export const workTask = mysqlTable(
           OR (
             ${table.createdAtUtc} <= ${table.completedAtUtc}
             AND ${table.completedAtUtc} <= ${table.updatedAtUtc}
+          )
+        )
+        AND (
+          ${table.archivedAtUtc} IS NULL
+          OR (
+            ${table.createdAtUtc} <= ${table.archivedAtUtc}
+            AND ${table.archivedAtUtc} <= ${table.updatedAtUtc}
           )
         )`,
     ),
@@ -116,7 +143,15 @@ export const workTask = mysqlTable(
     })
       .onDelete("restrict")
       .onUpdate("restrict"),
+    foreignKey({
+      name: "fk_work_task_archived_by",
+      columns: [table.archivedByUserAccountId],
+      foreignColumns: [userAccount.id],
+    })
+      .onDelete("restrict")
+      .onUpdate("restrict"),
     index("idx_work_task_board").on(
+      table.archivedAtUtc,
       table.status,
       table.dueOn,
       table.updatedAtUtc,

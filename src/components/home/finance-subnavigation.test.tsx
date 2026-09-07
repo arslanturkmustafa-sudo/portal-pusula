@@ -16,11 +16,15 @@ describe("FinanceSubnavigation", () => {
 
     expect(within(navigation).getByRole("link", { name: "Alacaklar" }))
       .toHaveAttribute("href", "/finans");
+    expect(within(navigation).getByRole("link", { name: "Kasa ve bankalar" }))
+      .toHaveAttribute("href", "/finans/hesaplar");
     expect(within(navigation).getByRole("link", { name: "Giderler" }))
       .toHaveAttribute("href", "/finans/giderler");
     expect(
       within(navigation).getByRole("link", { name: "Kartlar ve ödeme planı" }),
     ).toHaveAttribute("href", "/finans/kartlar");
+    expect(within(navigation).getByRole("link", { name: "Nakit akışı" }))
+      .toHaveAttribute("href", "/finans/nakit-akisi");
     expect(within(navigation).getByRole("link", { name: "Proje görünümü" }))
       .toHaveAttribute("href", "/finans/raporlar");
     expect(within(navigation).getByRole("link", { name: "Ortaklık hesabı" }))

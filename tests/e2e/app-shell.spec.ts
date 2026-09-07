@@ -5,9 +5,12 @@ import { signIn } from "./auth";
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-test("protects and renders the accessible customer workbench", async ({ page }) => {
+test("protects and renders the accessible customer workbench", async (
+  { page },
+  testInfo,
+) => {
   await page.goto("/");
-  await expect(page).toHaveURL(/\/giris$/u);
+  await expect(page).toHaveURL(/\/giris\?next=%2F$/u);
   await expect(
     page.getByRole("heading", { level: 1, name: "Çalışma alanına giriş" }),
   ).toBeVisible();
@@ -19,7 +22,11 @@ test("protects and renders the accessible customer workbench", async ({ page }) 
     page.getByRole("heading", { level: 1, name: "Müşteriler" }),
   ).toBeVisible();
   await expect(
-    page.getByRole("navigation", { name: "Ana navigasyon" }),
+    page.getByRole("navigation", {
+      name: testInfo.project.name.startsWith("mobile")
+        ? "Mobil navigasyon"
+        : "Ana navigasyon",
+    }),
   ).toBeVisible();
   await expect(
     page.getByRole("region", { name: "Müşteri kayıtları" }),
@@ -37,8 +44,26 @@ test("protects and renders the accessible customer workbench", async ({ page }) 
   await expect(
     page.getByRole("heading", { level: 1, name: "Günlük plan" }),
   ).toBeVisible();
+
+  await page.getByRole("link", { name: "Finans" }).click();
+  await expect(page).toHaveURL(/\/finans$/u);
+  await expect(
+    page.getByRole("heading", { level: 1, name: "Finans" }),
+  ).toBeVisible();
+  await page.getByRole("link", { name: "Nakit akışı" }).click();
+  await expect(page).toHaveURL(/\/finans\/nakit-akisi$/u);
+  await expect(
+    page.getByRole("heading", { level: 2, name: "Nakit akışı" }),
+  ).toBeVisible();
+
+  await page.goto("/gorevler/rapor");
+  await expect(
+    page.getByRole("heading", { level: 1, name: "Firma görev raporu" }),
+  ).toBeVisible();
   await page.getByRole("link", { name: "Müşteriler" }).click();
   await expect(page).toHaveURL(/\/musteriler$/u);
+  await expect(page.getByRole("columnheader", { name: "Sonraki ziyaret" })).toHaveCount(1);
+  await expect(page.getByRole("columnheader", { name: "Aylık ücret" })).toHaveCount(1);
 
   await expect(
     page.getByRole("heading", { name: /İşlerinizi tek bir yerde/i }),

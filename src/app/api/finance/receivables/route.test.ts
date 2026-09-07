@@ -63,4 +63,42 @@ describe("finance receivable collection API", () => {
     expect(duplicate.status).toBe(400);
     expect(mocks.list).not.toHaveBeenCalled();
   });
+
+  it("returns the safe collection movement view without caching", async () => {
+    mocks.list.mockResolvedValue({
+      receivables: [
+        {
+          collections: [
+            {
+              amount: "25.0000",
+              collectedOn: "2026-09-02",
+              entryType: "reversal",
+              id: "50000000-0000-4000-8000-000000000002",
+              reasonSummary: "Ters kayıt gerekçesi kaydedildi.",
+              reversalOfId: "50000000-0000-4000-8000-000000000001",
+              reversed: false,
+            },
+          ],
+          id: "30000000-0000-4000-8000-000000000001",
+        },
+      ],
+      summary: {},
+    });
+
+    const response = await GET(
+      new NextRequest("https://portal.example/api/finance/receivables"),
+    );
+    const payload = await response.json();
+
+    expect(response.headers.get("cache-control")).toContain("no-store");
+    expect(payload.receivables[0].collections[0]).toEqual(
+      expect.objectContaining({
+        entryType: "reversal",
+        reasonSummary: "Ters kayıt gerekçesi kaydedildi.",
+      }),
+    );
+    expect(payload.receivables[0].collections[0]).not.toHaveProperty(
+      "clientOperationKey",
+    );
+  });
 });

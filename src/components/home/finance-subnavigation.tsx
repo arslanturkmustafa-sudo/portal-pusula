@@ -5,8 +5,10 @@ import { usePathname } from "next/navigation";
 
 const financeSections = [
   { href: "/finans", label: "Alacaklar" },
+  { href: "/finans/hesaplar", label: "Kasa ve bankalar" },
   { href: "/finans/giderler", label: "Giderler" },
   { href: "/finans/kartlar", label: "Kartlar ve ödeme planı" },
+  { href: "/finans/nakit-akisi", label: "Nakit akışı" },
   { href: "/finans/raporlar", label: "Proje görünümü" },
   { href: "/finans/ortaklik", label: "Ortaklık hesabı" },
 ] as const;

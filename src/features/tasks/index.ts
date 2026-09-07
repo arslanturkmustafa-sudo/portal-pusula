@@ -3,6 +3,7 @@ export type {
   TaskStatus,
   WorkTask,
 } from "./repository";
+export { changeTaskLifecycle } from "./lifecycle-service";
 export {
   createTask,
   listTasks,
@@ -11,6 +12,7 @@ export {
   TaskCustomerProjectMismatchError,
   TaskNotFoundError,
   TaskProjectNotFoundError,
+  TaskVisitLinkedFieldsLockedError,
   TaskVersionConflictError,
   updateTask,
 } from "./service";

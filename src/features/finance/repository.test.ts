@@ -5,7 +5,10 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
-import { listReceivableRecords } from "@/features/finance/repository";
+import {
+  listReceivableCollectionMovements,
+  listReceivableRecords,
+} from "@/features/finance/repository";
 
 describe("finance repository snapshot", () => {
   it("reads ledger rows and the in-range collection total in one SQL statement", async () => {
@@ -27,10 +30,14 @@ describe("finance repository snapshot", () => {
           project_id: "70000000-0000-4000-8000-000000000001",
           project_name: "Mühendis Kafası",
           project_short_code: "MUHENDIS_KAFASI",
+          record_state: "active",
           source_type: "opening_balance",
           total_amount: "100.0000",
           updated_at_utc: "2026-09-01 09:00:00.000000",
           vat_amount: "0.0000",
+          version: 1,
+          void_reason: null,
+          voided_at_utc: null,
         },
       ],
       [],
@@ -46,6 +53,9 @@ describe("finance repository snapshot", () => {
     expect(execute).toHaveBeenCalledWith(
       expect.stringContaining("CROSS JOIN"),
       ["2026-09-01", "2026-10-01"],
+    );
+    expect(String(execute.mock.calls[0]?.[0])).toMatch(
+      /entry_type = 'reversal' THEN -rc\.amount/iu,
     );
     expect(result).toMatchObject({
       collectedAmountInRange: "25.0000",
@@ -74,6 +84,62 @@ describe("finance repository snapshot", () => {
         /collected_r\.project_id = \?[\s\S]*WHERE r\.project_id = \?/u,
       ),
       ["2026-09-01", "2026-10-01", projectId, projectId],
+    );
+  });
+
+  it("returns a minimal collection movement model with reversal state and redacted reason", async () => {
+    const projectId = "70000000-0000-4000-8000-000000000001";
+    const originalId = "50000000-0000-4000-8000-000000000001";
+    const execute = vi.fn().mockResolvedValue([
+      [
+        {
+          amount: "25.0000",
+          collected_on: "2026-09-01",
+          entry_type: "collection",
+          id: originalId,
+          reason_summary: null,
+          receivable_id: "30000000-0000-4000-8000-000000000001",
+          reversal_of_id: null,
+          reversed_flag: 1,
+        },
+        {
+          amount: "25.0000",
+          collected_on: "2026-09-02",
+          entry_type: "reversal",
+          id: "50000000-0000-4000-8000-000000000002",
+          reason_summary: "Ters kayıt gerekçesi kaydedildi.",
+          receivable_id: "30000000-0000-4000-8000-000000000001",
+          reversal_of_id: originalId,
+          reversed_flag: "0",
+        },
+      ],
+      [],
+    ]);
+
+    const result = await listReceivableCollectionMovements(
+      { execute } as unknown as PoolConnection,
+      projectId,
+    );
+
+    expect(result).toEqual([
+      expect.objectContaining({
+        entryType: "collection",
+        reasonSummary: null,
+        reversed: true,
+      }),
+      expect.objectContaining({
+        entryType: "reversal",
+        reasonSummary: "Ters kayıt gerekçesi kaydedildi.",
+        reversalOfId: originalId,
+        reversed: false,
+      }),
+    ]);
+    expect(result[1]).not.toHaveProperty("clientOperationKey");
+    expect(result[1]).not.toHaveProperty("note");
+    expect(result[1]).not.toHaveProperty("reversalReason");
+    expect(execute).toHaveBeenCalledWith(
+      expect.stringMatching(/EXISTS[\s\S]*END AS reason_summary/iu),
+      [projectId],
     );
   });
 });

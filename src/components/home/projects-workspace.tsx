@@ -10,6 +10,8 @@ import {
 } from "react";
 
 import { PortalPageHeader } from "@/components/portal/portal-page-header";
+import { RecordLifecycleControls } from "@/components/portal/record-lifecycle-controls";
+import { redirectToPortalLogin as redirectToLogin } from "@/platform/navigation/portal-return-path";
 
 type ProjectType = "consulting" | "product" | "partnership" | "internal";
 type ProjectStatus =
@@ -23,6 +25,8 @@ type SaveState = "idle" | "saving";
 type EditorMode = "create" | "edit" | null;
 
 export type ProjectDto = Readonly<{
+  archiveReason?: string | null;
+  archivedAtUtc?: string | null;
   budgetAmount: string | null;
   closedAtUtc: string | null;
   createdAtUtc: string;
@@ -172,10 +176,6 @@ function projectBody(draft: ProjectDraft) {
   };
 }
 
-function redirectToLogin(): void {
-  window.location.assign(new URL("/giris", window.location.origin).toString());
-}
-
 function dateLabel(value: string | null): string {
   if (value === null) return "Belirlenmedi";
   const [year, month, day] = value.split("-").map(Number);
@@ -193,7 +193,21 @@ function budgetLabel(value: string | null): string {
   return `₺${groupedInteger},${visibleFraction}`;
 }
 
-export function ProjectsWorkspace() {
+type ProjectsWorkspaceProps = Readonly<{
+  capabilities?: Readonly<{
+    canLifecycleProjects: boolean;
+    canReadAudit: boolean;
+  }>;
+}>;
+
+const fullProjectCapabilities: NonNullable<ProjectsWorkspaceProps["capabilities"]> = {
+  canLifecycleProjects: true,
+  canReadAudit: true,
+};
+
+export function ProjectsWorkspace({
+  capabilities = fullProjectCapabilities,
+}: ProjectsWorkspaceProps = {}) {
   const [projects, setProjects] = useState<readonly ProjectDto[]>([]);
   const [customers, setCustomers] = useState<readonly CustomerDto[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
@@ -838,6 +852,35 @@ export function ProjectsWorkspace() {
                 <footer className="project-dossier-actions">
                   <p>Görevler ekranında bu projeyi seçerek işleri aynı dosya altında toplayabilirsiniz.</p>
                   <button className="primary-action" type="button" onClick={openEditEditor}>Projeyi düzenle</button>
+                  <RecordLifecycleControls
+                    actions={!capabilities.canLifecycleProjects ? [] : selectedProject.archivedAtUtc ? [{
+                      description: "Projeyi arşivden çıkarır; tamamlandı veya iptal durumunu ayrıca değiştirmez.",
+                      id: "restore",
+                      label: "Arşivden çıkar",
+                      request: {
+                        action: "restore",
+                        endpoint: `/api/projects/${selectedProject.id}/lifecycle`,
+                        kind: "lifecycle",
+                        version: selectedProject.version,
+                      },
+                    }] : selectedProject.status === "completed" || selectedProject.status === "cancelled" ? [{
+                      description: "Projeyi aktif listeden kaldırır; bağlı kayıtlar ve geçmiş korunur.",
+                      id: "archive",
+                      label: "Arşivle",
+                      request: {
+                        action: "archive",
+                        endpoint: `/api/projects/${selectedProject.id}/lifecycle`,
+                        kind: "lifecycle",
+                        version: selectedProject.version,
+                      },
+                      tone: "danger",
+                    }] : []}
+                    canReadHistory={capabilities.canReadAudit}
+                    entityId={selectedProject.id}
+                    entityLabel={selectedProject.displayName}
+                    entityType="project"
+                    onSuccess={() => setRequestRevision((current) => current + 1)}
+                  />
                 </footer>
               </article>
             )}

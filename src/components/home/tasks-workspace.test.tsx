@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { TasksWorkspace } from "@/components/home/tasks-workspace";
 
-type TaskStatus = "backlog" | "todo" | "in_progress" | "blocked" | "done";
+type TaskStatus = "backlog" | "todo" | "in_progress" | "blocked" | "done" | "cancelled";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -49,6 +49,7 @@ function taskFixture(
     title: `Görev ${status}`,
     updatedAtUtc: "2026-09-01T08:00:00.000Z",
     version: 3,
+    visitLinked: false,
     ...overrides,
   };
 }
@@ -68,13 +69,14 @@ const project = {
 };
 
 describe("TasksWorkspace", () => {
-  it("loads tasks and customers into five accessible Kanban columns", async () => {
+  it("loads tasks and customers into six accessible Kanban columns", async () => {
     const statuses: TaskStatus[] = [
       "backlog",
       "todo",
       "in_progress",
       "blocked",
       "done",
+      "cancelled",
     ];
     const tasks = statuses.map((status, index) =>
       taskFixture(status, {
@@ -93,6 +95,7 @@ describe("TasksWorkspace", () => {
       throw new Error(`Unexpected request: ${String(input)}`);
     });
     vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
 
     render(<TasksWorkspace />);
 
@@ -109,9 +112,24 @@ describe("TasksWorkspace", () => {
     expect(screen.getByRole("region", { name: "Beklemede" })).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Tamamlandı" }))
       .toBeInTheDocument();
-    expect(screen.getAllByRole("article")).toHaveLength(5);
+    expect(screen.getByRole("region", { name: "İptal" }))
+      .toBeInTheDocument();
+    expect(screen.getAllByRole("article")).toHaveLength(6);
     expect(screen.queryByText("Bağımlılıklar ve zaman takibi")).not
       .toBeInTheDocument();
+    const reportLink = screen.getByRole("link", { name: "Firma görev raporu" });
+    expect(reportLink).toHaveAttribute("href", "/gorevler/rapor");
+    expect(reportLink).toHaveClass("task-report-action");
+    expect(within(reportLink).getByText("Firma raporu")).toBeInTheDocument();
+    expect(reportLink.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Müşteri filtresi" }),
+      customer.id,
+    );
+    expect(reportLink).toHaveAttribute(
+      "href",
+      "/gorevler/rapor?customerId=customer-1",
+    );
 
     const stageSelector = screen.getByRole("combobox", {
       name: "Gösterilen Kanban aşaması",
@@ -131,6 +149,39 @@ describe("TasksWorkspace", () => {
       "/api/projects",
       expect.objectContaining({ cache: "no-store", credentials: "same-origin" }),
     );
+  });
+
+  it("keeps write controls but hides lifecycle and audit controls without exact capabilities", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async (input) => {
+        if (String(input) === "/api/tasks") {
+          return jsonResponse({ tasks: [taskFixture("todo", { title: "Yetki kontrollü görev" })] });
+        }
+        if (String(input) === "/api/customers") return jsonResponse({ customers: [customer] });
+        if (String(input) === "/api/projects") return jsonResponse({ projects: [project] });
+        throw new Error(`Unexpected request: ${String(input)}`);
+      }),
+    );
+
+    render(
+      <TasksWorkspace
+        capabilities={{
+          canExportReports: false,
+          canLifecycleTasks: false,
+          canReadAudit: false,
+          canReadCustomers: true,
+          canReadProjects: true,
+          canWriteTasks: true,
+        }}
+      />,
+    );
+
+    expect(await screen.findByRole("button", { name: "Yetki kontrollü görev görevini düzenle" }))
+      .toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Yetki kontrollü görev durumu" }))
+      .toBeInTheDocument();
+    expect(screen.queryByText("İşlemler")).not.toBeInTheDocument();
   });
 
   it("serializes initial reads for the deliberately small database pool", async () => {
@@ -367,6 +418,75 @@ describe("TasksWorkspace", () => {
     expect(
       screen.getByRole("heading", { name: "Görevi güncelle" }),
     ).toBeInTheDocument();
+  });
+
+  it("locks visit-owned fields while keeping safe task details editable", async () => {
+    const linkedTask = taskFixture("done", {
+      id: "task-visit-linked",
+      title: "Ziyaret özeti",
+      visitLinked: true,
+    });
+    let patchBody: Record<string, unknown> | null = null;
+    const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+      const url = String(input);
+      if (url === "/api/tasks/task-visit-linked" && init?.method === "PATCH") {
+        patchBody = JSON.parse(String(init.body)) as Record<string, unknown>;
+        return jsonResponse({
+          task: {
+            ...linkedTask,
+            ...patchBody,
+            title: "Güncellenen ziyaret özeti",
+            version: 4,
+          },
+        });
+      }
+      if (url === "/api/tasks") return jsonResponse({ tasks: [linkedTask] });
+      if (url === "/api/customers") {
+        return jsonResponse({ customers: [customer] });
+      }
+      if (url === "/api/projects") {
+        return jsonResponse({ projects: [project] });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+
+    render(<TasksWorkspace />);
+
+    const statusSelect = await screen.findByRole("combobox", {
+      name: "Ziyaret özeti durumu",
+    });
+    expect(statusSelect).toBeDisabled();
+    expect(statusSelect).toHaveAccessibleDescription(/ziyaret kaydınca yönetilir/iu);
+    await user.click(
+      screen.getByRole("button", { name: "Ziyaret özeti görevini düzenle" }),
+    );
+
+    const editor = screen.getByRole("region", { name: "Görevi güncelle" });
+    expect(within(editor).getByLabelText("Proje")).toBeDisabled();
+    expect(within(editor).getByLabelText("Müşteri")).toBeDisabled();
+    expect(within(editor).getByLabelText("Vade")).toBeDisabled();
+    expect(within(editor).getByLabelText("Durum")).toBeDisabled();
+    expect(within(editor).getByLabelText("Görev başlığı")).toBeEnabled();
+    expect(within(editor).getByLabelText("Öncelik")).toBeEnabled();
+    expect(within(editor).getByLabelText("Açıklama")).toBeEnabled();
+
+    await user.clear(within(editor).getByLabelText("Görev başlığı"));
+    await user.type(
+      within(editor).getByLabelText("Görev başlığı"),
+      "Güncellenen ziyaret özeti",
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Değişiklikleri kaydet" }),
+    );
+
+    await waitFor(() =>
+      expect(patchBody).toEqual({
+        title: "Güncellenen ziyaret özeti",
+        version: 3,
+      }),
+    );
   });
 
   it("offers only customer and project combinations linked in the portfolio", async () => {

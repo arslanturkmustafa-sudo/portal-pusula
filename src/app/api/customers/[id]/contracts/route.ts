@@ -6,11 +6,13 @@ import {
   ContractPeriodConflictError,
   ContractProjectUnavailableError,
   ContractResourceNotFoundError,
+  type ConsultingContract,
   createContractInputSchema,
   createCustomerContract,
   listCustomerContracts,
 } from "@/features/contracts";
-import { isAdminAuthenticated } from "@/platform/auth/server-auth";
+import { hasPermission } from "@/platform/auth/permissions";
+import { authenticatePrincipalRequest } from "@/platform/auth/server-auth";
 import { getDatabaseProbeEnvironment } from "@/platform/config/readiness-env";
 import { getPlatformDatabasePool } from "@/platform/database/mysql-platform";
 import { correlationIdFromHeaders } from "@/platform/http/correlation-id";
@@ -41,18 +43,52 @@ function databasePool() {
   return getPlatformDatabasePool(getDatabaseProbeEnvironment());
 }
 
+function presentContract(
+  contract: ConsultingContract,
+  includeBilling: boolean,
+): ConsultingContract | Omit<
+  ConsultingContract,
+  "currency" | "monthlyFeeAmount" | "paymentDay" | "vatMode" | "vatRate"
+> {
+  if (includeBilling) return contract;
+  return {
+    archiveReason: contract.archiveReason,
+    archivedAtUtc: contract.archivedAtUtc,
+    archivedByUserAccountId: contract.archivedByUserAccountId,
+    createdAtUtc: contract.createdAtUtc,
+    customerId: contract.customerId,
+    endsOn: contract.endsOn,
+    id: contract.id,
+    internalNote: contract.internalNote,
+    projectId: contract.projectId,
+    startsOn: contract.startsOn,
+    status: contract.status,
+    updatedAtUtc: contract.updatedAtUtc,
+    version: contract.version,
+  };
+}
+
 export async function GET(
   request: NextRequest,
   context: ContractRouteContext,
 ): Promise<NextResponse> {
-  if (!(await isAdminAuthenticated(request))) {
+  const principal = await authenticatePrincipalRequest(request);
+  if (!principal) {
     return json({ status: "unauthorized" }, 401);
+  }
+  if (!hasPermission(principal, "contracts.read")) {
+    return json({ status: "forbidden" }, 403);
   }
 
   try {
     const { id } = await context.params;
     const contracts = await listCustomerContracts(databasePool(), id);
-    return json({ contracts });
+    const includeBilling = hasPermission(principal, "contracts.billing.read");
+    return json({
+      contracts: contracts.map((contract) =>
+        presentContract(contract, includeBilling),
+      ),
+    });
   } catch (error) {
     if (error instanceof PlatformInputError) {
       return json({ status: "validation_error" }, 400);
@@ -68,8 +104,15 @@ export async function POST(
   request: NextRequest,
   context: ContractRouteContext,
 ): Promise<NextResponse> {
-  if (!(await isAdminAuthenticated(request))) {
+  const principal = await authenticatePrincipalRequest(request);
+  if (!principal) {
     return json({ status: "unauthorized" }, 401);
+  }
+  if (
+    !hasPermission(principal, "contracts.write") ||
+    !hasPermission(principal, "contracts.billing.write")
+  ) {
+    return json({ status: "forbidden" }, 403);
   }
   if (!isSameOriginWriteRequest(request)) return json({ status: "forbidden" }, 403);
   if (!isJsonWriteRequest(request)) {
@@ -82,6 +125,7 @@ export async function POST(
       await readJsonWriteBody(request, 16_384),
     );
     const contract = await createCustomerContract(databasePool(), id, input, {
+      actorId: principal.kind === "account" ? principal.accountId : undefined,
       correlationId: correlationIdFromHeaders(request.headers),
     });
     return json({ contract }, 201);

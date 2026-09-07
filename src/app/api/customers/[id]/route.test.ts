@@ -4,7 +4,7 @@ import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  isAdminAuthenticated: vi.fn(),
+  authenticatePrincipalRequest: vi.fn(),
   parseCustomer: vi.fn(),
   updateCustomer: vi.fn(),
 }));
@@ -23,7 +23,7 @@ vi.mock("@/features/customers", () => ({
   updateCustomerInputSchema: { parse: mocks.parseCustomer },
 }));
 vi.mock("@/platform/auth/server-auth", () => ({
-  isAdminAuthenticated: mocks.isAdminAuthenticated,
+  authenticatePrincipalRequest: mocks.authenticatePrincipalRequest,
 }));
 vi.mock("@/platform/config/readiness-env", () => ({
   getDatabaseProbeEnvironment: vi.fn(() => ({})),
@@ -36,6 +36,7 @@ import { PATCH } from "@/app/api/customers/[id]/route";
 
 const customerId = "10000000-0000-4000-8000-000000000001";
 const projectId = "20000000-0000-4000-8000-000000000001";
+const accountId = "80000000-0000-4000-8000-000000000001";
 
 function request(): NextRequest {
   return new NextRequest(
@@ -56,7 +57,14 @@ const context = { params: Promise.resolve({ id: customerId }) };
 describe("customer project update API", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.isAdminAuthenticated.mockResolvedValue(true);
+    mocks.authenticatePrincipalRequest.mockResolvedValue({
+      accountId,
+      displayName: "Operasyon",
+      email: "operasyon@example.com",
+      kind: "account",
+      permissions: ["customers.write", "customers.contact.read"],
+      role: "member",
+    });
     mocks.parseCustomer.mockReturnValue({ projectIds: [projectId] });
   });
 
@@ -76,5 +84,11 @@ describe("customer project update API", () => {
 
     expect(response.status).toBe(code);
     await expect(response.json()).resolves.toEqual({ status });
+    expect(mocks.updateCustomer).toHaveBeenCalledWith(
+      {},
+      customerId,
+      { projectIds: [projectId] },
+      expect.objectContaining({ actorId: accountId }),
+    );
   });
 });

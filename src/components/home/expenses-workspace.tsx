@@ -10,22 +10,23 @@ import {
   type FormEvent,
 } from "react";
 
+import { redirectToPortalLogin as redirectToLogin } from "@/platform/navigation/portal-return-path";
+import { RecordLifecycleControls } from "@/components/portal/record-lifecycle-controls";
+
 type LoadState = "error" | "loading" | "ready";
 type SaveState = "idle" | "saving";
 type EditorMode = "copy" | "create" | "edit" | null;
 type ExpenseStatus = "active" | "voided";
 type PaymentMethod = "bank_transfer" | "cash" | "credit_card" | "other";
-type ExpenseCategory =
-  | "external_service"
-  | "marketing"
-  | "meals_hospitality"
-  | "office"
-  | "other"
-  | "rent"
-  | "software_subscription"
-  | "tax_fee"
-  | "transportation";
+type ExpenseCategory = string;
 type DocumentType = "invoice" | "none" | "other" | "receipt";
+
+type ExpenseCategoryDto = Readonly<{
+  code: string;
+  displayName: string;
+  id: string;
+  isSystem: boolean;
+}>;
 
 type ProjectDto = Readonly<{
   displayName: string;
@@ -89,24 +90,37 @@ type ExpenseDraft = {
   vendorName: string;
 };
 
-const categoryDefinitions: readonly Readonly<{
-  label: string;
-  value: ExpenseCategory;
-}>[] = [
-  { label: "Kira", value: "rent" },
-  { label: "Yazılım / abonelik", value: "software_subscription" },
-  { label: "Ulaşım", value: "transportation" },
-  { label: "Yemek / ağırlama", value: "meals_hospitality" },
-  { label: "Pazarlama", value: "marketing" },
-  { label: "Ofis", value: "office" },
-  { label: "Dış hizmet", value: "external_service" },
-  { label: "Vergi / harç", value: "tax_fee" },
-  { label: "Diğer", value: "other" },
+const fallbackCategoryDefinitions: readonly ExpenseCategoryDto[] = [
+  { code: "rent", displayName: "Kira", id: "rent", isSystem: true },
+  {
+    code: "software_subscription",
+    displayName: "Yazılım / abonelik",
+    id: "software_subscription",
+    isSystem: true,
+  },
+  {
+    code: "transportation",
+    displayName: "Ulaşım",
+    id: "transportation",
+    isSystem: true,
+  },
+  {
+    code: "meals_hospitality",
+    displayName: "Yemek / ağırlama",
+    id: "meals_hospitality",
+    isSystem: true,
+  },
+  { code: "marketing", displayName: "Pazarlama", id: "marketing", isSystem: true },
+  { code: "office", displayName: "Ofis", id: "office", isSystem: true },
+  {
+    code: "external_service",
+    displayName: "Dış hizmet",
+    id: "external_service",
+    isSystem: true,
+  },
+  { code: "tax_fee", displayName: "Vergi / harç", id: "tax_fee", isSystem: true },
+  { code: "other", displayName: "Diğer", id: "other", isSystem: true },
 ];
-
-const categoryLabels = Object.fromEntries(
-  categoryDefinitions.map((category) => [category.value, category.label]),
-) as Readonly<Record<ExpenseCategory, string>>;
 
 const paymentLabels: Readonly<Record<PaymentMethod, string>> = {
   bank_transfer: "Banka",
@@ -250,17 +264,32 @@ function expenseBody(draft: ExpenseDraft) {
   };
 }
 
-function redirectToLogin(): void {
-  window.location.assign(new URL("/giris", window.location.origin).toString());
-}
-
 function canonicalSearch(value: string): string {
   return value.trim().toLocaleLowerCase("tr-TR");
 }
 
-export function ExpensesWorkspace() {
+type ExpensesWorkspaceProps = Readonly<{
+  capabilities?: Readonly<{
+    canReadAudit: boolean;
+    canReverseExpenses: boolean;
+    canWriteExpenses: boolean;
+  }>;
+}>;
+
+const fullExpenseCapabilities: NonNullable<ExpensesWorkspaceProps["capabilities"]> = {
+  canReadAudit: true,
+  canReverseExpenses: true,
+  canWriteExpenses: true,
+};
+
+export function ExpensesWorkspace({
+  capabilities = fullExpenseCapabilities,
+}: ExpensesWorkspaceProps = {}) {
   const [projects, setProjects] = useState<readonly ProjectDto[]>([]);
   const [cards, setCards] = useState<readonly CreditCardDto[]>([]);
+  const [categories, setCategories] = useState<readonly ExpenseCategoryDto[]>(
+    fallbackCategoryDefinitions,
+  );
   const [expenses, setExpenses] = useState<readonly ExpenseDto[]>([]);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [requestRevision, setRequestRevision] = useState(0);
@@ -270,14 +299,25 @@ export function ExpensesWorkspace() {
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [formError, setFormError] = useState<string | null>(null);
   const [announcement, setAnnouncement] = useState("");
+  const [categoryEditorOpen, setCategoryEditorOpen] = useState(false);
+  const [categoryName, setCategoryName] = useState("");
+  const [categoryError, setCategoryError] = useState<string | null>(null);
+  const [categorySaveState, setCategorySaveState] = useState<SaveState>("idle");
+  const [pendingCategoryCode, setPendingCategoryCode] = useState<string | null>(
+    null,
+  );
   const [monthFilter, setMonthFilter] = useState(currentIstanbulMonth());
   const [projectFilter, setProjectFilter] = useState("all");
   const [paymentFilter, setPaymentFilter] = useState<PaymentMethod | "all">("all");
   const [query, setQuery] = useState("");
   const editorTitleRef = useRef<HTMLHeadingElement>(null);
+  const categoryTriggerRef = useRef<HTMLButtonElement>(null);
   const operationRef = useRef<Readonly<{ fingerprint: string; key: string }> | null>(
     null,
   );
+  const categoryOperationRef = useRef<
+    Readonly<{ fingerprint: string; key: string }> | null
+  >(null);
 
   const loadWorkspace = useCallback(async (signal?: AbortSignal) => {
     // The production pool deliberately has two connections. Keep these reads
@@ -302,6 +342,17 @@ export function ExpensesWorkspace() {
     if (!cardsResponse.ok) throw new Error("Cards are unavailable.");
     const cardPayload = (await cardsResponse.json()) as { cards?: CreditCardDto[] };
 
+    const categoriesResponse = await fetch("/api/finance/expense-categories", {
+      cache: "no-store",
+      credentials: "same-origin",
+      signal,
+    });
+    if (categoriesResponse.status === 401) return redirectToLogin();
+    if (!categoriesResponse.ok) throw new Error("Categories are unavailable.");
+    const categoryPayload = (await categoriesResponse.json()) as {
+      categories?: ExpenseCategoryDto[];
+    };
+
     const expensesResponse = await fetch("/api/finance/expenses", {
       cache: "no-store",
       credentials: "same-origin",
@@ -316,12 +367,14 @@ export function ExpensesWorkspace() {
     if (
       !Array.isArray(projectPayload.projects) ||
       !Array.isArray(cardPayload.cards) ||
+      !Array.isArray(categoryPayload.categories) ||
       !Array.isArray(expensePayload.expenses)
     ) {
       throw new Error("Expense workspace response is invalid.");
     }
     setProjects(projectPayload.projects);
     setCards(cardPayload.cards);
+    setCategories(categoryPayload.categories);
     setExpenses(expensePayload.expenses);
     setLoadState("ready");
   }, []);
@@ -334,6 +387,7 @@ export function ExpensesWorkspace() {
         if (error instanceof DOMException && error.name === "AbortError") return;
         setProjects([]);
         setCards([]);
+        setCategories(fallbackCategoryDefinitions);
         setExpenses([]);
         setLoadState("error");
       });
@@ -350,6 +404,14 @@ export function ExpensesWorkspace() {
   const activeCards = useMemo(
     () => cards.filter((card) => card.status === "active"),
     [cards],
+  );
+
+  const categoryLabels = useMemo(
+    () =>
+      Object.fromEntries(
+        categories.map((category) => [category.code, category.displayName]),
+      ) as Readonly<Record<string, string>>,
+    [categories],
   );
 
   const visibleExpenses = useMemo(() => {
@@ -401,7 +463,13 @@ export function ExpensesWorkspace() {
   }
 
   function openCreate(): void {
-    setDraft(emptyDraft());
+    const nextDraft = emptyDraft();
+    setDraft(
+      pendingCategoryCode === null
+        ? nextDraft
+        : { ...nextDraft, category: pendingCategoryCode },
+    );
+    setPendingCategoryCode(null);
     setEditingExpense(null);
     setEditorMode("create");
     setFormError(null);
@@ -438,6 +506,85 @@ export function ExpensesWorkspace() {
     setSaveState("idle");
     setFormError(null);
     operationRef.current = null;
+  }
+
+  function closeCategoryEditor(restoreFocus: boolean): void {
+    setCategoryEditorOpen(false);
+    setCategoryError(null);
+    categoryOperationRef.current = null;
+    if (restoreFocus) {
+      window.setTimeout(() => categoryTriggerRef.current?.focus(), 0);
+    }
+  }
+
+  async function submitCategory(
+    event: FormEvent<HTMLFormElement>,
+  ): Promise<void> {
+    event.preventDefault();
+    const displayName = categoryName.trim();
+    if (displayName === "") {
+      setCategoryError("Kategori adı zorunludur.");
+      return;
+    }
+    if (
+      categoryOperationRef.current === null ||
+      categoryOperationRef.current.fingerprint !== displayName
+    ) {
+      categoryOperationRef.current = {
+        fingerprint: displayName,
+        key: globalThis.crypto.randomUUID(),
+      };
+    }
+    setCategorySaveState("saving");
+    setCategoryError(null);
+    try {
+      const response = await fetch("/api/finance/expense-categories", {
+        body: JSON.stringify({
+          clientOperationKey: categoryOperationRef.current.key,
+          displayName,
+        }),
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      });
+      if (response.status === 401) return redirectToLogin();
+      const payload = (await response.json()) as {
+        category?: ExpenseCategoryDto;
+        status?: string;
+      };
+      if (!response.ok || payload.category === undefined) {
+        setCategoryError(
+          payload.status === "category_already_exists"
+            ? "Bu adla bir gider kategorisi zaten var."
+            : payload.status === "validation_error"
+              ? "Kategori adını kontrol edin."
+              : "Kategori eklenemedi. Lütfen yeniden deneyin.",
+        );
+        setCategorySaveState("idle");
+        return;
+      }
+      const saved = payload.category;
+      setCategories((current) =>
+        current.some((category) => category.id === saved.id)
+          ? current
+          : [...current, saved].sort((left, right) => {
+              if (left.isSystem !== right.isSystem) return left.isSystem ? -1 : 1;
+              return left.displayName.localeCompare(right.displayName, "tr-TR");
+            }),
+      );
+      if (editorMode === null) {
+        setPendingCategoryCode(saved.code);
+      } else {
+        setDraft((current) => ({ ...current, category: saved.code }));
+      }
+      setAnnouncement(`${saved.displayName} gider kategorisi eklendi.`);
+      setCategoryName("");
+      setCategorySaveState("idle");
+      closeCategoryEditor(true);
+    } catch {
+      setCategoryError("Kategori eklenemedi. Bağlantıyı kontrol edip yeniden deneyin.");
+      setCategorySaveState("idle");
+    }
   }
 
   async function submitExpense(event: FormEvent<HTMLFormElement>): Promise<void> {
@@ -549,9 +696,29 @@ export function ExpensesWorkspace() {
           <h2 id="expense-ledger-title">Giderler</h2>
           <p>Ödemeleri iş hattı, KDV ve ödeme kaynağıyla birlikte kaydedin.</p>
         </div>
-        <button className="primary-action" type="button" onClick={openCreate}>
-          + Gider ekle
-        </button>
+        {capabilities.canWriteExpenses ? (
+          <div className="expense-command-actions">
+            <button
+              aria-controls="expense-category-editor"
+              aria-expanded={categoryEditorOpen}
+              className="text-action"
+              ref={categoryTriggerRef}
+              type="button"
+              onClick={() => {
+                if (categoryEditorOpen) closeCategoryEditor(false);
+                else {
+                  setCategoryEditorOpen(true);
+                  setCategoryError(null);
+                }
+              }}
+            >
+              + Kategori ekle
+            </button>
+            <button className="primary-action" type="button" onClick={openCreate}>
+              + Gider ekle
+            </button>
+          </div>
+        ) : null}
       </div>
 
       <section className="finance-summary expense-summary" aria-label="Gider özeti">
@@ -567,6 +734,46 @@ export function ExpensesWorkspace() {
           </div>
         ))}
       </section>
+
+      {categoryEditorOpen ? (
+        <form
+          className="expense-category-entry"
+          id="expense-category-editor"
+          onSubmit={(event) => void submitCategory(event)}
+        >
+          <label>
+            <span>Yeni gider kategorisi</span>
+            <input
+              autoFocus
+              maxLength={191}
+              placeholder="Örn. Eğitim materyali"
+              required
+              value={categoryName}
+              onChange={(event) => setCategoryName(event.target.value)}
+            />
+          </label>
+          <div className="expense-category-actions">
+            <button
+              className="text-action"
+              disabled={categorySaveState === "saving"}
+              type="button"
+              onClick={() => closeCategoryEditor(true)}
+            >
+              Vazgeç
+            </button>
+            <button
+              className="primary-action"
+              disabled={categorySaveState === "saving"}
+              type="submit"
+            >
+              {categorySaveState === "saving" ? "Ekleniyor…" : "Kategoriyi ekle"}
+            </button>
+          </div>
+          {categoryError === null ? null : (
+            <p className="entry-error" role="alert">{categoryError}</p>
+          )}
+        </form>
+      ) : null}
 
       {editorMode !== null ? (
         <section className="finance-entry expense-entry" aria-labelledby="expense-form-title">
@@ -625,8 +832,10 @@ export function ExpensesWorkspace() {
                   updateDraft({ category: event.target.value as ExpenseCategory })
                 }
               >
-                {categoryDefinitions.map((category) => (
-                  <option key={category.value} value={category.value}>{category.label}</option>
+                {categories.map((category) => (
+                  <option key={category.id} value={category.code}>
+                    {category.displayName}
+                  </option>
                 ))}
               </select>
             </label>
@@ -857,7 +1066,7 @@ export function ExpensesWorkspace() {
                 <td data-label="Gider">
                   <strong>{expense.description}</strong>
                   <small>
-                    {categoryLabels[expense.category]}
+                    {categoryLabels[expense.category] ?? expense.category}
                     {expense.vendorName === null ? "" : ` · ${expense.vendorName}`}
                   </small>
                 </td>
@@ -878,21 +1087,43 @@ export function ExpensesWorkspace() {
                 </td>
                 <td data-label="İşlem">
                   <div className="expense-row-actions">
-                    <button
-                      aria-label={`${expense.description} giderini düzenle`}
-                      disabled={expense.status === "voided"}
-                      type="button"
-                      onClick={() => openEdit(expense)}
-                    >
-                      Düzenle
-                    </button>
-                    <button
-                      aria-label={`${expense.description} giderini kopyala`}
-                      type="button"
-                      onClick={() => openCopy(expense)}
-                    >
-                      Kopyala
-                    </button>
+                    {capabilities.canWriteExpenses ? (
+                      <>
+                        <button
+                          aria-label={`${expense.description} giderini düzenle`}
+                          disabled={expense.status === "voided"}
+                          type="button"
+                          onClick={() => openEdit(expense)}
+                        >
+                          Düzenle
+                        </button>
+                        <button
+                          aria-label={`${expense.description} giderini kopyala`}
+                          type="button"
+                          onClick={() => openCopy(expense)}
+                        >
+                          Kopyala
+                        </button>
+                      </>
+                    ) : null}
+                    <RecordLifecycleControls
+                      actions={capabilities.canReverseExpenses && expense.status === "active" ? [{
+                        description: "Gideri silmeden finansal toplamlardan çıkarır ve gerekçeli iz bırakır.",
+                        id: "void",
+                        label: "Geçersiz kıl",
+                        request: {
+                          endpoint: `/api/finance/expenses/${expense.id}`,
+                          kind: "expense-void",
+                          version: expense.version,
+                        },
+                        tone: "danger",
+                      }] : []}
+                      canReadHistory={capabilities.canReadAudit}
+                      entityId={expense.id}
+                      entityLabel={expense.description}
+                      entityType="expense"
+                      onSuccess={() => setRequestRevision((current) => current + 1)}
+                    />
                   </div>
                 </td>
               </tr>

@@ -1,5 +1,3 @@
-import { Buffer } from "node:buffer";
-
 import type { NextRequest } from "next/server";
 
 export const DEFAULT_WRITE_BODY_LIMIT = 32_768;
@@ -36,20 +34,65 @@ export function isJsonWriteRequest(request: NextRequest): boolean {
   );
 }
 
-export async function readJsonWriteBody(
+function invalidRequestBody(): SyntaxError {
+  return new SyntaxError("Request body is invalid.");
+}
+
+export async function readBoundedRequestText(
   request: NextRequest,
-  maximumBytes = DEFAULT_WRITE_BODY_LIMIT,
-): Promise<unknown> {
+  maximumBytes: number,
+): Promise<string> {
+  if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 0) {
+    throw invalidRequestBody();
+  }
   const declaredLength = request.headers.get("content-length");
   if (
     declaredLength !== null &&
     (!/^\d+$/u.test(declaredLength) || Number(declaredLength) > maximumBytes)
   ) {
-    throw new SyntaxError("Request body is invalid.");
+    throw invalidRequestBody();
   }
-  const text = await request.text();
-  if (Buffer.byteLength(text, "utf8") > maximumBytes) {
-    throw new SyntaxError("Request body is invalid.");
+  if (request.body === null) return "";
+
+  const reader = request.body.getReader();
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  const parts: string[] = [];
+  let byteLength = 0;
+  try {
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      byteLength += chunk.value.byteLength;
+      if (byteLength > maximumBytes) {
+        try {
+          await reader.cancel();
+        } catch {
+          // The generic validation result is unchanged if cancellation races.
+        }
+        throw invalidRequestBody();
+      }
+      parts.push(decoder.decode(chunk.value, { stream: true }));
+    }
+    parts.push(decoder.decode());
+  } catch (error) {
+    if (!(error instanceof SyntaxError)) {
+      try {
+        await reader.cancel();
+      } catch {
+        // The body remains rejected even if the stream cannot be cancelled.
+      }
+    }
+    throw invalidRequestBody();
+  } finally {
+    reader.releaseLock();
   }
+  return parts.join("");
+}
+
+export async function readJsonWriteBody(
+  request: NextRequest,
+  maximumBytes = DEFAULT_WRITE_BODY_LIMIT,
+): Promise<unknown> {
+  const text = await readBoundedRequestText(request, maximumBytes);
   return JSON.parse(text) as unknown;
 }

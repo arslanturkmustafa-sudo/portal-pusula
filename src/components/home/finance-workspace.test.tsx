@@ -15,6 +15,13 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+function jsonResponse(body: unknown): Response {
+  return new Response(JSON.stringify(body), {
+    headers: { "Content-Type": "application/json" },
+    status: 200,
+  });
+}
+
 describe("FinanceWorkspace", () => {
   it("shows the receivable summary, ledger and three focused actions", async () => {
     const user = userEvent.setup();
@@ -47,6 +54,18 @@ describe("FinanceWorkspace", () => {
     ).toBeInTheDocument();
     expect(screen.getByLabelText("Net tutar")).toBeInTheDocument();
     expect(screen.getByLabelText("KDV tutarı")).toHaveValue(0);
+  });
+
+  it("explains that a generated receivable is due in the month after service", async () => {
+    const user = userEvent.setup();
+    render(<FinanceWorkspace customers={customers} live={false} />);
+
+    await user.click(screen.getByRole("button", { name: "Ayı oluştur" }));
+
+    expect(screen.getByLabelText("Hizmet ayı")).toBeInTheDocument();
+    expect(
+      screen.getByText(/vade, sözleşmedeki ödeme gününe göre izleyen ayda oluşur/u),
+    ).toBeInTheDocument();
   });
 
   it("does not present sample money while live records are loading", () => {
@@ -98,5 +117,77 @@ describe("FinanceWorkspace", () => {
     await waitFor(() => expect(postBodies).toHaveLength(2));
     expect(postBodies[0]?.clientOperationKey).toBe(operationKey);
     expect(postBodies[1]?.clientOperationKey).toBe(operationKey);
+  });
+
+  it("offers collection reversal only for an unreversed original movement", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async () => jsonResponse({
+        receivables: [{
+          collectedAmount: "300.0000",
+          collections: [
+            {
+              amount: "100.0000",
+              collectedOn: "2026-09-01",
+              entryType: "collection",
+              id: "collection-open",
+              reasonSummary: null,
+              receivableId: "receivable-1",
+              reversalOfId: null,
+              reversed: false,
+            },
+            {
+              amount: "100.0000",
+              collectedOn: "2026-09-02",
+              entryType: "collection",
+              id: "collection-reversed",
+              reasonSummary: null,
+              receivableId: "receivable-1",
+              reversalOfId: null,
+              reversed: true,
+            },
+            {
+              amount: "-100.0000",
+              collectedOn: "2026-09-03",
+              entryType: "reversal",
+              id: "reversal-1",
+              reasonSummary: "Mükerrer tahsilat",
+              receivableId: "receivable-1",
+              reversalOfId: "collection-reversed",
+              reversed: false,
+            },
+          ],
+          contractId: null,
+          createdAtUtc: "2026-09-01T08:00:00.000Z",
+          customerId: "sample-1",
+          customerName: "Atlas Makina",
+          description: "Eylül danışmanlığı",
+          dueOn: "2026-09-10",
+          id: "receivable-1",
+          netAmount: "1000.0000",
+          outstandingAmount: "700.0000",
+          periodMonth: "2026-09",
+          projectId: null,
+          projectName: null,
+          projectShortCode: null,
+          recordState: "active",
+          sourceType: "opening_balance",
+          status: "partial",
+          totalAmount: "1000.0000",
+          vatAmount: "0.0000",
+          version: 2,
+        }],
+        summary: {
+          collectedThisMonth: "300.0000",
+          dueThisMonth: "1000.0000",
+          overdue: "0.0000",
+          outstanding: "700.0000",
+        },
+      })),
+    );
+
+    render(<FinanceWorkspace customers={customers} live />);
+
+    expect(await screen.findAllByText("Tahsilatı ters kaydet")).toHaveLength(1);
   });
 });

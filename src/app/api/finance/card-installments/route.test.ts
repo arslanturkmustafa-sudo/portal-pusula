@@ -31,4 +31,16 @@ describe("card installment collection API", () => {
     expect(response.status).toBe(200);
     expect(mocks.list).toHaveBeenCalledWith({}, { cardId, month: "2026-09" });
   });
+
+  it("forwards the validated open-only filter", async () => {
+    const response = await GET(
+      new NextRequest(
+        "https://portal.example/api/finance/card-installments?status=open",
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.parse).toHaveBeenCalledWith({ status: "open" });
+    expect(mocks.list).toHaveBeenCalledWith({}, { status: "open" });
+  });
 });

@@ -63,7 +63,7 @@ describe("CardPlanWorkspace", () => {
       }),
     );
 
-    render(<CardPlanWorkspace />);
+    render(<CardPlanWorkspace canWrite />);
 
     expect(await screen.findByText("Yazılım lisansı")).toBeInTheDocument();
     expect(requestOrder[0]).toBe("/api/finance/cards");
@@ -92,7 +92,7 @@ describe("CardPlanWorkspace", () => {
     vi.stubGlobal("fetch", fetchMock);
     const user = userEvent.setup();
 
-    render(<CardPlanWorkspace />);
+    render(<CardPlanWorkspace canWrite />);
     await screen.findByText("Henüz kart tanımlanmadı.");
     await user.click(screen.getByRole("button", { name: "+ Kart ekle" }));
     await user.type(screen.getByLabelText("Kart adı"), "İş kartı");
@@ -144,7 +144,7 @@ describe("CardPlanWorkspace", () => {
     );
     const user = userEvent.setup();
 
-    render(<CardPlanWorkspace />);
+    render(<CardPlanWorkspace canWrite />);
     await user.click(await screen.findByRole("button", { name: /ödendi işaretle/iu }));
     const paidOn = screen.getByLabelText("Yazılım lisansı 1. taksit ödeme tarihi");
     await user.clear(paidOn);
@@ -160,11 +160,241 @@ describe("CardPlanWorkspace", () => {
     }));
     expect(
       await within(
-        screen.getByRole("table", { name: "Kart taksit ve ödeme planı" }),
+        screen.getByRole("table", { name: "İş kartı taksit planı" }),
       ).findByText("Ödendi"),
     ).toBeInTheDocument();
     expect(screen.getByText("31 Ağu 2026")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /plana geri al/iu })).toBeInTheDocument();
+  });
+
+  it("groups installments under each card with debt and next-due summaries", async () => {
+    const installments = [
+      installment,
+      {
+        ...installment,
+        amount: "1000.0000",
+        dueOn: "2026-09-10",
+        id: "installment-2",
+        installmentNumber: 2,
+        paidOn: "2026-09-02",
+        status: "paid",
+      },
+      {
+        ...installment,
+        amount: "500.0000",
+        dueOn: "2026-09-01",
+        id: "installment-3",
+        installmentNumber: 3,
+      },
+    ];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async (input) => {
+        const url = String(input);
+        if (url === "/api/finance/cards") return jsonResponse({ cards: [card] });
+        if (url.startsWith("/api/finance/card-installments?")) {
+          return jsonResponse({ installments });
+        }
+        throw new Error(`Unexpected request: ${url}`);
+      }),
+    );
+
+    render(<CardPlanWorkspace canWrite />);
+
+    const group = await screen.findByRole("region", { name: "İş kartı" });
+    const cardSummary = group.querySelector(".card-plan-card-summary");
+    expect(cardSummary).not.toBeNull();
+    expect(within(cardSummary as HTMLElement).getByText("₺5.500,00")).toBeInTheDocument();
+    expect(within(cardSummary as HTMLElement).getByText("₺1.000,00")).toBeInTheDocument();
+    expect(within(cardSummary as HTMLElement).getByText("₺4.500,00")).toBeInTheDocument();
+    expect(within(cardSummary as HTMLElement).getByText("₺500,00")).toBeInTheDocument();
+    expect(within(cardSummary as HTMLElement).getByText("20 Eyl 2026")).toBeInTheDocument();
+    expect(
+      within(group).getByRole("table", { name: "İş kartı taksit planı" }),
+    ).toBeInTheDocument();
+  });
+
+  it("bulk-pays the exact open card-period snapshot without a partial amount", async () => {
+    const second = {
+      ...installment,
+      amount: "1000.0000",
+      id: "installment-2",
+      installmentNumber: 2,
+      version: 2,
+    };
+    let bulkBody: Record<string, unknown> | undefined;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async (input, init) => {
+        const url = String(input);
+        if (url === "/api/finance/cards") return jsonResponse({ cards: [card] });
+        if (url.startsWith("/api/finance/card-installments?")) {
+          return jsonResponse({ installments: [installment, second] });
+        }
+        if (
+          url === "/api/finance/card-installments/bulk-pay" &&
+          init?.method === "PATCH"
+        ) {
+          bulkBody = JSON.parse(String(init.body)) as Record<string, unknown>;
+          const paidOn = String(bulkBody.paidOn);
+          return jsonResponse({
+            installments: [
+              { ...installment, paidOn, status: "paid", version: 2 },
+              { ...second, paidOn, status: "paid", version: 3 },
+            ],
+            replayed: false,
+            updatedCount: 2,
+          });
+        }
+        throw new Error(`Unexpected request: ${url}`);
+      }),
+    );
+    const user = userEvent.setup();
+
+    render(<CardPlanWorkspace canWrite />);
+    const bulkTrigger = await screen.findByRole("button", {
+      name: "Dönemin açık taksitlerini ödendi olarak işaretle",
+    });
+    await user.click(bulkTrigger);
+    const date = screen.getByLabelText("İş kartı toplu ödeme tarihi");
+    await waitFor(() => expect(date).toHaveFocus());
+    const bulkForm = screen.getByRole("form", {
+      name: "İş kartı açık taksitlerini toplu şekilde ödendi olarak işaretle",
+    });
+    expect(within(bulkForm).getByText("İş kartı")).toBeVisible();
+    expect(within(bulkForm).getByText("2 açık taksit · ₺5.000,00")).toBeVisible();
+    await user.click(within(bulkForm).getByRole("button", { name: "Vazgeç" }));
+    const returnedTrigger = screen.getByRole("button", {
+      name: "Dönemin açık taksitlerini ödendi olarak işaretle",
+    });
+    await waitFor(() => expect(returnedTrigger).toHaveFocus());
+
+    await user.click(returnedTrigger);
+    const reopenedDate = screen.getByLabelText("İş kartı toplu ödeme tarihi");
+    await user.clear(reopenedDate);
+    await user.type(reopenedDate, "2026-09-03");
+    await user.click(screen.getByRole("button", {
+      name: "2 taksiti ödendi olarak işaretle",
+    }));
+
+    await waitFor(() =>
+      expect(bulkBody).toEqual({
+        cardId: card.id,
+        installments: [
+          { id: installment.id, version: 1 },
+          { id: second.id, version: 2 },
+        ],
+        month: expect.stringMatching(/^\d{4}-\d{2}$/u),
+        paidOn: "2026-09-03",
+      }),
+    );
+    expect(
+      screen.queryByRole("button", {
+        name: "Dönemin açık taksitlerini ödendi olarak işaretle",
+      }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/tutar/iu)).not.toBeInTheDocument();
+  });
+
+  it("closes a stale bulk editor and requires a safe plan reload after conflict", async () => {
+    let planReadCount = 0;
+    let bulkWriteCount = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async (input, init) => {
+        const url = String(input);
+        if (url === "/api/finance/cards") return jsonResponse({ cards: [card] });
+        if (
+          url === "/api/finance/card-installments/bulk-pay" &&
+          init?.method === "PATCH"
+        ) {
+          bulkWriteCount += 1;
+          return jsonResponse({ status: "installment_selection_conflict" }, 409);
+        }
+        if (url.startsWith("/api/finance/card-installments?")) {
+          planReadCount += 1;
+          return jsonResponse({
+            installments:
+              planReadCount === 1
+                ? [installment]
+                : [
+                    {
+                      ...installment,
+                      paidOn: "2026-09-03",
+                      status: "paid",
+                      version: 2,
+                    },
+                  ],
+          });
+        }
+        throw new Error(`Unexpected request: ${url}`);
+      }),
+    );
+    const user = userEvent.setup();
+
+    render(<CardPlanWorkspace canWrite />);
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Dönemin açık taksitlerini ödendi olarak işaretle",
+      }),
+    );
+    await user.click(
+      screen.getByRole("button", {
+        name: "1 taksiti ödendi olarak işaretle",
+      }),
+    );
+
+    const refresh = await screen.findByRole("button", {
+      name: "Güncel planı yükle",
+    });
+    expect(
+      screen.queryByRole("form", {
+        name: "İş kartı açık taksitlerini toplu şekilde ödendi olarak işaretle",
+      }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", {
+        name: "Dönemin açık taksitlerini ödendi olarak işaretle",
+      }),
+    ).not.toBeInTheDocument();
+    expect(bulkWriteCount).toBe(1);
+
+    await user.click(refresh);
+
+    await waitFor(() => expect(planReadCount).toBe(2));
+    expect(
+      await within(
+        screen.getByRole("table", { name: "İş kartı taksit planı" }),
+      ).findByText("Ödendi"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Güncel planı yükle" }),
+    ).not.toBeInTheDocument();
+    expect(bulkWriteCount).toBe(1);
+  });
+
+  it("keeps all mutation controls out of a read-only card view", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async (input) => {
+        const url = String(input);
+        if (url === "/api/finance/cards") return jsonResponse({ cards: [card] });
+        if (url.startsWith("/api/finance/card-installments?")) {
+          return jsonResponse({ installments: [installment] });
+        }
+        throw new Error(`Unexpected request: ${url}`);
+      }),
+    );
+
+    render(<CardPlanWorkspace canWrite={false} />);
+    expect(await screen.findByText("Yazılım lisansı")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "+ Kart ekle" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /ödendi işaretle/iu })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", {
+        name: "Dönemin açık taksitlerini ödendi olarak işaretle",
+      }),
+    ).not.toBeInTheDocument();
   });
 
   it("clears stale installments and offers retry when a changed period cannot load", async () => {
@@ -181,7 +411,7 @@ describe("CardPlanWorkspace", () => {
       }),
     );
 
-    render(<CardPlanWorkspace />);
+    render(<CardPlanWorkspace canWrite />);
     expect(await screen.findByText("Yazılım lisansı")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Ödeme planı dönemi"), {
       target: { value: "2027-01" },
@@ -207,14 +437,17 @@ describe("CardPlanWorkspace", () => {
       }),
     );
 
-    render(<CardPlanWorkspace />);
+    render(<CardPlanWorkspace canWrite />);
     await screen.findByText("Bu dönem için kart ödemesi yok.");
-    fireEvent.change(screen.getByLabelText("Ödeme planı dönemi"), {
-      target: { value: "" },
-    });
+    fireEvent.click(screen.getByRole("button", { name: /Tüm dönemler/iu }));
 
     expect(await screen.findByRole("heading", { name: "Tüm dönemler" })).toBeInTheDocument();
-    await waitFor(() => expect(planUrls).toContain("/api/finance/card-installments"));
+    await waitFor(() =>
+      expect(planUrls).toContain("/api/finance/card-installments?status=open"),
+    );
+    expect(planUrls.some((url) => url.includes("month=") && url.includes("status="))).toBe(
+      false,
+    );
     expect(planUrls).not.toContain("/api/finance/card-installments?month=");
   });
 });
