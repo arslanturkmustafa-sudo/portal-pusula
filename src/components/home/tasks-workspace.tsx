@@ -41,6 +41,7 @@ type TaskDto = Readonly<{
   title: string;
   updatedAtUtc: string;
   version: number;
+  visitLinked: boolean;
 }>;
 
 type CustomerDto = Readonly<{
@@ -247,6 +248,7 @@ function TaskCard({
   updating,
 }: TaskCardProps) {
   const titleId = `task-title-${task.id}`;
+  const visitLockId = `task-visit-lock-${task.id}`;
   const overdue = isOverdue(task, today);
 
   return (
@@ -291,6 +293,12 @@ function TaskCard({
         <p className="task-card-description">{task.description}</p>
       )}
 
+      {task.visitLinked ? (
+        <p className="task-card-customer" id={visitLockId}>
+          Ziyarete bağlı · firma, proje, vade ve durum ziyaret kaydınca yönetilir
+        </p>
+      ) : null}
+
       <div className="task-card-meta">
         {task.dueOn === null ? (
           <span>Vade yok</span>
@@ -307,8 +315,9 @@ function TaskCard({
         {canWrite ? <label className="task-card-status-field">
           <span>Durum</span>
           <select
+            aria-describedby={task.visitLinked ? visitLockId : undefined}
             aria-label={`${task.title} durumu`}
-            disabled={updating}
+            disabled={updating || task.visitLinked}
             value={task.status}
             onChange={(event) =>
               onStatusChange(task, event.target.value as TaskStatus)
@@ -676,7 +685,9 @@ export function TasksWorkspace({
       };
       if (!response.ok || payload.task === undefined) {
         setFormError(
-          payload.status === "customer_project_mismatch"
+          payload.status === "visit_linked_fields_locked"
+            ? "Ziyarete bağlı görevlerde firma, proje, vade ve durum ziyaret kaydından yönetilir."
+            : payload.status === "customer_project_mismatch"
             ? "Seçilen müşteri bu projeye bağlı değil. Müşteri veya proje seçimini değiştirin."
             : response.status === 409
               ? "Görev başka bir işlemde değişti. Sayfayı yenileyip yeniden deneyin."
@@ -731,7 +742,9 @@ export function TasksWorkspace({
   }
 
   async function changeTaskStatus(task: TaskDto, status: TaskStatus) {
-    if (task.status === status || updatingTaskId !== null) return;
+    if (task.visitLinked || task.status === status || updatingTaskId !== null) {
+      return;
+    }
     setUpdatingTaskId(task.id);
     setBoardError(null);
     try {
@@ -842,7 +855,9 @@ export function TasksWorkspace({
               {editingTask === null ? "Görev ekle" : "Görevi güncelle"}
             </h2>
             <p>
-              Görevi ilgili proje dosyasına bağlayın; gerekiyorsa müşteri ve vade ekleyin.
+              {editingTask?.visitLinked
+                ? "Bu görev bir ziyaret kaydından üretildi. Firma, proje, vade ve durum ziyaret kaydınca korunur; başlık, açıklama ve öncelik düzenlenebilir."
+                : "Görevi ilgili proje dosyasına bağlayın; gerekiyorsa müşteri ve vade ekleyin."}
             </p>
           </div>
           <form onSubmit={submitTask}>
@@ -859,6 +874,7 @@ export function TasksWorkspace({
             <label>
               <span>Proje</span>
               <select
+                disabled={editingTask?.visitLinked === true}
                 value={draft.projectId}
                 onChange={(event) =>
                   updateDraft({ projectId: event.target.value })
@@ -886,6 +902,7 @@ export function TasksWorkspace({
             <label>
               <span>Müşteri</span>
               <select
+                disabled={editingTask?.visitLinked === true}
                 value={draft.customerId}
                 onChange={(event) =>
                   updateDraft({ customerId: event.target.value })
@@ -909,6 +926,7 @@ export function TasksWorkspace({
             <label>
               <span>Vade</span>
               <input
+                disabled={editingTask?.visitLinked === true}
                 max="9999-12-31"
                 min="1000-01-01"
                 type="date"
@@ -934,6 +952,7 @@ export function TasksWorkspace({
             <label>
               <span>Durum</span>
               <select
+                disabled={editingTask?.visitLinked === true}
                 value={draft.status}
                 onChange={(event) =>
                   updateDraft({ status: event.target.value as TaskStatus })

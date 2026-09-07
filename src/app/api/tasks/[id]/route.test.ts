@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => {
   class TaskCustomerProjectMismatchError extends Error {}
   class TaskNotFoundError extends Error {}
   class TaskProjectNotFoundError extends Error {}
+  class TaskVisitLinkedFieldsLockedError extends Error {}
   class TaskVersionConflictError extends Error {}
   return {
     authenticatePrincipalRequest: vi.fn(),
@@ -21,6 +22,7 @@ const mocks = vi.hoisted(() => {
     TaskCustomerProjectMismatchError,
     TaskNotFoundError,
     TaskProjectNotFoundError,
+    TaskVisitLinkedFieldsLockedError,
     TaskVersionConflictError,
     updateTask: vi.fn(),
   };
@@ -32,6 +34,7 @@ vi.mock("@/features/tasks", () => ({
   TaskCustomerProjectMismatchError: mocks.TaskCustomerProjectMismatchError,
   TaskNotFoundError: mocks.TaskNotFoundError,
   TaskProjectNotFoundError: mocks.TaskProjectNotFoundError,
+  TaskVisitLinkedFieldsLockedError: mocks.TaskVisitLinkedFieldsLockedError,
   TaskVersionConflictError: mocks.TaskVersionConflictError,
   updateTask: mocks.updateTask,
   updateTaskInputSchema: { parse: mocks.parseUpdate },
@@ -131,6 +134,19 @@ describe("task item API", () => {
     expect(response.status).toBe(409);
     await expect(response.json()).resolves.toEqual({
       status: "version_conflict",
+    });
+  });
+
+  it("maps a visit-linked invariant change to a stable conflict response", async () => {
+    mocks.updateTask.mockRejectedValue(
+      new mocks.TaskVisitLinkedFieldsLockedError(),
+    );
+
+    const response = await PATCH(request(), context);
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      status: "visit_linked_fields_locked",
     });
   });
 

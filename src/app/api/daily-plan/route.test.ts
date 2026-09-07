@@ -21,8 +21,8 @@ const querySchema = z.object({
 });
 
 const mocks = vi.hoisted(() => ({
+  authenticateAdminRequest: vi.fn(),
   getDailyAgenda: vi.fn(),
-  isAdminAuthenticated: vi.fn(),
   parseQuery: vi.fn(),
   pool: {},
 }));
@@ -33,7 +33,7 @@ vi.mock("@/features/daily-plan", () => ({
 }));
 
 vi.mock("@/platform/auth/server-auth", () => ({
-  isAdminAuthenticated: mocks.isAdminAuthenticated,
+  authenticateAdminRequest: mocks.authenticateAdminRequest,
 }));
 
 vi.mock("@/platform/config/readiness-env", () => ({
@@ -62,6 +62,19 @@ const agenda = {
     },
   ],
   range: { endDate: "2026-09-02", startDate: "2026-09-02" },
+  tasks: [
+    {
+      calendarOn: "2026-09-02",
+      calendarSource: "visit",
+      customerName: "Öncü Üretim",
+      dueOn: "2026-09-05",
+      id: "40000000-0000-4000-8000-000000000001",
+      linkedVisitId: "30000000-0000-4000-8000-000000000001",
+      projectName: "Dönüşüm Programı",
+      status: "todo",
+      title: "Saha gözlemlerini hazırla",
+    },
+  ],
   view: "day",
 };
 
@@ -72,7 +85,10 @@ function request(query = "?date=2026-09-02"): NextRequest {
 describe("daily plan API", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.isAdminAuthenticated.mockResolvedValue(true);
+    mocks.authenticateAdminRequest.mockResolvedValue({
+      permissions: ["daily-plan.read", "tasks.read"],
+      role: "member",
+    });
     mocks.parseQuery.mockImplementation((value: unknown) =>
       querySchema.parse(value),
     );
@@ -89,6 +105,7 @@ describe("daily plan API", () => {
       mocks.pool,
       "2026-09-02",
       "day",
+      true,
     );
   });
 
@@ -106,11 +123,31 @@ describe("daily plan API", () => {
       mocks.pool,
       "2026-09-02",
       "week",
+      true,
+    );
+  });
+
+  it("returns an empty task projection to a daily-plan-only member", async () => {
+    mocks.authenticateAdminRequest.mockResolvedValue({
+      permissions: ["daily-plan.read"],
+      role: "member",
+    });
+    mocks.getDailyAgenda.mockResolvedValue({ ...agenda, tasks: [] });
+
+    const response = await GET(request());
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ tasks: [] });
+    expect(mocks.getDailyAgenda).toHaveBeenCalledWith(
+      mocks.pool,
+      "2026-09-02",
+      "day",
+      false,
     );
   });
 
   it("rejects an unauthenticated request before validation or database access", async () => {
-    mocks.isAdminAuthenticated.mockResolvedValue(false);
+    mocks.authenticateAdminRequest.mockResolvedValue(null);
 
     const response = await GET(request());
 

@@ -31,5 +31,16 @@ describe("module permissions", () => {
     expect(isPermissionCode("customers.lifecycle")).toBe(true);
     expect(isPermissionCode("finance.receivables.reverse")).toBe(true);
     expect(isPermissionCode("audit.read")).toBe(true);
+    expect(isPermissionCode("finance.accounts.read")).toBe(true);
+    expect(isPermissionCode("finance.accounts.write")).toBe(true);
+  });
+
+  it("does not infer sensitive finance-account access for a member", () => {
+    const principal = {
+      permissions: ["finance.expenses.read"] as const,
+      role: "member" as const,
+    };
+    expect(hasPermission(principal, "finance.accounts.read")).toBe(false);
+    expect(hasPermission(principal, "finance.accounts.write")).toBe(false);
   });
 });

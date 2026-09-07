@@ -21,6 +21,7 @@ import {
   type WorkTaskState,
   updateTaskRecord,
 } from "@/features/tasks/repository";
+import { findTaskVisitLinkForUpdate } from "@/features/tasks/visit-repository";
 import {
   type CreateTaskInput,
   createTaskInputSchema,
@@ -71,6 +72,13 @@ export class TaskVersionConflictError extends Error {
   constructor() {
     super("Task was changed by another request.");
     this.name = "TaskVersionConflictError";
+  }
+}
+
+export class TaskVisitLinkedFieldsLockedError extends Error {
+  constructor() {
+    super("Visit-linked task schedule fields are locked.");
+    this.name = "TaskVisitLinkedFieldsLockedError";
   }
 }
 
@@ -150,6 +158,16 @@ export async function createTask(
   rawInput: CreateTaskInput,
   context: TaskWriteContext,
 ): Promise<WorkTask> {
+  return withUtcTransaction(pool, (connection) =>
+    createTaskInTransaction(connection, rawInput, context),
+  );
+}
+
+export async function createTaskInTransaction(
+  connection: PoolConnection,
+  rawInput: CreateTaskInput,
+  context: TaskWriteContext,
+): Promise<WorkTask> {
   const input = createTaskInputSchema.parse(rawInput);
   if (context.actorId !== undefined) assertCanonicalUuid(context.actorId);
   const now = toUtcDateTime6(context.now ?? new Date());
@@ -176,27 +194,25 @@ export async function createTask(
     version: 1,
   };
 
-  return withUtcTransaction(pool, async (connection) => {
-    await assertTaskReferences(
-      connection,
-      task.customerId,
-      task.assigneeUserAccountId,
-      task.projectId,
-    );
-    await insertTaskRecord(connection, task);
-    await replaceTaskProjectRecord(connection, task.id, task.projectId, now);
-    await appendAuditEvent(connection, {
-      action: "task.created",
-      actorId: context.actorId,
-      actorType: "user",
-      afterSummary: auditSummary(task),
-      correlationId: context.correlationId,
-      entityId: task.id,
-      entityType: "work_task",
-      occurredAtUtc: now,
-    });
-    return taskProjection(connection, task.id);
+  await assertTaskReferences(
+    connection,
+    task.customerId,
+    task.assigneeUserAccountId,
+    task.projectId,
+  );
+  await insertTaskRecord(connection, task);
+  await replaceTaskProjectRecord(connection, task.id, task.projectId, now);
+  await appendAuditEvent(connection, {
+    action: "task.created",
+    actorId: context.actorId,
+    actorType: "user",
+    afterSummary: auditSummary(task),
+    correlationId: context.correlationId,
+    entityId: task.id,
+    entityType: "work_task",
+    occurredAtUtc: now,
   });
+  return taskProjection(connection, task.id);
 }
 
 export async function updateTask(
@@ -224,6 +240,24 @@ export async function updateTask(
       version: expectedVersion,
       ...changes
     } = input;
+    const customerChanged =
+      changes.customerId !== undefined &&
+      changes.customerId !== before.customerId;
+    const dueOnChanged =
+      changes.dueOn !== undefined && changes.dueOn !== before.dueOn;
+    const projectChanged =
+      changes.projectId !== undefined && changes.projectId !== before.projectId;
+    const statusChanged =
+      changes.status !== undefined && changes.status !== before.status;
+    // The task row is already locked above. Locking the immutable link in the
+    // same transaction keeps the decision and the fenced update atomic.
+    const visitLink = await findTaskVisitLinkForUpdate(connection, id);
+    if (
+      visitLink !== null &&
+      (customerChanged || dueOnChanged || projectChanged || statusChanged)
+    ) {
+      throw new TaskVisitLinkedFieldsLockedError();
+    }
     const nextStatus = changes.status ?? before.status;
     const after: WorkTaskState = {
       ...before,
@@ -240,9 +274,9 @@ export async function updateTask(
     };
 
     if (
-      changes.customerId !== undefined ||
+      customerChanged ||
       changes.assigneeUserAccountId !== undefined ||
-      changes.projectId !== undefined
+      projectChanged
     ) {
       await assertTaskReferences(
         connection,
@@ -266,7 +300,7 @@ export async function updateTask(
     if (!(await updateTaskRecord(connection, after, expectedVersion))) {
       throw new TaskVersionConflictError();
     }
-    if (changes.projectId !== undefined) {
+    if (projectChanged) {
       await replaceTaskProjectRecord(connection, after.id, after.projectId, now);
     }
     await appendAuditEvent(connection, {

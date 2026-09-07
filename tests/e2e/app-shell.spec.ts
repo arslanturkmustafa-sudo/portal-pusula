@@ -58,7 +58,7 @@ test("protects and renders the accessible customer workbench", async (
 
   await page.goto("/gorevler/rapor");
   await expect(
-    page.getByRole("heading", { level: 1, name: "Önce bir firma seçin" }),
+    page.getByRole("heading", { level: 1, name: "Firma görev raporu" }),
   ).toBeVisible();
   await page.getByRole("link", { name: "Müşteriler" }).click();
   await expect(page).toHaveURL(/\/musteriler$/u);

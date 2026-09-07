@@ -21,6 +21,10 @@ const disposableMariaDbEnabled =
 const repositoryRoot = process.cwd();
 const journalTable = "__drizzle_migrations";
 const knownTablesInDropOrder = [
+  "work_task_visit",
+  "finance_ledger_entry",
+  "finance_transaction",
+  "finance_account",
   "partnership_contribution_receipt",
   "partnership_contribution",
   "partnership_commission",
@@ -472,8 +476,8 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
           },
           sessionRestored: true,
         });
-        expect(await tableNames(pool)).toHaveLength(25);
-        expect(await journalRows(pool)).toHaveLength(16);
+        expect(await tableNames(pool)).toHaveLength(29);
+        expect(await journalRows(pool)).toHaveLength(18);
       } catch (error) {
         reusable = false;
         throw error;
@@ -639,11 +643,11 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
         tablesAfter,
       }).toEqual({
         diagnostics: {
-          application_columns: 282,
-          checks: 134,
-          foreign_keys: 27,
-          indexes: 89,
-          matching_application_tables: 24,
+          application_columns: 316,
+          checks: 152,
+          foreign_keys: 34,
+          indexes: 104,
+          matching_application_tables: 28,
           matching_journal_tables: 1,
           sql_mode: expect.any(String),
         },
@@ -663,6 +667,9 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
           "customer",
           "customer_project",
           "expense",
+          "finance_account",
+          "finance_ledger_entry",
+          "finance_transaction",
           "job_run",
           "login_attempt_throttle",
           "monthly_visit_commitment",
@@ -678,8 +685,9 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
           "user_permission",
           "work_task",
           "work_task_project",
+          "work_task_visit",
         ],
-        journalCount: 16,
+        journalCount: 18,
       });
 
       await expect(
@@ -693,7 +701,7 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
 
       const bundleSchema = await schemaDefinitionSnapshot(pool);
       await expect(runMigration()).resolves.toBeUndefined();
-      expect(await journalRows(pool)).toHaveLength(16);
+      expect(await journalRows(pool)).toHaveLength(18);
       expect(await schemaDefinitionSnapshot(pool)).toEqual(bundleSchema);
 
       await resetKnownTables(pool);

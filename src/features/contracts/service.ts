@@ -2,7 +2,7 @@ import "server-only";
 
 import { randomUUID } from "node:crypto";
 
-import type { Pool } from "mysql2/promise";
+import type { Pool, PoolConnection } from "mysql2/promise";
 
 import {
   findActiveCustomerProjectForUpdate,
@@ -35,8 +35,13 @@ import {
   updateContractInputSchema,
   type UpdateVisitResolutionInput,
   updateVisitResolutionInputSchema,
+  type UpdateVisitWithWorkItemsInput,
+  updateVisitWithWorkItemsInputSchema,
 } from "@/features/contracts/validation";
 import { LifecycleArchivedRecordError } from "@/features/lifecycle";
+import type { WorkTask } from "@/features/tasks/repository";
+import { createTaskInTransaction } from "@/features/tasks/service";
+import { insertTaskVisitRecord } from "@/features/tasks/visit-repository";
 import { appendAuditEvent } from "@/platform/audit/repository";
 import { withUtcTransaction } from "@/platform/jobs/mysql-transaction";
 import { toUtcDateTime6 } from "@/platform/jobs/time";
@@ -130,6 +135,11 @@ export type MonthlyVisitPlan = Readonly<{
   month: string;
   summary: ReturnType<typeof summarizeVisitMonth>;
   visits: readonly MonthlyVisit[];
+}>;
+
+export type MonthlyVisitWorkItemUpdate = Readonly<{
+  tasks: readonly WorkTask[];
+  visit: MonthlyVisit;
 }>;
 
 function isDuplicateEntry(error: unknown): boolean {
@@ -555,6 +565,83 @@ export async function replaceMonthlyVisitPlan(
   });
 }
 
+async function updateMonthlyVisitInTransaction(
+  connection: PoolConnection,
+  customerId: string,
+  contractId: string,
+  visitId: string,
+  input: UpdateVisitResolutionInput,
+  context: ContractWriteContext,
+  now: string,
+): Promise<
+  Readonly<{
+    contract: ConsultingContract;
+    visit: MonthlyVisit;
+  }>
+> {
+  const contract = await findOwnedContractForUpdate(
+    connection,
+    customerId,
+    contractId,
+  );
+  if (!contract) throw new ContractResourceNotFoundError();
+  if (contract.status !== "active") throw new ContractClosedError();
+
+  const before = await findOwnedVisitForUpdate(connection, contractId, visitId);
+  if (!before) throw new ContractResourceNotFoundError();
+  if (
+    before.resolutionStatus === "completed" ||
+    before.resolutionStatus === "cancelled_by_agreement"
+  ) {
+    throw new VisitLockedError();
+  }
+  if (
+    before.resolutionStatus === "makeup_pending" &&
+    input.resolutionStatus === "planned"
+  ) {
+    throw new VisitLockedError();
+  }
+  if (
+    input.deliveredOn !== null &&
+    input.deliveredOn.slice(0, 7) !== before.committedOn.slice(0, 7)
+  ) {
+    throw new MonthOutsideContractError();
+  }
+
+  const after: MonthlyVisit = {
+    ...before,
+    deliveredOn: input.deliveredOn,
+    resolutionNote: input.resolutionNote,
+    resolutionStatus: input.resolutionStatus,
+    updatedAtUtc: now,
+  };
+  await updateVisitRecord(connection, after);
+  await appendAuditEvent(connection, {
+    action: "monthly_visit_commitment.updated",
+    actorId: context.actorId,
+    actorType: "user",
+    afterSummary: visitAuditSummary(after),
+    beforeSummary: visitAuditSummary(before),
+    correlationId: context.correlationId,
+    entityId: visitId,
+    entityType: "monthly_visit_commitment",
+    occurredAtUtc: now,
+  });
+  return { contract, visit: after };
+}
+
+function assertVisitWriteIdentifiers(
+  customerId: string,
+  contractId: string,
+  visitId: string,
+  actorId?: string,
+): void {
+  assertCanonicalUuid(customerId);
+  assertCanonicalUuid(contractId);
+  assertCanonicalUuid(visitId);
+  if (actorId !== undefined) assertCanonicalUuid(actorId);
+}
+
 export async function updateMonthlyVisit(
   pool: Pool,
   customerId: string,
@@ -563,66 +650,83 @@ export async function updateMonthlyVisit(
   rawInput: UpdateVisitResolutionInput,
   context: ContractWriteContext,
 ): Promise<MonthlyVisit> {
-  assertCanonicalUuid(customerId);
-  assertCanonicalUuid(contractId);
-  assertCanonicalUuid(visitId);
-  if (context.actorId !== undefined) assertCanonicalUuid(context.actorId);
+  assertVisitWriteIdentifiers(customerId, contractId, visitId, context.actorId);
   const input = updateVisitResolutionInputSchema.parse(rawInput);
   const now = toUtcDateTime6(context.now ?? new Date());
 
+  return withUtcTransaction(pool, async (connection) =>
+    (
+      await updateMonthlyVisitInTransaction(
+        connection,
+        customerId,
+        contractId,
+        visitId,
+        input,
+        context,
+        now,
+      )
+    ).visit,
+  );
+}
+
+export async function updateMonthlyVisitWithWorkItems(
+  pool: Pool,
+  customerId: string,
+  contractId: string,
+  visitId: string,
+  rawInput: UpdateVisitWithWorkItemsInput,
+  context: ContractWriteContext,
+): Promise<MonthlyVisitWorkItemUpdate> {
+  assertVisitWriteIdentifiers(customerId, contractId, visitId, context.actorId);
+  const input = updateVisitWithWorkItemsInputSchema.parse(rawInput);
+  const operationDate = context.now ?? new Date();
+  const now = toUtcDateTime6(operationDate);
+
   return withUtcTransaction(pool, async (connection) => {
-    const contract = await findOwnedContractForUpdate(
+    const { contract, visit } = await updateMonthlyVisitInTransaction(
       connection,
       customerId,
       contractId,
-    );
-    if (!contract) throw new ContractResourceNotFoundError();
-    if (contract.status !== "active") throw new ContractClosedError();
-
-    const before = await findOwnedVisitForUpdate(
-      connection,
-      contractId,
       visitId,
+      input,
+      context,
+      now,
     );
-    if (!before) throw new ContractResourceNotFoundError();
-    if (
-      before.resolutionStatus === "completed" ||
-      before.resolutionStatus === "cancelled_by_agreement"
-    ) {
-      throw new VisitLockedError();
-    }
-    if (
-      before.resolutionStatus === "makeup_pending" &&
-      input.resolutionStatus === "planned"
-    ) {
-      throw new VisitLockedError();
-    }
-    if (
-      input.deliveredOn !== null &&
-      input.deliveredOn.slice(0, 7) !== before.committedOn.slice(0, 7)
-    ) {
-      throw new MonthOutsideContractError();
+    const tasks: WorkTask[] = [];
+
+    if (input.workItems.length > 0) {
+      if (input.deliveredOn === null) {
+        throw new Error("Visit work items require a delivery date.");
+      }
+      for (const title of input.workItems) {
+        const task = await createTaskInTransaction(
+          connection,
+          {
+            customerId,
+            description: null,
+            dueOn: input.deliveredOn,
+            priority: "normal",
+            projectId: contract.projectId,
+            status: "done",
+            title,
+          },
+          { ...context, now: operationDate },
+        );
+        await insertTaskVisitRecord(connection, task.id, visitId, now);
+        await appendAuditEvent(connection, {
+          action: "work_task.visit_linked",
+          actorId: context.actorId,
+          actorType: "user",
+          afterSummary: { contractId, customerId, visitId },
+          correlationId: context.correlationId,
+          entityId: task.id,
+          entityType: "work_task",
+          occurredAtUtc: now,
+        });
+        tasks.push(task);
+      }
     }
 
-    const after: MonthlyVisit = {
-      ...before,
-      deliveredOn: input.deliveredOn,
-      resolutionNote: input.resolutionNote,
-      resolutionStatus: input.resolutionStatus,
-      updatedAtUtc: now,
-    };
-    await updateVisitRecord(connection, after);
-    await appendAuditEvent(connection, {
-      action: "monthly_visit_commitment.updated",
-      actorId: context.actorId,
-      actorType: "user",
-      afterSummary: visitAuditSummary(after),
-      beforeSummary: visitAuditSummary(before),
-      correlationId: context.correlationId,
-      entityId: visitId,
-      entityType: "monthly_visit_commitment",
-      occurredAtUtc: now,
-    });
-    return after;
+    return { tasks, visit };
   });
 }

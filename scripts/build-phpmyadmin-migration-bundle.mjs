@@ -38,6 +38,8 @@ const CUSTOMER_PROJECTS_PARTNERSHIP_MIGRATION_TAG =
 const USER_PERMISSIONS_MIGRATION_TAG = "0012_user_permissions";
 const RECORD_LIFECYCLE_MIGRATION_TAG = "0014_record_lifecycle";
 const FINANCIAL_REVERSALS_MIGRATION_TAG = "0015_financial_reversals";
+const FINANCE_ACCOUNTS_LEDGER_MIGRATION_TAG =
+  "0016_finance_accounts_ledger";
 
 const managedForwardColumns = new Map([
   ...[
@@ -86,6 +88,7 @@ const managedDroppedChecks = new Set([
   `${FINANCIAL_REVERSALS_MIGRATION_TAG}:partnership_contribution_receipt:chk_partnership_contribution_receipt_identity`,
   `${FINANCIAL_REVERSALS_MIGRATION_TAG}:receivable:chk_receivable_timeline`,
   `${FINANCIAL_REVERSALS_MIGRATION_TAG}:receivable_collection:chk_receivable_collection_identity`,
+  `${FINANCE_ACCOUNTS_LEDGER_MIGRATION_TAG}:user_permission:chk_user_permission_code`,
 ]);
 
 const managedDroppedIndexes = new Map([
@@ -535,7 +538,8 @@ function managedColumnSpec(definition) {
 function parseManagedForwardStatement(statement, migrationTag) {
   if (
     migrationTag !== RECORD_LIFECYCLE_MIGRATION_TAG &&
-    migrationTag !== FINANCIAL_REVERSALS_MIGRATION_TAG
+    migrationTag !== FINANCIAL_REVERSALS_MIGRATION_TAG &&
+    migrationTag !== FINANCE_ACCOUNTS_LEDGER_MIGRATION_TAG
   ) {
     return null;
   }

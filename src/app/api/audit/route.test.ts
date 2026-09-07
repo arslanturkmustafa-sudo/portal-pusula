@@ -16,6 +16,8 @@ vi.mock("@/features/audit-history", () => {
     "consulting_contract",
     "customer",
     "expense",
+    "finance_account",
+    "finance_transaction",
     "partnership_contribution",
     "partnership_contribution_receipt",
     "partnership_commission",
@@ -114,6 +116,17 @@ describe("GET /api/audit", () => {
       new mocks.AuditHistoryForbiddenError(),
     );
     const response = await GET(request());
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({ status: "forbidden" });
+  });
+
+  it("returns a generic 403 for finance audit without finance read access", async () => {
+    mocks.getAuditHistory.mockRejectedValueOnce(
+      new mocks.AuditHistoryForbiddenError(),
+    );
+    const response = await GET(
+      request(`entityType=finance_transaction&entityId=${entityId}`),
+    );
     expect(response.status).toBe(403);
     await expect(response.json()).resolves.toEqual({ status: "forbidden" });
   });

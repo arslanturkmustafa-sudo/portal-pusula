@@ -36,6 +36,7 @@ const migrationTagPattern = /^[0-9]{4}_[A-Za-z0-9][A-Za-z0-9_-]*$/u;
 const safeIdentifier = /^[A-Za-z0-9_]{1,64}$/u;
 const CUSTOMER_PROJECTS_PARTNERSHIP_MIGRATION_TAG =
   "0011_customer_projects_partnership";
+const WORK_TASK_VISIT_MIGRATION_TAG = "0017_work_task_visit";
 
 const allowedAddedColumns = new Map([
   ["consulting_contract:project_id", { columnName: "project_id", tableName: "consulting_contract" }],
@@ -820,6 +821,33 @@ function existingColumnPredicate(tableName, columnName) {
                AND COLUMN_NAME = ${sqlString(columnName)}) = 1`;
 }
 
+function exactCanonicalParentIdPredicate(tableName) {
+  return `(SELECT COUNT(*) FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE()
+               AND TABLE_NAME = ${sqlString(tableName)}
+               AND COLUMN_NAME = 'id'
+               AND DATA_TYPE = 'char'
+               AND COLUMN_TYPE = 'char(36)'
+               AND CHARACTER_MAXIMUM_LENGTH = 36
+               AND CHARACTER_SET_NAME = 'ascii'
+               AND COLLATION_NAME = 'ascii_bin'
+               AND IS_NULLABLE = 'NO'
+               AND (COLUMN_DEFAULT IS NULL OR BINARY COLUMN_DEFAULT = BINARY 'NULL')
+               AND EXTRA = '') = 1`;
+}
+
+function exactSingleColumnPrimaryKeyPredicate(tableName) {
+  return [
+    constraintPredicate(tableName, "PRIMARY", "PRIMARY KEY"),
+    orderedIndexPredicate({
+      columnNames: ["id"],
+      indexName: "PRIMARY",
+      tableName,
+      unique: true,
+    }),
+  ].join(" AND ");
+}
+
 function statementPreflightPredicate(analysis) {
   if (analysis.type === "drop-check") {
     return [
@@ -896,7 +924,7 @@ function statementPreflightPredicate(analysis) {
   ].join(" AND ");
 }
 
-function prerequisitePredicates(statements) {
+function prerequisitePredicates(statements, migrationTag) {
   const createdTables = new Set(
     statements
       .filter((item) => item.analysis.type === "create-table")
@@ -995,6 +1023,13 @@ function prerequisitePredicates(statements) {
       /REFERENCES\s+`([^`]+)`\s*\(\s*`([^`]+)`\s*\)/giu,
     )) {
       requireColumn(match[1], match[2]);
+    }
+  }
+
+  if (migrationTag === WORK_TASK_VISIT_MIGRATION_TAG) {
+    for (const tableName of ["work_task", "monthly_visit_commitment"]) {
+      predicates.add(exactCanonicalParentIdPredicate(tableName));
+      predicates.add(exactSingleColumnPrimaryKeyPredicate(tableName));
     }
   }
 
@@ -1117,7 +1152,7 @@ function buildSql({
     )
     .map((item) => statementAbsentPredicate(item.analysis))
     .join(" AND ");
-  const prerequisites = prerequisitePredicates(statements);
+  const prerequisites = prerequisitePredicates(statements, migration.tag);
   const prefixCheckSql = `SET @pp_step = IF((${exactJournalPrefixPredicate(prefix, migration)}), 1, -1)`;
   const lines = [
     "-- Portal Pusula existing-schema phpMyAdmin incremental migration bundle.",

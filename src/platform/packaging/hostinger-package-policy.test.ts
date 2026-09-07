@@ -214,6 +214,8 @@ describe.sequential("Hostinger package sensitive-file policy", () => {
     expect(entries).toContain("drizzle/0013_login_attempt_throttle.sql");
     expect(entries).toContain("drizzle/0014_record_lifecycle.sql");
     expect(entries).toContain("drizzle/0015_financial_reversals.sql");
+    expect(entries).toContain("drizzle/0016_finance_accounts_ledger.sql");
+    expect(entries).toContain("drizzle/0017_work_task_visit.sql");
     expect(entries).toContain("drizzle/meta/_journal.json");
     expect(entries).toContain("drizzle/meta/0000_snapshot.json");
     expect(entries).toContain("drizzle/meta/0001_snapshot.json");
@@ -225,6 +227,8 @@ describe.sequential("Hostinger package sensitive-file policy", () => {
     expect(entries).toContain("drizzle/meta/0013_snapshot.json");
     expect(entries).toContain("drizzle/meta/0014_snapshot.json");
     expect(entries).toContain("drizzle/meta/0015_snapshot.json");
+    expect(entries).toContain("drizzle/meta/0016_snapshot.json");
+    expect(entries).toContain("drizzle/meta/0017_snapshot.json");
     expect(entries).toContain("public/offline-v1.html");
     expect(entries).toContain("public/brand/muhendis-kafasi-logo.png");
     expect(entries).toContain("public/icons/portal-pusula-192-v1.png");

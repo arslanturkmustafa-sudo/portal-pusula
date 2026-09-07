@@ -54,6 +54,7 @@ function validatePermissionDependencies(
     ["finance.expenses.reverse", "finance.expenses.read"],
     ["finance.expenses.reverse", "finance.expenses.write"],
     ["finance.cards.write", "finance.cards.read"],
+    ["finance.accounts.write", "finance.accounts.read"],
     ["finance.partnership.write", "finance.partnership.read"],
     ["finance.partnership.reverse", "finance.partnership.read"],
     ["finance.partnership.reverse", "finance.partnership.write"],

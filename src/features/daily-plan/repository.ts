@@ -20,6 +20,27 @@ export type DailyAgendaItem = Readonly<{
   visitId: string;
 }>;
 
+export type DailyPlanTaskStatus =
+  | "backlog"
+  | "todo"
+  | "in_progress"
+  | "blocked"
+  | "done";
+
+export type DailyPlanTaskCalendarSource = "visit" | "due_date";
+
+export type DailyPlanTask = Readonly<{
+  calendarOn: string;
+  calendarSource: DailyPlanTaskCalendarSource;
+  customerName: string | null;
+  dueOn: string;
+  id: string;
+  linkedVisitId: string | null;
+  projectName: string | null;
+  status: DailyPlanTaskStatus;
+  title: string;
+}>;
+
 type DailyAgendaRow = RowDataPacket & {
   committed_on: string | Date;
   contract_id: string;
@@ -30,6 +51,18 @@ type DailyAgendaRow = RowDataPacket & {
   internal_planned_at_utc: string | Date | null;
   resolution_status: string;
   visit_id: string;
+};
+
+type DailyPlanTaskRow = RowDataPacket & {
+  calendar_on: string | Date;
+  calendar_source: string;
+  customer_name: string | null;
+  due_on: string | Date;
+  id: string;
+  linked_visit_id: string | null;
+  project_name: string | null;
+  status: string;
+  title: string;
 };
 
 function canonicalDate(value: string | Date): string {
@@ -70,6 +103,50 @@ function mapDailyAgendaItem(row: DailyAgendaRow): DailyAgendaItem {
   };
 }
 
+function dailyPlanTaskStatus(value: string): DailyPlanTaskStatus {
+  if (
+    value !== "backlog" &&
+    value !== "todo" &&
+    value !== "in_progress" &&
+    value !== "blocked" &&
+    value !== "done"
+  ) {
+    throw new Error("Task status is invalid.");
+  }
+  return value;
+}
+
+function dailyPlanTaskCalendarSource(
+  value: string,
+): DailyPlanTaskCalendarSource {
+  if (value !== "visit" && value !== "due_date") {
+    throw new Error("Task calendar source is invalid.");
+  }
+  return value;
+}
+
+function mapDailyPlanTask(row: DailyPlanTaskRow): DailyPlanTask {
+  const calendarSource = dailyPlanTaskCalendarSource(row.calendar_source);
+  if (
+    (calendarSource === "visit" && row.linked_visit_id === null) ||
+    (calendarSource === "due_date" && row.linked_visit_id !== null)
+  ) {
+    throw new Error("Task calendar visit projection is invalid.");
+  }
+
+  return {
+    calendarOn: canonicalDate(row.calendar_on),
+    calendarSource,
+    customerName: row.customer_name,
+    dueOn: canonicalDate(row.due_on),
+    id: row.id,
+    linkedVisitId: row.linked_visit_id,
+    projectName: row.project_name,
+    status: dailyPlanTaskStatus(row.status),
+    title: row.title,
+  };
+}
+
 export async function listDailyAgendaItems(
   connection: PoolConnection,
   startDate: string,
@@ -98,4 +175,72 @@ export async function listDailyAgendaItems(
     [startDate, endDate],
   );
   return rows.map(mapDailyAgendaItem);
+}
+
+export async function listDailyPlanTasks(
+  connection: PoolConnection,
+  startDate: string,
+  endDate: string,
+): Promise<readonly DailyPlanTask[]> {
+  const [rows] = await connection.execute<DailyPlanTaskRow[]>(
+    `SELECT task.id,
+            task.title,
+            task.status,
+            task.due_on,
+            COALESCE(
+              exact_visit.committed_on,
+              mapped_visit.committed_on,
+              task.due_on
+            ) AS calendar_on,
+            CASE
+              WHEN exact_visit.id IS NOT NULL OR mapped_visit.id IS NOT NULL
+                THEN 'visit'
+              ELSE 'due_date'
+            END AS calendar_source,
+            COALESCE(exact_visit.id, mapped_visit.id) AS linked_visit_id,
+            customer.display_name AS customer_name,
+            project.display_name AS project_name
+       FROM work_task AS task
+       LEFT JOIN customer
+              ON customer.id = task.customer_id
+       LEFT JOIN work_task_project AS task_project
+              ON task_project.task_id = task.id
+       LEFT JOIN project
+              ON project.id = task_project.project_id
+       LEFT JOIN work_task_visit AS exact_visit_link
+              ON exact_visit_link.task_id = task.id
+       LEFT JOIN monthly_visit_commitment AS exact_visit
+              ON exact_visit.id = exact_visit_link.visit_id
+       LEFT JOIN monthly_visit_commitment AS mapped_visit
+              ON mapped_visit.id = (
+                SELECT candidate_visit.id
+                  FROM monthly_visit_commitment AS candidate_visit
+                  INNER JOIN consulting_contract AS candidate_contract
+                          ON candidate_contract.id = candidate_visit.contract_id
+                 WHERE candidate_contract.customer_id = task.customer_id
+                   AND candidate_visit.resolution_status = 'planned'
+                   AND candidate_visit.committed_on <= task.due_on
+                 ORDER BY candidate_visit.committed_on DESC,
+                          candidate_visit.internal_planned_at_utc DESC,
+                          candidate_visit.id DESC
+                 LIMIT 1
+              )
+      WHERE task.archived_at_utc IS NULL
+        AND task.due_on IS NOT NULL
+        AND (
+          task.status IN ('backlog', 'todo', 'in_progress', 'blocked')
+          OR (task.status = 'done' AND exact_visit_link.task_id IS NOT NULL)
+        )
+        AND COALESCE(
+              exact_visit.committed_on,
+              mapped_visit.committed_on,
+              task.due_on
+            ) BETWEEN ? AND ?
+      ORDER BY calendar_on ASC,
+               FIELD(task.status, 'in_progress', 'blocked', 'todo', 'backlog', 'done'),
+               task.due_on ASC,
+               task.id ASC`,
+    [startDate, endDate],
+  );
+  return rows.map(mapDailyPlanTask);
 }

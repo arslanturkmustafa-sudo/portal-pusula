@@ -17,6 +17,10 @@ const migrationTag = "0013_login_attempt_throttle";
 const journalTable = "__drizzle_migrations";
 const validBucketKey = "a".repeat(64);
 const dropOrder = [
+  "work_task_visit",
+  "finance_ledger_entry",
+  "finance_transaction",
+  "finance_account",
   "login_attempt_throttle",
   "partnership_contribution_receipt",
   "partnership_contribution",

@@ -9,6 +9,7 @@ import {
   TaskCustomerProjectMismatchError,
   TaskNotFoundError,
   TaskProjectNotFoundError,
+  TaskVisitLinkedFieldsLockedError,
   TaskVersionConflictError,
   updateTask,
   updateTaskInputSchema,
@@ -150,6 +151,9 @@ export async function PATCH(
     }
     if (error instanceof TaskCustomerProjectMismatchError) {
       return json({ status: "customer_project_mismatch" }, 409);
+    }
+    if (error instanceof TaskVisitLinkedFieldsLockedError) {
+      return json({ status: "visit_linked_fields_locked" }, 409);
     }
     if (error instanceof TaskVersionConflictError) {
       return json({ status: "version_conflict" }, 409);

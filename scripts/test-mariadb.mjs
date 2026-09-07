@@ -199,7 +199,7 @@ try {
     publishedPort,
   );
 
-  console.log("Running 0013 through 0015 lifecycle and financial incremental migrations...");
+  console.log("Running 0013 through 0017 lifecycle, finance-account, and task-visit incremental migrations...");
   await runIntegrationFile(
     "mariadb-phpmyadmin-current-incremental.test.ts",
     publishedPort,
@@ -213,6 +213,9 @@ try {
 
   console.log("Running durable login-throttle behavior tests...");
   await runIntegrationFile("mariadb-login-throttle.test.ts", publishedPort);
+
+  console.log("Running finance-account ledger reconciliation tests...");
+  await runIntegrationFile("mariadb-finance-accounts.test.ts", publishedPort);
 
   // These suites intentionally share the same disposable database and mutate
   // the same platform tables, so they must remain separate, serial processes.

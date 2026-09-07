@@ -158,7 +158,7 @@ describe("DailyPlanWorkspace", () => {
 
     render(<DailyPlanWorkspace />);
     expect(
-      await screen.findByText("Bu dönem için planlanmış ziyaret bulunmuyor."),
+      await screen.findByText("Bu dönem için planlanmış ziyaret veya görev bulunmuyor."),
     ).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Sonraki gün" }));
@@ -235,6 +235,19 @@ describe("DailyPlanWorkspace", () => {
             },
           ],
           range: weeklyRange,
+          tasks: [
+            {
+              calendarOn: "2026-09-03",
+              calendarSource: "due_date",
+              customerName: "Vega Endüstri",
+              dueOn: "2026-09-03",
+              id: "task-week-1",
+              linkedVisitId: null,
+              projectName: "Danışmanlık",
+              status: "in_progress",
+              title: "Teklif revizyonunu bitir",
+            },
+          ],
           view,
         });
       }
@@ -255,6 +268,19 @@ describe("DailyPlanWorkspace", () => {
             },
           ],
           range: { endDate: "2026-09-30", startDate: "2026-09-01" },
+          tasks: [
+            {
+              calendarOn: "2026-09-04",
+              calendarSource: "visit",
+              customerName: "Vega Endüstri",
+              dueOn: "2026-09-18",
+              id: "task-1",
+              linkedVisitId: "visit-2",
+              projectName: "Danışmanlık",
+              status: "todo",
+              title: "Ziyaret raporunu gönder",
+            },
+          ],
           view,
         });
       }
@@ -264,7 +290,7 @@ describe("DailyPlanWorkspace", () => {
     const user = userEvent.setup();
 
     render(<DailyPlanWorkspace />);
-    await screen.findByText("Bu dönem için planlanmış ziyaret bulunmuyor.");
+    await screen.findByText("Bu dönem için planlanmış ziyaret veya görev bulunmuyor.");
     fireEvent.change(screen.getByLabelText("Plan tarihi"), {
       target: { value: anchor },
     });
@@ -288,7 +314,17 @@ describe("DailyPlanWorkspace", () => {
       "Vega Endüstri",
     );
     expect(screen.getByLabelText("Dönem özeti")).toHaveTextContent("2 ziyaret");
-    expect(screen.getByLabelText("Dönem özeti")).toHaveTextContent("2 planlı gün");
+    expect(screen.getByLabelText("Dönem özeti")).toHaveTextContent("3 planlı gün");
+    expect(screen.getByLabelText("Dönem özeti")).toHaveTextContent("1 görev");
+    const taskOnlyDay = screen.getByRole("region", {
+      name: /3 Eylül 2026 Perşembe/u,
+    });
+    const taskList = within(taskOnlyDay).getByRole("region", { name: "Görevler" });
+    expect(taskList).toHaveTextContent("Teklif revizyonunu bitir");
+    expect(taskList).toHaveTextContent("Vega Endüstri · Danışmanlık");
+    expect(taskList).toHaveTextContent("Devam ediyor");
+    expect(taskList).toHaveTextContent("Vade: 3 Eyl 2026");
+    expect(taskList).toHaveTextContent("Vade günü");
 
     await user.click(screen.getByRole("button", { name: "Aylık" }));
     expect(await screen.findByRole("heading", { name: "Aylık plan" })).toBeInTheDocument();
@@ -296,6 +332,17 @@ describe("DailyPlanWorkspace", () => {
       `/api/daily-plan?date=${anchor}&view=month`,
       expect.any(Object),
     );
+    const monthTable = await screen.findByRole("table", {
+      name: "Eylül 2026 plan takvimi",
+    });
+    expect(within(monthTable).getAllByRole("columnheader")).toHaveLength(7);
+    const visitDay = within(monthTable).getByRole("cell", {
+      name: /4 Eylül 2026 Cuma, 1 ziyaret, 1 görev/u,
+    });
+    expect(visitDay).toHaveTextContent("Vega Endüstri");
+    expect(visitDay).toHaveTextContent("Ziyaret raporunu gönder");
+    expect(visitDay).toHaveTextContent("Ziyarete bağlı");
+    expect(screen.getByLabelText("Dönem özeti")).toHaveTextContent("1 görev");
   });
 
   it("completes a planned visit in place when the account has visit write access", async () => {
@@ -311,23 +358,34 @@ describe("DailyPlanWorkspace", () => {
       resolutionStatus: "planned",
       visitId: "visit-1",
     } as const;
+    let completed = false;
     const fetchMock = vi.fn<typeof fetch>(async (_input, init) => {
       if (init?.method === "PATCH") {
+        completed = true;
         return jsonResponse({
+          tasks: [],
           visit: { id: visit.visitId, resolutionStatus: "completed" },
         });
       }
-      return jsonResponse({ date: today, items: [visit] });
+      return jsonResponse({
+        date: today,
+        items: [
+          completed ? { ...visit, resolutionStatus: "completed" } : visit,
+        ],
+      });
     });
     vi.stubGlobal("fetch", fetchMock);
     const user = userEvent.setup();
 
-    render(<DailyPlanWorkspace canWriteVisits />);
+    render(<DailyPlanWorkspace canWriteTasks canWriteVisits />);
     await user.click(
       await screen.findByRole("button", {
         name: /Atlas Makina.*ziyaretini tamamla/u,
       }),
     );
+    expect(
+      screen.getByRole("group", { name: "Tamamlanan çalışmalar" }),
+    ).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Tamamla ve kaydet" }));
 
     expect(
@@ -340,6 +398,7 @@ describe("DailyPlanWorkspace", () => {
           deliveredOn: today,
           resolutionNote: null,
           resolutionStatus: "completed",
+          workItems: [],
         }),
         credentials: "same-origin",
         method: "PATCH",
@@ -350,8 +409,11 @@ describe("DailyPlanWorkspace", () => {
       screen.queryByRole("button", { name: /ziyaretini tamamla/u }),
     ).not.toBeInTheDocument();
     expect(screen.getByLabelText("Dönem özeti")).toHaveTextContent(
-      "1 tamamlandı",
+      "1 tamamlanan ziyaret",
     );
+    expect(
+      fetchMock.mock.calls.filter(([, options]) => options?.method !== "PATCH"),
+    ).toHaveLength(2);
     await waitFor(() => {
       expect(screen.getByText("ATLAS").closest("article")).toHaveFocus();
     });
@@ -382,7 +444,7 @@ describe("DailyPlanWorkspace", () => {
 
     await user.click(screen.getByRole("button", { name: "Yeniden dene" }));
     expect(
-      await screen.findByText("Bu dönem için planlanmış ziyaret bulunmuyor."),
+      await screen.findByText("Bu dönem için planlanmış ziyaret veya görev bulunmuyor."),
     ).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });

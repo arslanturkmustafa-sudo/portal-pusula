@@ -2,7 +2,7 @@
 
 ## Amaç ve güven modeli
 
-Bu belge mevcut platform altyapısının tehdit sınırını kaydeder. Portal Pusula DB tabanlı owner/member hesapları, scrypt parola doğrulama, imzalı 8 saatlik oturum, 35 kodlu allowlist izin defteri ve DB tabanlı kalıcı giriş sınırlaması uygular; ilk owner mevcut environment kimliğinden tek seferlik güvenli geçişle oluşturulabilir. Parola değişikliği veya hesabı devre dışı bırakma kimlik bilgisi sürümünü artırarak eski oturumları geçersiz kılar. Sayfalar proxy/server katmanında, iş API'leri ise yeniden oturum ve izin kontrolüyle korunur. Organization/workspace çoklu-tenant izolasyonu ve parola kurtarma henüz yoktur.
+Bu belge mevcut platform altyapısının tehdit sınırını kaydeder. Portal Pusula DB tabanlı owner/member hesapları, scrypt parola doğrulama, imzalı 8 saatlik oturum, 37 kodlu allowlist izin defteri ve DB tabanlı kalıcı giriş sınırlaması uygular; ilk owner mevcut environment kimliğinden tek seferlik güvenli geçişle oluşturulabilir. Parola değişikliği veya hesabı devre dışı bırakma kimlik bilgisi sürümünü artırarak eski oturumları geçersiz kılar. Sayfalar proxy/server katmanında, iş API'leri ise yeniden oturum ve izin kontrolüyle korunur. Organization/workspace çoklu-tenant izolasyonu ve parola kurtarma henüz yoktur.
 
 Finansal gizlilik yalnız istemci görünürlüğüne bırakılmaz. Müşteri liste sorgusu izinsiz billing/contact/visit kolonlarını DB seçiminde keser; sözleşme API'si aylık ücret, KDV ve ödeme gününü `contracts.billing.read` olmadan döndürmez; finans modülleri kendi read/write izinlerini ister. Ayrıntı [erişim kontrolü belgesindedir](./access-control.md).
 
@@ -11,9 +11,11 @@ Finansal gizlilik yalnız istemci görünürlüğüne bırakılmaz. Müşteri li
 - Müşteri, sözleşme, proje ve görev ana kayıtlarında normal kullanıcı işlemi hard-delete yapmaz. Arşivleme gerekçe, zaman ve aktörle kaydedilir; restore aynı kaydı yeni version ile etkinleştirir. Lifecycle yazmaları ilgili `.lifecycle` iznini ve optimistic version eşleşmesini ister.
 - Gider ve alacak düzeltmesi özgün kaydı silmez; kayıt gerekçeli `voided` duruma geçirilir. Tahsilat ile ortaklık katkı tahsilatı düzeltmesi özgün satırı değiştirmez; aynı tutarlı, özgün kayda bağlı ve tekil yeni `reversal` satırı ekler. Reversal forward-only'dir: özgün kayıt başına en fazla bir ters kayıt vardır ve ters kayıt yeniden ters çevrilemez.
 - Finansal düzeltmeler modüle özel `.reverse` izni, zorunlu gerekçe, idempotency anahtarı veya optimistic version ve aynı transaction içindeki audit iziyle korunur. Permission veya lifecycle kontrolünün yalnız UI'da bulunması yeterli değildir; API aynı sınırı yeniden uygular.
+- Kasa/banka hesap defteri `finance.accounts.read` ve `finance.accounts.write` sınırlarını ayrı uygular. Gelir, gider ve transfer immutable işlem/ledger satırlarıyla kaydedilir; düzeltme özgün satırı silmeden veya yerinde değiştirmeden ileri yönlü ters kayıt üretir. Transferin iki hesabı ve iki ledger tarafı aynı transaction içinde dengelenir.
+- Günlük plan görev projeksiyonu `tasks.read`, ziyaret okuması `visits.read` ister. Ziyaret tamamlama sırasında yeni iş maddesi oluşturmak görev yazmasıdır ve ayrıca `tasks.write` olmadan kabul edilmez; yalnız istemcide buton gizlemek yetkilendirme sayılmaz.
 - İşlem geçmişi `audit.read` ile birlikte ilgili varlığın okuma iznini ister. Özetler strict alan allowlist'iyle redakte edilir; sözleşme ücret/KDV/ödeme günü `contracts.billing.read` olmadan geçmiş yanıtına da girmez. Parola, token, connection string ve bilinmeyen/nested alanlar audit history yanıtına taşınmaz.
 
-Bu politikaların kaynakta bulunması `0014_record_lifecycle` veya `0015_financial_reversals` migration'larının canlıya uygulandığı anlamına gelmez. Canlı journal exact `0013` seviyesindeyse zorunlu DB-first sıra `0013` → `0014` → `0015`tir. İki yeni adımın hedefe bağlı üretim/kontrol runbook'u kaynakta bulunsa da canlı artefakt, import ve postflight kanıtı henüz alınmadığından canlı başarı durumu `UNKNOWN` kalır.
+`0014_record_lifecycle` ve `0015_financial_reversals` tarihsel güvenlik temelidir. Güncel change window'un ön kabulü canlı journal'ın exact `0015` seviyesinde olması, ardından araya uygulama deploy edilmeden `0016_finance_accounts_ledger` → `0017_work_task_visit` uygulanmasıdır. Bu politikaların ve [hedefe bağlı runbook'un](./phpmyadmin-finance-calendar-incremental.md) kaynakta bulunması canlı artefakt, import, postflight veya deploy kanıtı değildir; bu kanıtlar alınana kadar canlı durum `UNKNOWN` kalır.
 
 Korunan varlıklar server-side environment secret'ları, DB erişimi, migration bütünlüğü, job/outbox/audit kayıtları, iç endpoint'lerin varlık/çalışma ayrıntıları ve gelecekteki iş verisidir. Hostinger paneli, public internet/CDN, Node runtime, MariaDB, cron scheduler ve geliştirici çalışma alanı ayrı güven sınırlarıdır.
 
@@ -63,7 +65,7 @@ Token karşılaştırması exact sözleşme ve sabit uzunluklu digest üzerinde 
 
 - Readiness SQL'i sabit `SELECT 1`'dir; kullanıcı girdisi SQL veya identifier belirlemez.
 - Bağlantı havuzları küçüktür; queue, connect/query ve toplam deadline sınırları vardır.
-- Migration journal sırası ve SHA-256 bütünlüğü her koşuda fail-closed doğrulanır; uygulanan SQL değiştirilmez. Clean kaynak zinciri 16 migration ve 16 journal kaydıdır.
+- Migration journal sırası ve SHA-256 bütünlüğü her koşuda fail-closed doğrulanır; uygulanan SQL değiştirilmez. Clean kaynak zinciri 18 migration, 18 journal kaydı ve journal dışında 28 uygulama tablosudur.
 - Giriş denemesi sınırlaması DB tabanlı hesap/global bucket'larda transaction ve satır kilidi kullanır; limiter erişilemez veya kayıt invariant'ı bozuksa auth fail-closed kalır.
 - Migration ve cron advisory lock adları DB adını açığa çıkarmayan hash'ten türetilir.
 - Job claim/finalize conditional update, affected-row kontrolü ve lease-token fencing kullanır.
@@ -102,15 +104,16 @@ Correlation ID iz sürme içindir; secret veya güvenlik kararı içermez. Canl�
 | --- | --- | --- |
 | Hostinger cron method/header/secret saklama yeteneği | UNKNOWN | Secretsız canlı yetenek deneyi ve exact header kanıtı |
 | Scheduler retry/overlap/timezone ve güvenli çağrı sıklığı | UNKNOWN | Kontrollü canlı ölçüm; dayanıklı kapı davranışıyla birlikte değerlendirme |
-| Güncel migration/ZIP | UNKNOWN | Onaylı change window, backup/restore; exact `0013` → `0014` → `0015` DB-first migration ve smoke kanıtı |
+| Güncel migration/ZIP | UNKNOWN | Onaylı change window, backup/restore; exact `0015` → `0016` → `0017` DB-first migration ve smoke kanıtı |
 | Plan-geneli backup kapsamı | PANEL PASS | Portal Pusula spike DB özel yedekte doğrulandı; gerçek tanımlayıcılar redakte |
 | Boş readiness kaynağının restore doğruluğu | PASS | İkinci disposable hedef; import hatasız, 0 tablo ve journal yok |
 | Komut 3C şema/journal/veri restore doğruluğu | UNKNOWN | Toplam yedi tablo (altı teknik + journal), dört journal satırı ve kontrollü veri için ayrı tatbikat |
 | Şifreli yerel kopya ve ciphertext checksum | PASS — yerel custody | Aynı makine/kullanıcı bağımlılığını giderecek escrow/off-site prosedürü |
 | Secret-safe application rollback | BLOCKED | Secret göstermeyen ayrı staging/geri dönüş prosedürü |
 | Manuel dead-letter/requeue ve production adapter | Yok | Ayrı auth, audit, idempotency ve operasyon tasarımı |
-| Owner/member hesap ve 35 kodlu modül RBAC | Kaynakta mevcut; canlı UNKNOWN | `0012` + izin allowlist'ini genişleten `0014`, kullanıcı/alan redaksiyonu smoke ve owner koruma kanıtı |
-| Hard-delete'siz lifecycle ve finansal ters kayıt | Kaynakta mevcut; canlı UNKNOWN | Exact `0014`/`0015` incremental runbook'ları, 16 journal postflight, lifecycle/reversal/audit smoke kanıtı |
+| Owner/member hesap ve 37 kodlu modül RBAC | Kaynakta mevcut; canlı UNKNOWN | Tarihsel `0012`/`0014` temeli + `0016`daki iki hesap izni; kullanıcı/alan redaksiyonu smoke ve owner koruma kanıtı |
+| Hard-delete'siz lifecycle ve finansal ters kayıt | Kaynakta mevcut; canlı UNKNOWN | Exact `0014`/`0015` tarihsel zinciri ile `0016` hesap-ledger ters kayıtları; final 18 journal, lifecycle/reversal/audit smoke kanıtı |
+| Görev–ziyaret ilişkisinde çift modül yetkisi | Kaynakta mevcut; canlı UNKNOWN | `0017` postflight; `tasks.read` projeksiyonu ve iş maddesinde `tasks.write` reddi için canlı smoke kanıtı |
 | Organization/workspace izolasyonu | Yok | Çoklu-tenant gereksinimi doğarsa ayrı şema ve tehdit modeli |
 | Kalıcı login brute-force/rate limit | Kaynakta DB tabanlı hesap/global sınır mevcut; canlı UNKNOWN | `0013` migration, 5/15 dk hesap ve 100/15 dk global davranışının generic 303/no-store ile canlı smoke kanıtı |
 

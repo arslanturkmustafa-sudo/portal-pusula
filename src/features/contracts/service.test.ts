@@ -13,8 +13,12 @@ const mocks = vi.hoisted(() => ({
   findCustomerForUpdate: vi.fn(),
   findOverlappingContract: vi.fn(),
   findOwnedContractForUpdate: vi.fn(),
+  findOwnedVisitForUpdate: vi.fn(),
   insertContractRecord: vi.fn(),
+  insertTaskVisitRecord: vi.fn(),
+  createTaskInTransaction: vi.fn(),
   updateContractRecord: vi.fn(),
+  updateVisitRecord: vi.fn(),
 }));
 
 vi.mock("@/features/customers/repository", () => ({
@@ -28,13 +32,21 @@ vi.mock("@/features/contracts/repository", () => ({
   deletePlannedMonthVisits: vi.fn(),
   findOverlappingContract: mocks.findOverlappingContract,
   findOwnedContractForUpdate: mocks.findOwnedContractForUpdate,
-  findOwnedVisitForUpdate: vi.fn(),
+  findOwnedVisitForUpdate: mocks.findOwnedVisitForUpdate,
   insertContractRecord: mocks.insertContractRecord,
   insertVisitRecords: vi.fn(),
   listContractRecords: vi.fn(),
   listMonthVisitRecords: vi.fn(),
   updateContractRecord: mocks.updateContractRecord,
-  updateVisitRecord: vi.fn(),
+  updateVisitRecord: mocks.updateVisitRecord,
+}));
+
+vi.mock("@/features/tasks/service", () => ({
+  createTaskInTransaction: mocks.createTaskInTransaction,
+}));
+
+vi.mock("@/features/tasks/visit-repository", () => ({
+  insertTaskVisitRecord: mocks.insertTaskVisitRecord,
 }));
 
 vi.mock("@/platform/audit/repository", () => ({
@@ -54,6 +66,7 @@ import {
   ContractProjectUnavailableError,
   ContractVisitRangeConflictError,
   createCustomerContract,
+  updateMonthlyVisitWithWorkItems,
   updateCustomerContract,
 } from "@/features/contracts/service";
 
@@ -61,6 +74,7 @@ const customerId = "10000000-0000-4000-8000-000000000001";
 const contractId = "20000000-0000-4000-8000-000000000001";
 const projectId = "30000000-0000-4000-8000-000000000001";
 const otherProjectId = "30000000-0000-4000-8000-000000000002";
+const visitId = "40000000-0000-4000-8000-000000000001";
 const before = {
   archiveReason: null,
   archivedAtUtc: null,
@@ -98,6 +112,18 @@ const context = {
   correlationId: "contract-edit-test",
   now: new Date("2026-09-01T12:00:00.000Z"),
 };
+const plannedVisit = {
+  committedOn: "2026-09-03",
+  contractId,
+  createdAtUtc: "2026-09-01 09:00:00.000000",
+  deliveredOn: null,
+  id: visitId,
+  internalDurationMinutes: 120,
+  internalPlannedAtUtc: "2026-09-03 06:00:00.000000",
+  resolutionNote: null,
+  resolutionStatus: "planned" as const,
+  updatedAtUtc: "2026-09-01 09:00:00.000000",
+};
 
 describe("contract write service", () => {
   beforeEach(() => {
@@ -107,6 +133,7 @@ describe("contract write service", () => {
       status: "active",
     });
     mocks.findOwnedContractForUpdate.mockResolvedValue(before);
+    mocks.findOwnedVisitForUpdate.mockResolvedValue(plannedVisit);
     mocks.findActiveCustomerProjectForUpdate.mockResolvedValue({
       customerId,
       projectId,
@@ -115,6 +142,123 @@ describe("contract write service", () => {
     mocks.contractHasReceivable.mockResolvedValue(false);
     mocks.contractHasVisitOutsideRange.mockResolvedValue(false);
     mocks.updateContractRecord.mockResolvedValue(true);
+    mocks.updateVisitRecord.mockResolvedValue(undefined);
+  });
+
+  it("completes a visit and links each work item as a done customer-project task", async () => {
+    const tasks = [
+      {
+        id: "50000000-0000-4000-8000-000000000001",
+        status: "done",
+        title: "Süreç akışı çıkarıldı",
+      },
+      {
+        id: "50000000-0000-4000-8000-000000000002",
+        status: "done",
+        title: "Riskler paylaşıldı",
+      },
+    ];
+    mocks.createTaskInTransaction
+      .mockResolvedValueOnce(tasks[0])
+      .mockResolvedValueOnce(tasks[1]);
+
+    const result = await updateMonthlyVisitWithWorkItems(
+      {} as Pool,
+      customerId,
+      contractId,
+      visitId,
+      {
+        deliveredOn: "2026-09-03",
+        resolutionNote: "Saha çalışması tamamlandı",
+        resolutionStatus: "completed",
+        workItems: ["Süreç akışı çıkarıldı", "Riskler paylaşıldı"],
+      },
+      context,
+    );
+
+    expect(result).toEqual({
+      tasks,
+      visit: expect.objectContaining({
+        deliveredOn: "2026-09-03",
+        resolutionStatus: "completed",
+      }),
+    });
+    expect(mocks.updateVisitRecord).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        deliveredOn: "2026-09-03",
+        id: visitId,
+        resolutionStatus: "completed",
+      }),
+    );
+    expect(mocks.createTaskInTransaction).toHaveBeenCalledTimes(2);
+    expect(mocks.createTaskInTransaction).toHaveBeenNthCalledWith(
+      1,
+      expect.anything(),
+      {
+        customerId,
+        description: null,
+        dueOn: "2026-09-03",
+        priority: "normal",
+        projectId,
+        status: "done",
+        title: "Süreç akışı çıkarıldı",
+      },
+      expect.objectContaining({
+        actorId: context.actorId,
+        correlationId: context.correlationId,
+        now: context.now,
+      }),
+    );
+    expect(mocks.insertTaskVisitRecord.mock.calls).toEqual([
+      [
+        expect.anything(),
+        tasks[0].id,
+        visitId,
+        "2026-09-01 12:00:00.000000",
+      ],
+      [
+        expect.anything(),
+        tasks[1].id,
+        visitId,
+        "2026-09-01 12:00:00.000000",
+      ],
+    ]);
+    expect(mocks.appendAuditEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        action: "work_task.visit_linked",
+        afterSummary: { contractId, customerId, visitId },
+        entityId: tasks[0].id,
+      }),
+    );
+    const sharedConnection = mocks.updateVisitRecord.mock.calls[0]?.[0];
+    expect(mocks.createTaskInTransaction.mock.calls[0]?.[0]).toBe(
+      sharedConnection,
+    );
+    expect(mocks.insertTaskVisitRecord.mock.calls[0]?.[0]).toBe(
+      sharedConnection,
+    );
+  });
+
+  it("rejects completed work items without a delivery date before a transaction", async () => {
+    await expect(
+      updateMonthlyVisitWithWorkItems(
+        {} as Pool,
+        customerId,
+        contractId,
+        visitId,
+        {
+          deliveredOn: null,
+          resolutionNote: null,
+          resolutionStatus: "completed",
+          workItems: ["Tamamlanan çalışma"],
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({ name: "ZodError" });
+    expect(mocks.updateVisitRecord).not.toHaveBeenCalled();
+    expect(mocks.createTaskInTransaction).not.toHaveBeenCalled();
   });
 
   it("updates the owned contract transactionally and appends before/after audit", async () => {

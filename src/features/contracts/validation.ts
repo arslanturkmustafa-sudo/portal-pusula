@@ -1,6 +1,11 @@
 import Decimal from "decimal.js";
 import { z } from "zod";
 
+import {
+  MAX_VISIT_WORK_ITEM_LENGTH,
+  MAX_VISIT_WORK_ITEMS,
+} from "@/features/contracts/visit-work-items";
+
 const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/u;
 const MONTH_PATTERN = /^\d{4}-\d{2}$/u;
 const CLOCK_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d$/u;
@@ -221,6 +226,49 @@ export const updateVisitResolutionInputSchema = z
     }
   });
 
+const visitWorkItemsSchema = z
+  .array(z.string().trim().max(MAX_VISIT_WORK_ITEM_LENGTH))
+  .max(MAX_VISIT_WORK_ITEMS)
+  .transform((items) => items.filter((item) => item.length > 0));
+
+export const updateVisitWithWorkItemsInputSchema = z
+  .object({
+    deliveredOn: z.union([isoDateSchema, z.null()]).default(null),
+    resolutionNote: optionalNoteSchema,
+    resolutionStatus: visitResolutionStatusSchema,
+    workItems: visitWorkItemsSchema.default([]),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (
+      (value.resolutionStatus === "completed") !==
+      (value.deliveredOn !== null)
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Tamamlanan ziyaretin gerçekleşme günü zorunludur.",
+        path: ["deliveredOn"],
+      });
+    }
+    if (
+      value.resolutionStatus === "cancelled_by_agreement" &&
+      value.resolutionNote === null
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Mutabakatla iptal için açıklama zorunludur.",
+        path: ["resolutionNote"],
+      });
+    }
+    if (value.resolutionStatus !== "completed" && value.workItems.length > 0) {
+      context.addIssue({
+        code: "custom",
+        message: "Çalışma maddeleri yalnız tamamlanan ziyarete eklenebilir.",
+        path: ["workItems"],
+      });
+    }
+  });
+
 export type CreateContractInput = z.infer<typeof createContractInputSchema>;
 export type UpdateContractInput = z.infer<typeof updateContractInputSchema>;
 export type MonthlyVisitPlanInput = z.infer<
@@ -228,4 +276,7 @@ export type MonthlyVisitPlanInput = z.infer<
 >;
 export type UpdateVisitResolutionInput = z.infer<
   typeof updateVisitResolutionInputSchema
+>;
+export type UpdateVisitWithWorkItemsInput = z.infer<
+  typeof updateVisitWithWorkItemsInputSchema
 >;

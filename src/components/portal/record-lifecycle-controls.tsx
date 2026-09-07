@@ -62,6 +62,8 @@ type RecordLifecycleControlsProps = Readonly<{
     | "consulting_contract"
     | "customer"
     | "expense"
+    | "finance_account"
+    | "finance_transaction"
     | "partnership_contribution"
     | "partnership_contribution_receipt"
     | "partnership_commission"
@@ -89,6 +91,11 @@ const auditActionLabels: Readonly<Record<string, string>> = {
   "expense.created": "Gider oluşturuldu",
   "expense.updated": "Gider güncellendi",
   "expense.voided": "Gider geçersiz kılındı",
+  "finance_account.created": "Finans hesabı oluşturuldu",
+  "finance_account.deactivated": "Finans hesabı pasife alındı",
+  "finance_account.updated": "Finans hesabı güncellendi",
+  "finance_transaction.created": "Hesap hareketi oluşturuldu",
+  "finance_transaction.reversed": "Hesap hareketi ters kaydedildi",
   "partnership_contribution.receipt_added": "Ortaklık tahsilatı eklendi",
   "partnership_contribution.receipt_reversed": "Ortaklık tahsilatı ters kaydedildi",
   "project.archived": "Proje arşivlendi",
@@ -113,9 +120,12 @@ const auditKeyLabels: Readonly<Record<string, string>> = {
   completedAtUtc: "Tamamlanma zamanı",
   description: "Açıklama",
   displayName: "Ad",
+  accountType: "Hesap türü",
   dueOn: "Vade",
   endsOn: "Bitiş",
   incurredOn: "Harcama tarihi",
+  openingBalanceAmount: "Açılış bakiyesi",
+  occurredOn: "İşlem tarihi",
   monthlyFeeAmount: "Aylık ücret",
   outstandingAmount: "Kalan tutar",
   originalCollectionId: "Özgün tahsilat",
@@ -125,10 +135,15 @@ const auditKeyLabels: Readonly<Record<string, string>> = {
   recordState: "Kayıt durumu",
   reason: "Gerekçe",
   reversalOfId: "Terslenen kayıt",
+  reversalId: "Ters kayıt",
+  reversalReason: "Ters kayıt gerekçesi",
+  sourceAccountId: "Kaynak hesap",
   startsOn: "Başlangıç",
   status: "Durum",
   title: "Başlık",
   totalAmount: "Toplam",
+  targetAccountId: "Hedef hesap",
+  transactionType: "Hareket türü",
   version: "Sürüm",
   voidReason: "Geçersiz kılma gerekçesi",
 };

@@ -75,6 +75,11 @@ export {
   type WorkTaskRecord,
 } from "./work-task";
 export {
+  workTaskVisit,
+  type NewWorkTaskVisitRecord,
+  type WorkTaskVisitRecord,
+} from "./work-task-visit";
+export {
   project,
   workTaskProject,
   type NewProjectRecord,
@@ -104,3 +109,14 @@ export {
   type PartnershipContributionRecord,
   type PartnershipContributionReceiptRecord,
 } from "./partnership-finance";
+export {
+  financeAccount,
+  financeLedgerEntry,
+  financeTransaction,
+  type FinanceAccountRecord,
+  type FinanceLedgerEntryRecord,
+  type FinanceTransactionRecord,
+  type NewFinanceAccountRecord,
+  type NewFinanceLedgerEntryRecord,
+  type NewFinanceTransactionRecord,
+} from "./finance-account";

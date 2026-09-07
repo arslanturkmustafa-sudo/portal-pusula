@@ -5,6 +5,7 @@ import {
   monthlyVisitPlanInputSchema,
   updateContractInputSchema,
   updateVisitResolutionInputSchema,
+  updateVisitWithWorkItemsInputSchema,
 } from "@/features/contracts/validation";
 
 const projectId = "30000000-0000-4000-8000-000000000001";
@@ -168,6 +169,49 @@ describe("monthly visit validation", () => {
         deliveredOn: null,
         resolutionNote: null,
         resolutionStatus: "cancelled_by_agreement",
+      }).success,
+    ).toBe(false);
+  });
+
+  it("normalizes non-empty visit work items and ignores blank rows", () => {
+    const result = updateVisitWithWorkItemsInputSchema.parse({
+      deliveredOn: "2026-09-03",
+      resolutionNote: null,
+      resolutionStatus: "completed",
+      workItems: ["  Süreç akışı çıkarıldı  ", "", "   ", "Riskler paylaşıldı"],
+    });
+
+    expect(result.workItems).toEqual([
+      "Süreç akışı çıkarıldı",
+      "Riskler paylaşıldı",
+    ]);
+  });
+
+  it("only accepts bounded work items for a completed visit", () => {
+    const base = {
+      deliveredOn: "2026-09-03",
+      resolutionNote: null,
+      resolutionStatus: "completed" as const,
+    };
+
+    expect(
+      updateVisitWithWorkItemsInputSchema.safeParse({
+        ...base,
+        workItems: Array.from({ length: 21 }, () => "Çalışma"),
+      }).success,
+    ).toBe(false);
+    expect(
+      updateVisitWithWorkItemsInputSchema.safeParse({
+        ...base,
+        workItems: ["x".repeat(192)],
+      }).success,
+    ).toBe(false);
+    expect(
+      updateVisitWithWorkItemsInputSchema.safeParse({
+        deliveredOn: null,
+        resolutionNote: "Sonraki ziyarete taşındı",
+        resolutionStatus: "makeup_pending",
+        workItems: ["Tamamlanan çalışma"],
       }).success,
     ).toBe(false);
   });

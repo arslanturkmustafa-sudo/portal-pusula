@@ -16,6 +16,8 @@ describe("FinanceSubnavigation", () => {
 
     expect(within(navigation).getByRole("link", { name: "Alacaklar" }))
       .toHaveAttribute("href", "/finans");
+    expect(within(navigation).getByRole("link", { name: "Kasa ve bankalar" }))
+      .toHaveAttribute("href", "/finans/hesaplar");
     expect(within(navigation).getByRole("link", { name: "Giderler" }))
       .toHaveAttribute("href", "/finans/giderler");
     expect(

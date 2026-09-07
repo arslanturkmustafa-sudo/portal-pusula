@@ -21,6 +21,9 @@ export default async function DailyPlanPage() {
         title="Günlük plan"
       />
       <DailyPlanWorkspace
+        canWriteTasks={
+          principal !== null && hasPermission(principal, "tasks.write")
+        }
         canWriteVisits={
           principal !== null && hasPermission(principal, "visits.write")
         }

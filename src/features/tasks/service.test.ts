@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   findProjectForUpdate: vi.fn(),
   findTaskRecordById: vi.fn(),
   findTaskStateForUpdate: vi.fn(),
+  findTaskVisitLinkForUpdate: vi.fn(),
   findUserAccountById: vi.fn(),
   insertTaskRecord: vi.fn(),
   listTaskRecords: vi.fn(),
@@ -37,6 +38,9 @@ vi.mock("@/features/tasks/repository", () => ({
   replaceTaskProjectRecord: mocks.replaceTaskProjectRecord,
   updateTaskRecord: mocks.updateTaskRecord,
 }));
+vi.mock("@/features/tasks/visit-repository", () => ({
+  findTaskVisitLinkForUpdate: mocks.findTaskVisitLinkForUpdate,
+}));
 vi.mock("@/platform/audit/repository", () => ({
   appendAuditEvent: mocks.appendAuditEvent,
 }));
@@ -49,8 +53,10 @@ vi.mock("@/platform/jobs/mysql-transaction", () => ({
 
 import {
   createTask,
+  createTaskInTransaction,
   TaskAssigneeNotFoundError,
   TaskCustomerProjectMismatchError,
+  TaskVisitLinkedFieldsLockedError,
   TaskVersionConflictError,
   updateTask,
 } from "@/features/tasks/service";
@@ -112,6 +118,7 @@ describe("task service", () => {
     });
     mocks.findTaskRecordById.mockResolvedValue(projection);
     mocks.findTaskStateForUpdate.mockResolvedValue(before);
+    mocks.findTaskVisitLinkForUpdate.mockResolvedValue(null);
     mocks.updateTaskRecord.mockResolvedValue(true);
   });
 
@@ -175,6 +182,39 @@ describe("task service", () => {
     expect(mocks.findUserAccountById).not.toHaveBeenCalled();
   });
 
+  it("supports composing task creation inside an existing transaction", async () => {
+    const connection = { transaction: "visit-completion" };
+
+    await createTaskInTransaction(
+      connection as never,
+      {
+        customerId,
+        description: null,
+        dueOn: "2026-09-03",
+        priority: "normal",
+        projectId: null,
+        status: "done",
+        title: "Ziyaret çalışma maddesi",
+      },
+      context,
+    );
+
+    expect(mocks.insertTaskRecord).toHaveBeenCalledWith(
+      connection,
+      expect.objectContaining({
+        completedAtUtc: nowSql,
+        dueOn: "2026-09-03",
+        status: "done",
+      }),
+    );
+    expect(mocks.replaceTaskProjectRecord).toHaveBeenCalledWith(
+      connection,
+      expect.any(String),
+      null,
+      nowSql,
+    );
+  });
+
   it("sets completion time and increments the optimistic version", async () => {
     await updateTask(
       {} as Pool,
@@ -201,6 +241,80 @@ describe("task service", () => {
       }),
     );
   });
+
+  it("keeps safe fields editable when the task is linked to a visit", async () => {
+    mocks.findTaskVisitLinkForUpdate.mockResolvedValue({
+      taskId,
+      visitId: "40000000-0000-4000-8000-000000000001",
+    });
+
+    await updateTask(
+      {} as Pool,
+      taskId,
+      {
+        customerId,
+        description: "Güncellenen açıklama",
+        dueOn: before.dueOn,
+        priority: "high",
+        projectId: null,
+        status: before.status,
+        title: "Güncellenen başlık",
+        version: 4,
+      },
+      context,
+    );
+
+    const transactionConnection = mocks.findTaskStateForUpdate.mock.calls[0]?.[0];
+    expect(mocks.findTaskVisitLinkForUpdate).toHaveBeenCalledWith(
+      transactionConnection,
+      taskId,
+    );
+    expect(
+      mocks.findTaskStateForUpdate.mock.invocationCallOrder[0],
+    ).toBeLessThan(mocks.findTaskVisitLinkForUpdate.mock.invocationCallOrder[0]!);
+    expect(mocks.updateTaskRecord).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        customerId,
+        description: "Güncellenen açıklama",
+        dueOn: before.dueOn,
+        priority: "high",
+        projectId: null,
+        status: before.status,
+        title: "Güncellenen başlık",
+      }),
+      4,
+    );
+    expect(mocks.findCustomerForUpdate).not.toHaveBeenCalled();
+    expect(mocks.replaceTaskProjectRecord).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["customerId", null],
+    ["projectId", "40000000-0000-4000-8000-000000000001"],
+    ["dueOn", "2026-09-06"],
+    ["status", "done"],
+  ] as const)(
+    "rejects a linked task %s change before mutation or audit",
+    async (field, value) => {
+      mocks.findTaskVisitLinkForUpdate.mockResolvedValue({
+        taskId,
+        visitId: "40000000-0000-4000-8000-000000000001",
+      });
+
+      await expect(
+        updateTask(
+          {} as Pool,
+          taskId,
+          { [field]: value, version: 4 },
+          context,
+        ),
+      ).rejects.toBeInstanceOf(TaskVisitLinkedFieldsLockedError);
+      expect(mocks.updateTaskRecord).not.toHaveBeenCalled();
+      expect(mocks.replaceTaskProjectRecord).not.toHaveBeenCalled();
+      expect(mocks.appendAuditEvent).not.toHaveBeenCalled();
+    },
+  );
 
   it("clears completion time when a completed task is reopened", async () => {
     mocks.findTaskStateForUpdate.mockResolvedValue({

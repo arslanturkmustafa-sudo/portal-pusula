@@ -20,6 +20,10 @@ const memberId = "10000000-0000-4000-8000-000000000002";
 const validPasswordHash =
   "scrypt:32768:8:1:AAAAAAAAAAAAAAAAAAAAAA:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 const dropOrder = [
+  "work_task_visit",
+  "finance_ledger_entry",
+  "finance_transaction",
+  "finance_account",
   "partnership_contribution_receipt",
   "partnership_contribution",
   "partnership_commission",

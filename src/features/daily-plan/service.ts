@@ -5,6 +5,8 @@ import type { Pool } from "mysql2/promise";
 import {
   type DailyAgendaItem,
   listDailyAgendaItems,
+  listDailyPlanTasks,
+  type DailyPlanTask,
 } from "@/features/daily-plan/repository";
 import {
   dailyPlanDateSchema,
@@ -24,6 +26,7 @@ export type DailyAgenda = Readonly<{
   date: string;
   items: readonly DailyAgendaItem[];
   range: DailyAgendaRange;
+  tasks: readonly DailyPlanTask[];
   view: DailyPlanView;
 }>;
 
@@ -110,17 +113,19 @@ export function dailyAgendaRange(
 export async function getDailyAgenda(
   pool: Pool,
   rawDate: unknown,
-  rawView: unknown = "day",
+  rawView: unknown,
+  includeTasks: boolean,
 ): Promise<DailyAgenda> {
   const { date, range, view } = dailyAgendaRange(rawDate, rawView);
-  return withUtcTransaction(pool, async (connection) => ({
-    date,
-    items: await listDailyAgendaItems(
+  return withUtcTransaction(pool, async (connection) => {
+    const items = await listDailyAgendaItems(
       connection,
       range.startDate,
       range.endDate,
-    ),
-    range,
-    view,
-  }));
+    );
+    const tasks = includeTasks
+      ? await listDailyPlanTasks(connection, range.startDate, range.endDate)
+      : [];
+    return { date, items, range, tasks, view };
+  });
 }

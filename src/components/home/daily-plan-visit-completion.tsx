@@ -12,6 +12,7 @@ import {
 import { redirectToPortalLogin as redirectToLogin } from "@/platform/navigation/portal-return-path";
 
 import styles from "./daily-plan-visit-completion.module.css";
+import { VisitWorkItemsEditor } from "./visit-work-items-editor";
 
 type SaveState = "idle" | "saving";
 
@@ -33,6 +34,7 @@ type CompletionTarget = Readonly<{
 }>;
 
 type DailyPlanVisitCompletionProps = Readonly<{
+  canWriteTasks?: boolean;
   onCompleted: (visitId: string) => void;
   target: CompletionTarget;
 }>;
@@ -89,6 +91,7 @@ function trapTab(event: KeyboardEvent<HTMLDivElement>, container: HTMLDivElement
 }
 
 export function DailyPlanVisitCompletion({
+  canWriteTasks = false,
   onCompleted,
   target,
 }: DailyPlanVisitCompletionProps) {
@@ -100,6 +103,7 @@ export function DailyPlanVisitCompletion({
   const [open, setOpen] = useState(false);
   const [deliveredOn, setDeliveredOn] = useState(target.committedOn);
   const [note, setNote] = useState("");
+  const [workItems, setWorkItems] = useState<string[]>([""]);
   const [error, setError] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const bounds = monthBounds(target.committedOn);
@@ -118,6 +122,7 @@ export function DailyPlanVisitCompletion({
   function openDialog() {
     setDeliveredOn(target.committedOn);
     setNote("");
+    setWorkItems([""]);
     setError(null);
     setSaveState("idle");
     setOpen(true);
@@ -152,6 +157,7 @@ export function DailyPlanVisitCompletion({
             deliveredOn,
             resolutionNote: note.trim() === "" ? null : note.trim(),
             resolutionStatus: "completed",
+            workItems: workItems.map((item) => item.trim()).filter(Boolean),
           }),
           credentials: "same-origin",
           headers: { "Content-Type": "application/json" },
@@ -266,6 +272,13 @@ export function DailyPlanVisitCompletion({
                   onChange={(event) => setNote(event.target.value)}
                 />
               </label>
+              {canWriteTasks ? (
+                <VisitWorkItemsEditor
+                  disabled={saveState === "saving"}
+                  items={workItems}
+                  onChange={setWorkItems}
+                />
+              ) : null}
 
               {error ? (
                 <p className={styles.error} role="alert">

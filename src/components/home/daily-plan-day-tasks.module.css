@@ -1,0 +1,130 @@
+.root {
+  margin-top: 1.7rem;
+}
+
+.sectionHeading {
+  min-height: 58px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-bottom: 0.7rem;
+  border-bottom: 1px solid var(--ink);
+}
+
+.sectionHeading p,
+.sectionHeading h4 {
+  margin: 0;
+}
+
+.sectionHeading p,
+.sectionHeading > span {
+  color: var(--ink-soft);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.58rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.sectionHeading h4 {
+  margin-top: 0.18rem;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.08rem;
+  font-weight: 500;
+}
+
+.list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.item {
+  min-width: 0;
+  padding: 0.9rem 0.85rem 0.95rem;
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--sheet-soft) 45%, var(--sheet));
+}
+
+.item[data-status="done"],
+.item[data-status="cancelled"] {
+  opacity: 0.68;
+}
+
+.itemHeading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.itemHeading strong {
+  min-width: 0;
+  color: var(--ink);
+  font-size: 0.76rem;
+  line-height: 1.4;
+}
+
+.status,
+.source {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  font-size: 0.56rem;
+  font-weight: 750;
+  line-height: 1.25;
+}
+
+.status {
+  padding: 0.22rem 0.44rem;
+  background: var(--sheet);
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+
+.context {
+  margin: 0.45rem 0 0;
+  color: var(--ink-soft);
+  font-size: 0.64rem;
+  line-height: 1.45;
+}
+
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem 0.7rem;
+  margin: 0.65rem 0 0;
+  color: var(--ink-soft);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.56rem;
+}
+
+.source {
+  padding: 0.2rem 0.42rem;
+  background: color-mix(in srgb, var(--forest) 10%, var(--sheet));
+  color: var(--forest);
+  font-family: inherit;
+}
+
+@media (max-width: 620px) {
+  .list {
+    grid-template-columns: 1fr;
+  }
+
+  .item {
+    padding-right: 0;
+    padding-left: 0;
+    border-right: 0;
+    background: transparent;
+  }
+
+  .itemHeading {
+    gap: 0.5rem;
+  }
+}

@@ -35,7 +35,13 @@ describe("DailyPlanVisitCompletion", () => {
     const onCompleted = vi.fn();
     const user = userEvent.setup();
 
-    render(<DailyPlanVisitCompletion onCompleted={onCompleted} target={target} />);
+    render(
+      <DailyPlanVisitCompletion
+        canWriteTasks
+        onCompleted={onCompleted}
+        target={target}
+      />,
+    );
     await user.click(
       screen.getByRole("button", {
         name: /Atlas Makina.*ziyaretini tamamla/u,
@@ -46,6 +52,15 @@ describe("DailyPlanVisitCompletion", () => {
     expect(screen.getByLabelText("Gerçekleşen gün")).toHaveValue("2026-09-05");
     await user.clear(screen.getByLabelText(/Not/u));
     await user.type(screen.getByLabelText(/Not/u), "Saha görüşmesi tamamlandı.");
+    await user.type(
+      screen.getByRole("textbox", { name: "Çalışma 1" }),
+      "Süreç akışı çıkarıldı",
+    );
+    await user.click(screen.getByRole("button", { name: "+ Çalışma ekle" }));
+    await user.type(
+      screen.getByRole("textbox", { name: "Çalışma 2" }),
+      "Riskler paylaşıldı",
+    );
     fireEvent.submit(screen.getByRole("button", { name: "Tamamla ve kaydet" }).closest("form")!);
 
     await waitFor(() => expect(onCompleted).toHaveBeenCalledWith("visit-1"));
@@ -56,6 +71,7 @@ describe("DailyPlanVisitCompletion", () => {
           deliveredOn: "2026-09-05",
           resolutionNote: "Saha görüşmesi tamamlandı.",
           resolutionStatus: "completed",
+          workItems: ["Süreç akışı çıkarıldı", "Riskler paylaşıldı"],
         }),
         credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
@@ -64,6 +80,66 @@ describe("DailyPlanVisitCompletion", () => {
       }),
     );
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("ignores blank work item rows in the completion payload", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      jsonResponse({
+        tasks: [],
+        visit: { id: target.visitId, resolutionStatus: "completed" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+
+    render(
+      <DailyPlanVisitCompletion
+        canWriteTasks
+        onCompleted={vi.fn()}
+        target={target}
+      />,
+    );
+    await user.click(
+      screen.getByRole("button", {
+        name: /Atlas Makina.*ziyaretini tamamla/u,
+      }),
+    );
+    await user.click(screen.getByRole("button", { name: "+ Çalışma ekle" }));
+    await user.type(
+      screen.getByRole("textbox", { name: "Çalışma 2" }),
+      "   Tamamlanan analiz   ",
+    );
+    await user.click(screen.getByRole("button", { name: "Tamamla ve kaydet" }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    const options = fetchMock.mock.calls[0]?.[1];
+    expect(JSON.parse(String(options?.body))).toMatchObject({
+      workItems: ["Tamamlanan analiz"],
+    });
+  });
+
+  it("does not expose work item controls without task write permission", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>().mockResolvedValue(
+        jsonResponse({
+          tasks: [],
+          visit: { id: target.visitId, resolutionStatus: "completed" },
+        }),
+      ),
+    );
+    const user = userEvent.setup();
+
+    render(<DailyPlanVisitCompletion onCompleted={vi.fn()} target={target} />);
+    await user.click(
+      screen.getByRole("button", {
+        name: /Atlas Makina.*ziyaretini tamamla/u,
+      }),
+    );
+
+    expect(
+      screen.queryByRole("group", { name: "Tamamlanan çalışmalar" }),
+    ).not.toBeInTheDocument();
   });
 
   it("keeps the dialog open and explains a locked visit", async () => {

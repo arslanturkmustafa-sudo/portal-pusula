@@ -49,6 +49,18 @@ describe("audit history service", () => {
     expect(mocks.listAuditHistoryRows).not.toHaveBeenCalled();
   });
 
+  it("rejects finance history for an audit reader without finance-account access", async () => {
+    await expect(
+      getAuditHistory(
+        {} as never,
+        "finance_transaction",
+        "10000000-0000-4000-8000-000000000001",
+        member(["audit.read"]),
+      ),
+    ).rejects.toBeInstanceOf(AuditHistoryForbiddenError);
+    expect(mocks.listAuditHistoryRows).not.toHaveBeenCalled();
+  });
+
   it("drops unknown, nested and secret-shaped values from summaries", () => {
     const result = redactAuditSummary(
       "customer",
@@ -118,6 +130,35 @@ describe("audit history service", () => {
       originalCollectionId: "50000000-0000-4000-8000-000000000001",
       reason: "Hatalı tahsilat",
     });
+  });
+
+  it("returns a minimal finance transaction summary without internal operation data", () => {
+    const result = redactAuditSummary(
+      "finance_transaction",
+      {
+        amount: "125.0000",
+        clientOperationKey: "redact-operation-key",
+        createdAtUtc: "2026-09-07 09:00:00.000000",
+        description: "Kasa aktarımı",
+        occurredOn: "2026-09-07",
+        reversalReason: "Mükerrer kayıt",
+        sourceAccountId: "20000000-0000-4000-8000-000000000001",
+        targetAccountId: "20000000-0000-4000-8000-000000000002",
+        transactionType: "transfer",
+      },
+      member(["audit.read", "finance.accounts.read"]),
+    );
+    expect(result).toEqual({
+      amount: "125.0000",
+      description: "Kasa aktarımı",
+      occurredOn: "2026-09-07",
+      reversalReason: "Mükerrer kayıt",
+      sourceAccountId: "20000000-0000-4000-8000-000000000001",
+      targetAccountId: "20000000-0000-4000-8000-000000000002",
+      transactionType: "transfer",
+    });
+    expect(JSON.stringify(result)).not.toContain("redact-operation-key");
+    expect(result).not.toHaveProperty("createdAtUtc");
   });
 
   it("maps actor labels and redacts every row before returning it", async () => {

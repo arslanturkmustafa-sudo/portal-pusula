@@ -1,0 +1,2 @@
+export const MAX_VISIT_WORK_ITEMS = 20;
+export const MAX_VISIT_WORK_ITEM_LENGTH = 191;

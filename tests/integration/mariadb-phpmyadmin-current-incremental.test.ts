@@ -19,9 +19,18 @@ const repositoryRoot = process.cwd();
 const journalTable = "__drizzle_migrations";
 const lifecycleTag = "0014_record_lifecycle";
 const reversalTag = "0015_financial_reversals";
+const financeAccountsTag = "0016_finance_accounts_ledger";
+const workTaskVisitTag = "0017_work_task_visit";
 const successResult = "PORTAL_PUSULA_INCREMENTAL_MIGRATION_OK";
+const financePermissionMemberId = "10000000-0000-4000-8000-000000000016";
+const validPasswordHash =
+  "scrypt:32768:8:1:AAAAAAAAAAAAAAAAAAAAAA:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
 const dropOrder = [
+  "work_task_visit",
+  "finance_ledger_entry",
+  "finance_transaction",
+  "finance_account",
   "login_attempt_throttle",
   "partnership_contribution_receipt",
   "partnership_contribution",
@@ -86,6 +95,23 @@ const reversalIndexes = [
   "idx_receivable_state_due",
   "uq_partnership_contribution_receipt_reversal",
   "uq_receivable_collection_reversal",
+] as const;
+
+const financeAccountConstraints = [
+  "chk_finance_account_identity",
+  "chk_finance_ledger_entry_amount",
+  "chk_finance_transaction_shape",
+  "fk_finance_ledger_entry_account",
+  "fk_finance_ledger_entry_transaction",
+  "fk_finance_transaction_reversal",
+  "fk_finance_transaction_source_account",
+  "fk_finance_transaction_target_account",
+] as const;
+
+const workTaskVisitConstraints = [
+  "chk_work_task_visit_identity",
+  "fk_work_task_visit_task",
+  "fk_work_task_visit_visit",
 ] as const;
 
 interface ExpectedMigration {
@@ -356,7 +382,7 @@ function rowByKey(
 }
 
 describe.skipIf(!enabled).sequential(
-  "0013 through 0015 target-bound phpMyAdmin incrementals on real MariaDB",
+  "0013 through 0017 target-bound phpMyAdmin incrementals on real MariaDB",
   () => {
     let pool: Pool;
     let outputDirectory = "";
@@ -395,14 +421,18 @@ describe.skipIf(!enabled).sequential(
       }
     });
 
-    it("advances journal 14 to 16, installs exact contracts, and rejects replay or a wrong prefix", async () => {
+    it("advances journal 14 to 18, installs exact contracts, and rejects replay or a wrong prefix", async () => {
       const migrations = await readExpectedMigrations(
         path.join(repositoryRoot, "drizzle"),
       );
       const lifecycle = migrations[14];
       const reversal = migrations[15];
+      const financeAccounts = migrations[16];
+      const workTaskVisit = migrations[17];
       expect(lifecycle?.sqlFileName).toBe(`${lifecycleTag}.sql`);
       expect(reversal?.sqlFileName).toBe(`${reversalTag}.sql`);
+      expect(financeAccounts?.sqlFileName).toBe(`${financeAccountsTag}.sql`);
+      expect(workTaskVisit?.sqlFileName).toBe(`${workTaskVisitTag}.sql`);
 
       const [identityRows] = await pool.query<DatabaseIdentityRow[]>(
         "SELECT DATABASE() AS database_name, VERSION() AS server_version",
@@ -427,12 +457,28 @@ describe.skipIf(!enabled).sequential(
         ...buildOptions,
         migrationTag: reversalTag,
       });
+      const financeAccountsSummary = await buildIncremental({
+        ...buildOptions,
+        migrationTag: financeAccountsTag,
+      });
+      const workTaskVisitSummary = await buildIncremental({
+        ...buildOptions,
+        migrationTag: workTaskVisitTag,
+      });
       const lifecycleSql = await readFile(
         path.resolve(repositoryRoot, lifecycleSummary.sqlPath),
         "utf8",
       );
       const reversalSql = await readFile(
         path.resolve(repositoryRoot, reversalSummary.sqlPath),
+        "utf8",
+      );
+      const financeAccountsSql = await readFile(
+        path.resolve(repositoryRoot, financeAccountsSummary.sqlPath),
+        "utf8",
+      );
+      const workTaskVisitSql = await readFile(
+        path.resolve(repositoryRoot, workTaskVisitSummary.sqlPath),
         "utf8",
       );
 
@@ -583,12 +629,88 @@ describe.skipIf(!enabled).sequential(
         },
       ]);
 
-      const completedSnapshot = await contractSnapshot(pool);
-      await expect(executeIncremental(pool, reversalSql)).resolves.toEqual({
+      await pool.execute(
+        `INSERT INTO user_account
+          (id, email, display_name, password_hash, password_changed_at_utc,
+           created_at_utc, updated_at_utc)
+         VALUES (?, 'finance-member@example.test', 'Finans Üyesi', ?,
+                 '2026-09-07 09:00:00.000000',
+                 '2026-09-07 09:00:00.000000',
+                 '2026-09-07 09:00:00.000000')`,
+        [financePermissionMemberId, validPasswordHash],
+      );
+      await pool.execute(
+        `INSERT INTO user_permission (user_account_id, permission_code)
+         VALUES (?, 'tasks.read')`,
+        [financePermissionMemberId],
+      );
+
+      await expect(
+        executeIncremental(pool, financeAccountsSql, true),
+      ).resolves.toEqual({
+        errors: 0,
+        results: [{ migrationTag: financeAccountsTag, result: successResult }],
+      });
+      const journal17 = await journalRows(pool);
+      expect(journal17).toHaveLength(17);
+      expect(journal17.at(-1)).toEqual({
+        created_at: financeAccounts?.createdAt,
+        hash: financeAccounts?.hash,
+        id: 17,
+      });
+      expect(
+        await namedConstraints(pool, financeAccountConstraints),
+      ).toHaveLength(financeAccountConstraints.length);
+      await pool.execute(
+        `INSERT INTO user_permission (user_account_id, permission_code)
+         VALUES (?, 'finance.accounts.read'),
+                (?, 'finance.accounts.write')`,
+        [financePermissionMemberId, financePermissionMemberId],
+      );
+      const [permissionRows] = await pool.query<RowDataPacket[]>(
+        `SELECT permission_code
+           FROM user_permission
+          WHERE user_account_id = ?
+          ORDER BY BINARY permission_code`,
+        [financePermissionMemberId],
+      );
+      expect(permissionRows.map((row) => row.permission_code)).toEqual([
+        "finance.accounts.read",
+        "finance.accounts.write",
+        "tasks.read",
+      ]);
+
+      await expect(
+        executeIncremental(pool, workTaskVisitSql, true),
+      ).resolves.toEqual({
+        errors: 0,
+        results: [{ migrationTag: workTaskVisitTag, result: successResult }],
+      });
+      const journal18 = await journalRows(pool);
+      expect(journal18).toHaveLength(18);
+      expect(journal18.at(-1)).toEqual({
+        created_at: workTaskVisit?.createdAt,
+        hash: workTaskVisit?.hash,
+        id: 18,
+      });
+      expect(
+        await namedConstraints(pool, workTaskVisitConstraints),
+      ).toHaveLength(workTaskVisitConstraints.length);
+
+      const completedSnapshot = {
+        contract: await contractSnapshot(pool),
+        finance: await namedConstraints(pool, financeAccountConstraints),
+        taskVisit: await namedConstraints(pool, workTaskVisitConstraints),
+      };
+      await expect(executeIncremental(pool, workTaskVisitSql)).resolves.toEqual({
         errors: 1,
         results: [],
       });
-      expect(await contractSnapshot(pool)).toEqual(completedSnapshot);
+      expect({
+        contract: await contractSnapshot(pool),
+        finance: await namedConstraints(pool, financeAccountConstraints),
+        taskVisit: await namedConstraints(pool, workTaskVisitConstraints),
+      }).toEqual(completedSnapshot);
 
       await seedJournalPrefix(pool, migrations, 14);
       await pool.execute(
@@ -605,6 +727,81 @@ describe.skipIf(!enabled).sequential(
       expect(await journalRows(pool)).toEqual(wrongPrefixJournal);
       expect(await targetColumns(pool)).toHaveLength(0);
       expect(await contractSnapshot(pool)).toEqual(wrongPrefixSnapshot);
-    }, 90_000);
+    }, 120_000);
+
+    it("rejects 0017 parent identity and key drift before creating its table", async () => {
+      const migrations = await readExpectedMigrations(
+        path.join(repositoryRoot, "drizzle"),
+      );
+      const workTaskVisit = migrations[17];
+      expect(workTaskVisit?.sqlFileName).toBe(`${workTaskVisitTag}.sql`);
+
+      const [identityRows] = await pool.query<DatabaseIdentityRow[]>(
+        "SELECT DATABASE() AS database_name, VERSION() AS server_version",
+      );
+      const identity = identityRows[0];
+      if (!identity) throw new Error("Disposable MariaDB identity is missing.");
+      const summary = await buildIncremental({
+        migrationTag: workTaskVisitTag,
+        outputDirectory,
+        projectRoot: repositoryRoot,
+        serverVersionSha256: createHash("sha256")
+          .update(identity.server_version, "utf8")
+          .digest("hex"),
+        targetDatabaseSha256: createHash("sha256")
+          .update(identity.database_name, "utf8")
+          .digest("hex"),
+      });
+      const sql = await readFile(
+        path.resolve(repositoryRoot, summary.sqlPath),
+        "utf8",
+      );
+
+      await seedJournalPrefix(pool, migrations, 17);
+      await pool.query(
+        "ALTER TABLE `work_task_project` DROP FOREIGN KEY `fk_work_task_project_task`",
+      );
+      await pool.query(
+        "ALTER TABLE `work_task` MODIFY `id` char(36) CHARACTER SET ascii COLLATE ascii_general_ci NOT NULL",
+      );
+      await pool.query(
+        "ALTER TABLE `monthly_visit_commitment` DROP PRIMARY KEY",
+      );
+
+      const journalBefore = await journalRows(pool);
+      const [targetBefore] = await pool.query<RowDataPacket[]>(
+        `SELECT COUNT(*) AS target_count
+           FROM information_schema.TABLES
+          WHERE TABLE_SCHEMA = DATABASE()
+            AND TABLE_NAME = 'work_task_visit'`,
+      );
+      const [triggersBefore] = await pool.query<RowDataPacket[]>(
+        `SELECT COUNT(*) AS trigger_count
+           FROM information_schema.TRIGGERS
+          WHERE TRIGGER_SCHEMA = DATABASE()`,
+      );
+      expect(Number(targetBefore[0]?.target_count)).toBe(0);
+      expect(Number(triggersBefore[0]?.trigger_count)).toBe(0);
+
+      await expect(executeIncremental(pool, sql)).resolves.toEqual({
+        errors: 1,
+        results: [],
+      });
+
+      const [targetAfter] = await pool.query<RowDataPacket[]>(
+        `SELECT COUNT(*) AS target_count
+           FROM information_schema.TABLES
+          WHERE TABLE_SCHEMA = DATABASE()
+            AND TABLE_NAME = 'work_task_visit'`,
+      );
+      const [triggersAfter] = await pool.query<RowDataPacket[]>(
+        `SELECT COUNT(*) AS trigger_count
+           FROM information_schema.TRIGGERS
+          WHERE TRIGGER_SCHEMA = DATABASE()`,
+      );
+      expect(await journalRows(pool)).toEqual(journalBefore);
+      expect(Number(targetAfter[0]?.target_count)).toBe(0);
+      expect(Number(triggersAfter[0]?.trigger_count)).toBe(0);
+    }, 120_000);
   },
 );

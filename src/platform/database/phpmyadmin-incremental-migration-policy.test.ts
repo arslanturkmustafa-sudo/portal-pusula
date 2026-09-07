@@ -60,6 +60,8 @@ const customerProjectsPartnershipMigrationTag =
 const userPermissionsMigrationTag = "0012_user_permissions";
 const recordLifecycleMigrationTag = "0014_record_lifecycle";
 const financialReversalsMigrationTag = "0015_financial_reversals";
+const financeAccountsLedgerMigrationTag = "0016_finance_accounts_ledger";
+const workTaskVisitMigrationTag = "0017_work_task_visit";
 const incremental0011Backfills = untyped0011Backfills as {
   consultingContract: string;
   customerProject: string;
@@ -434,6 +436,28 @@ describe.sequential("phpMyAdmin incremental migration bundle policy", () => {
       },
       statementCount: 26,
     },
+    {
+      expectedJournalCount: 16,
+      expectedPreviousTag: financialReversalsMigrationTag,
+      migrationTag: financeAccountsLedgerMigrationTag,
+      requiredTarget: {
+        name: "finance_account",
+        tableName: "finance_account",
+        type: "create-table",
+      },
+      statementCount: 15,
+    },
+    {
+      expectedJournalCount: 17,
+      expectedPreviousTag: financeAccountsLedgerMigrationTag,
+      migrationTag: workTaskVisitMigrationTag,
+      requiredTarget: {
+        name: "work_task_visit",
+        tableName: "work_task_visit",
+        type: "create-table",
+      },
+      statementCount: 4,
+    },
   ])(
     "builds deterministic guarded $migrationTag artifact",
     async ({
@@ -482,6 +506,56 @@ describe.sequential("phpMyAdmin incremental migration bundle policy", () => {
     },
   );
 
+  it("guards both 0017 parent identifiers and primary keys before any DDL", async () => {
+    const first = await buildCurrentIncremental(
+      workTaskVisitMigrationTag,
+      await temporaryOutputDirectory(),
+    );
+    const second = await buildCurrentIncremental(
+      workTaskVisitMigrationTag,
+      await temporaryOutputDirectory(),
+    );
+    const initialGuard = first.sql.slice(
+      0,
+      first.sql.indexOf("SET @pp_candidate_sql = 0x"),
+    );
+
+    expect(first.summary).toMatchObject({
+      migrationTag: workTaskVisitMigrationTag,
+      statementCount: 4,
+    });
+    expect(first.summary.sqlSha256).toBe(second.summary.sqlSha256);
+    expect(first.manifest.migration.statementHashes).toHaveLength(4);
+    expect(initialGuard).not.toContain("TRIGGER");
+
+    for (const tableName of ["work_task", "monthly_visit_commitment"]) {
+      expect(initialGuard).toContain(
+        `TABLE_NAME = '${tableName}' AND COLUMN_NAME = 'id' AND DATA_TYPE = 'char' AND COLUMN_TYPE = 'char(36)' AND CHARACTER_MAXIMUM_LENGTH = 36 AND CHARACTER_SET_NAME = 'ascii' AND COLLATION_NAME = 'ascii_bin' AND IS_NULLABLE = 'NO'`,
+      );
+      expect(initialGuard).toContain(
+        `TABLE_NAME = '${tableName}' AND CONSTRAINT_NAME = 'PRIMARY' AND CONSTRAINT_TYPE = 'PRIMARY KEY') = 1`,
+      );
+      expect(initialGuard).toContain(
+        `TABLE_NAME = '${tableName}' AND INDEX_NAME = 'PRIMARY') = 1`,
+      );
+      expect(initialGuard).toContain(
+        `TABLE_NAME = '${tableName}' AND INDEX_NAME = 'PRIMARY' AND NON_UNIQUE = 0 AND INDEX_TYPE = 'BTREE') = 1`,
+      );
+      expect(initialGuard).toContain(
+        `TABLE_NAME = '${tableName}' AND INDEX_NAME = 'PRIMARY' AND SEQ_IN_INDEX = 1 AND COLUMN_NAME = 'id' AND NON_UNIQUE = 0) = 1`,
+      );
+    }
+
+    expect(
+      candidateStatements(first.sql).filter((statement) =>
+        /\b(?:CREATE|ALTER|DROP)\b/iu.test(statement),
+      ),
+    ).toHaveLength(4);
+    expect(candidateStatements(first.sql).join("\n")).not.toMatch(
+      /\bTRIGGER\b/iu,
+    );
+  });
+
   it("rejects mutated lifecycle and reversal column definitions", () => {
     expect(() =>
       analyzeIncrementalMigrationStatement(
@@ -493,6 +567,34 @@ describe.sequential("phpMyAdmin incremental migration bundle policy", () => {
       analyzeIncrementalMigrationStatement(
         "ALTER TABLE `receivable` ADD `record_state` varchar(16) DEFAULT 'voided' NOT NULL",
         financialReversalsMigrationTag,
+      ),
+    ).toThrow();
+  });
+
+  it("allows the exact finance permission check replacement only in 0016", () => {
+    const statement =
+      "ALTER TABLE `user_permission` DROP CONSTRAINT `chk_user_permission_code`";
+
+    expect(
+      analyzeIncrementalMigrationStatement(
+        statement,
+        financeAccountsLedgerMigrationTag,
+      ),
+    ).toMatchObject({
+      constraintName: "chk_user_permission_code",
+      tableName: "user_permission",
+      type: "drop-check",
+    });
+    expect(() =>
+      analyzeIncrementalMigrationStatement(
+        statement.replace("chk_user_permission_code", "chk_other"),
+        financeAccountsLedgerMigrationTag,
+      ),
+    ).toThrow();
+    expect(() =>
+      analyzeIncrementalMigrationStatement(
+        statement,
+        workTaskVisitMigrationTag,
       ),
     ).toThrow();
   });

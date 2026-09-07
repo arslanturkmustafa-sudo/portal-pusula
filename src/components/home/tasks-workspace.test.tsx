@@ -49,6 +49,7 @@ function taskFixture(
     title: `Görev ${status}`,
     updatedAtUtc: "2026-09-01T08:00:00.000Z",
     version: 3,
+    visitLinked: false,
     ...overrides,
   };
 }
@@ -417,6 +418,75 @@ describe("TasksWorkspace", () => {
     expect(
       screen.getByRole("heading", { name: "Görevi güncelle" }),
     ).toBeInTheDocument();
+  });
+
+  it("locks visit-owned fields while keeping safe task details editable", async () => {
+    const linkedTask = taskFixture("done", {
+      id: "task-visit-linked",
+      title: "Ziyaret özeti",
+      visitLinked: true,
+    });
+    let patchBody: Record<string, unknown> | null = null;
+    const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+      const url = String(input);
+      if (url === "/api/tasks/task-visit-linked" && init?.method === "PATCH") {
+        patchBody = JSON.parse(String(init.body)) as Record<string, unknown>;
+        return jsonResponse({
+          task: {
+            ...linkedTask,
+            ...patchBody,
+            title: "Güncellenen ziyaret özeti",
+            version: 4,
+          },
+        });
+      }
+      if (url === "/api/tasks") return jsonResponse({ tasks: [linkedTask] });
+      if (url === "/api/customers") {
+        return jsonResponse({ customers: [customer] });
+      }
+      if (url === "/api/projects") {
+        return jsonResponse({ projects: [project] });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+
+    render(<TasksWorkspace />);
+
+    const statusSelect = await screen.findByRole("combobox", {
+      name: "Ziyaret özeti durumu",
+    });
+    expect(statusSelect).toBeDisabled();
+    expect(statusSelect).toHaveAccessibleDescription(/ziyaret kaydınca yönetilir/iu);
+    await user.click(
+      screen.getByRole("button", { name: "Ziyaret özeti görevini düzenle" }),
+    );
+
+    const editor = screen.getByRole("region", { name: "Görevi güncelle" });
+    expect(within(editor).getByLabelText("Proje")).toBeDisabled();
+    expect(within(editor).getByLabelText("Müşteri")).toBeDisabled();
+    expect(within(editor).getByLabelText("Vade")).toBeDisabled();
+    expect(within(editor).getByLabelText("Durum")).toBeDisabled();
+    expect(within(editor).getByLabelText("Görev başlığı")).toBeEnabled();
+    expect(within(editor).getByLabelText("Öncelik")).toBeEnabled();
+    expect(within(editor).getByLabelText("Açıklama")).toBeEnabled();
+
+    await user.clear(within(editor).getByLabelText("Görev başlığı"));
+    await user.type(
+      within(editor).getByLabelText("Görev başlığı"),
+      "Güncellenen ziyaret özeti",
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Değişiklikleri kaydet" }),
+    );
+
+    await waitFor(() =>
+      expect(patchBody).toEqual({
+        title: "Güncellenen ziyaret özeti",
+        version: 3,
+      }),
+    );
   });
 
   it("offers only customer and project combinations linked in the portfolio", async () => {

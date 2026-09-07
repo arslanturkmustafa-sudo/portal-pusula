@@ -12,6 +12,7 @@ export {
   TaskCustomerProjectMismatchError,
   TaskNotFoundError,
   TaskProjectNotFoundError,
+  TaskVisitLinkedFieldsLockedError,
   TaskVersionConflictError,
   updateTask,
 } from "./service";

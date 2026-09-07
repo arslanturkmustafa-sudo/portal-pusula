@@ -117,8 +117,8 @@ describe.sequential("clean-only phpMyAdmin migration bundle policy", () => {
     expect(second.summary).toEqual(first.summary);
     expect(second.sql).toBe(first.sql);
     expect(second.manifestText).toBe(first.manifestText);
-    expect(first.summary.migrationCount).toBe(16);
-    expect(first.summary.statementCount).toBe(174);
+    expect(first.summary.migrationCount).toBe(18);
+    expect(first.summary.statementCount).toBe(193);
     expect(first.summary.sqlBytes).toBe(Buffer.byteLength(first.sql));
     expect(first.summary.sqlSha256).toBe(
       createHash("sha256").update(first.sql).digest("hex"),
@@ -175,6 +175,9 @@ describe.sequential("clean-only phpMyAdmin migration bundle policy", () => {
       "customer",
       "customer_project",
       "expense",
+      "finance_account",
+      "finance_ledger_entry",
+      "finance_transaction",
       "job_run",
       "login_attempt_throttle",
       "monthly_visit_commitment",
@@ -190,6 +193,7 @@ describe.sequential("clean-only phpMyAdmin migration bundle policy", () => {
       "user_permission",
       "work_task",
       "work_task_project",
+      "work_task_visit",
     ]);
     expect(manifest.schema.tables.scheduled_job).toContain("lease_token");
     expect(manifest.schema.tables.consulting_contract).toContain("project_id");
@@ -295,6 +299,26 @@ describe.sequential("clean-only phpMyAdmin migration bundle policy", () => {
         tableName: "expense",
       },
       {
+        name: "fk_finance_ledger_entry_account",
+        tableName: "finance_ledger_entry",
+      },
+      {
+        name: "fk_finance_ledger_entry_transaction",
+        tableName: "finance_ledger_entry",
+      },
+      {
+        name: "fk_finance_transaction_reversal",
+        tableName: "finance_transaction",
+      },
+      {
+        name: "fk_finance_transaction_source_account",
+        tableName: "finance_transaction",
+      },
+      {
+        name: "fk_finance_transaction_target_account",
+        tableName: "finance_transaction",
+      },
+      {
         name: "fk_job_run_scheduled_job",
         tableName: "job_run",
       },
@@ -353,6 +377,14 @@ describe.sequential("clean-only phpMyAdmin migration bundle policy", () => {
       {
         name: "fk_work_task_project_task",
         tableName: "work_task_project",
+      },
+      {
+        name: "fk_work_task_visit_task",
+        tableName: "work_task_visit",
+      },
+      {
+        name: "fk_work_task_visit_visit",
+        tableName: "work_task_visit",
       },
       {
         name: "fk_work_task_archived_by",
@@ -505,10 +537,22 @@ describe.sequential("clean-only phpMyAdmin migration bundle policy", () => {
         sqlFileName: "0015_financial_reversals.sql",
         statementCount: 26,
       },
+      {
+        createdAt: 1788765657335,
+        hash: "5b92bb29683ae3e6981938cd79ceb5e48addb3d85e7b32a4e56dafd124890153",
+        sqlFileName: "0016_finance_accounts_ledger.sql",
+        statementCount: 15,
+      },
+      {
+        createdAt: 1788765868726,
+        hash: "bb1241676016ea62f65944607393f09d76bef6f0c53630bfa9d61c203818d7e8",
+        sqlFileName: "0017_work_task_visit.sql",
+        statementCount: 4,
+      },
     ]);
     expect(
       manifest.migrations.flatMap((migration) => migration.statementHashes),
-    ).toHaveLength(174);
+    ).toHaveLength(193);
     expect(
       manifest.migrations
         .flatMap((migration) => migration.statementHashes)

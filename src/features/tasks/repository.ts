@@ -43,6 +43,7 @@ export type WorkTask = WorkTaskState &
     customerName: string | null;
     projectCode: string | null;
     projectName: string | null;
+    visitLinked: boolean;
   }>;
 
 type WorkTaskStateRow = RowDataPacket & {
@@ -68,6 +69,7 @@ type WorkTaskRow = WorkTaskStateRow & {
   assignee_email: string | null;
   customer_code: string | null;
   customer_name: string | null;
+  linked_visit_id: string | null;
   project_code: string | null;
   project_name: string | null;
 };
@@ -159,6 +161,7 @@ function mapWorkTask(row: WorkTaskRow): WorkTask {
     customerName: row.customer_name,
     projectCode: row.project_code,
     projectName: row.project_name,
+    visitLinked: row.linked_visit_id !== null,
   };
 }
 
@@ -175,7 +178,8 @@ const TASK_PROJECTION_COLUMNS = `${TASK_STATE_COLUMNS},
   customer.short_code AS customer_code,
   project.display_name AS project_name,
   project.short_code AS project_code,
-  assignee.email AS assignee_email`;
+  assignee.email AS assignee_email,
+  task_visit.visit_id AS linked_visit_id`;
 
 const TASK_PROJECTION_JOIN = `
   FROM work_task AS task
@@ -183,7 +187,8 @@ const TASK_PROJECTION_JOIN = `
   LEFT JOIN project ON project.id = task_link.project_id
   LEFT JOIN customer ON customer.id = task.customer_id
   LEFT JOIN user_account AS assignee
-         ON assignee.id = task.assignee_user_account_id`;
+         ON assignee.id = task.assignee_user_account_id
+  LEFT JOIN work_task_visit AS task_visit ON task_visit.task_id = task.id`;
 
 export async function listTaskRecords(
   connection: PoolConnection,

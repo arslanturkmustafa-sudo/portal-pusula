@@ -24,6 +24,7 @@ const taskRow = {
   description: null,
   due_on: "2026-09-05",
   id: "30000000-0000-4000-8000-000000000001",
+  linked_visit_id: null,
   priority: "high",
   project_code: "BYPUSULA",
   project_id: "40000000-0000-4000-8000-000000000001",
@@ -49,12 +50,27 @@ describe("task repository", () => {
         projectCode: "BYPUSULA",
         projectName: "ByPusula",
         status: "todo",
+        visitLinked: false,
       }),
     ]);
     expect(execute).toHaveBeenCalledWith(
-      expect.stringMatching(/LEFT JOIN project[\s\S]*LEFT JOIN customer[\s\S]*LEFT JOIN user_account/iu),
+      expect.stringMatching(/LEFT JOIN project[\s\S]*LEFT JOIN customer[\s\S]*LEFT JOIN user_account[\s\S]*LEFT JOIN work_task_visit/iu),
     );
     expect(execute).toHaveBeenCalledWith(expect.stringContaining("FIELD(task.status"));
+  });
+
+  it("marks a task projection as visit-linked without exposing the visit id", async () => {
+    const execute = vi.fn().mockResolvedValue([
+      [{ ...taskRow, linked_visit_id: "50000000-0000-4000-8000-000000000001" }],
+      [],
+    ]);
+
+    const result = await listTaskRecords(
+      { execute } as unknown as PoolConnection,
+    );
+
+    expect(result).toEqual([expect.objectContaining({ visitLinked: true })]);
+    expect(result[0]).not.toHaveProperty("linkedVisitId");
   });
 
   it("fences an update with the caller's expected version", async () => {

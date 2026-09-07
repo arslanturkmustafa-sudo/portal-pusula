@@ -7,11 +7,13 @@ vi.mock("server-only", () => ({}));
 
 const mocks = vi.hoisted(() => ({
   listDailyAgendaItems: vi.fn(),
+  listDailyPlanTasks: vi.fn(),
   withUtcTransaction: vi.fn(),
 }));
 
 vi.mock("@/features/daily-plan/repository", () => ({
   listDailyAgendaItems: mocks.listDailyAgendaItems,
+  listDailyPlanTasks: mocks.listDailyPlanTasks,
 }));
 
 vi.mock("@/platform/jobs/mysql-transaction", () => ({
@@ -36,6 +38,18 @@ const item = {
   visitId: "30000000-0000-4000-8000-000000000001",
 };
 
+const task = {
+  calendarOn: "2026-09-02",
+  calendarSource: "visit" as const,
+  customerName: "Öncü Üretim",
+  dueOn: "2026-09-05",
+  id: "40000000-0000-4000-8000-000000000001",
+  linkedVisitId: "30000000-0000-4000-8000-000000000001",
+  projectName: "Dönüşüm Programı",
+  status: "todo" as const,
+  title: "Saha gözlemlerini hazırla",
+};
+
 describe("daily agenda service", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -44,15 +58,17 @@ describe("daily agenda service", () => {
         operation({}),
     );
     mocks.listDailyAgendaItems.mockResolvedValue([item]);
+    mocks.listDailyPlanTasks.mockResolvedValue([task]);
   });
 
   it("returns the validated daily range with repository items in one UTC transaction", async () => {
     const pool = {} as Pool;
 
-    await expect(getDailyAgenda(pool, "2026-09-02")).resolves.toEqual({
+    await expect(getDailyAgenda(pool, "2026-09-02", "day", true)).resolves.toEqual({
       date: "2026-09-02",
       items: [item],
       range: { endDate: "2026-09-02", startDate: "2026-09-02" },
+      tasks: [task],
       view: "day",
     });
     expect(mocks.withUtcTransaction).toHaveBeenCalledWith(
@@ -64,11 +80,16 @@ describe("daily agenda service", () => {
       "2026-09-02",
       "2026-09-02",
     );
+    expect(mocks.listDailyPlanTasks).toHaveBeenCalledWith(
+      expect.anything(),
+      "2026-09-02",
+      "2026-09-02",
+    );
   });
 
   it("uses Monday through Sunday for a weekly view", async () => {
     await expect(
-      getDailyAgenda({} as Pool, "2026-09-02", "week"),
+      getDailyAgenda({} as Pool, "2026-09-02", "week", true),
     ).resolves.toMatchObject({
       range: { endDate: "2026-09-06", startDate: "2026-08-31" },
       view: "week",
@@ -78,6 +99,19 @@ describe("daily agenda service", () => {
       "2026-08-31",
       "2026-09-06",
     );
+    expect(mocks.listDailyPlanTasks).toHaveBeenCalledWith(
+      expect.anything(),
+      "2026-08-31",
+      "2026-09-06",
+    );
+  });
+
+  it("does not query or disclose tasks when task access is excluded", async () => {
+    await expect(
+      getDailyAgenda({} as Pool, "2026-09-02", "day", false),
+    ).resolves.toMatchObject({ tasks: [] });
+    expect(mocks.listDailyAgendaItems).toHaveBeenCalledOnce();
+    expect(mocks.listDailyPlanTasks).not.toHaveBeenCalled();
   });
 
   it("uses the full calendar month within the maximum query range", () => {
@@ -99,17 +133,21 @@ describe("daily agenda service", () => {
   });
 
   it("rejects an impossible date before opening a database transaction", async () => {
-    await expect(getDailyAgenda({} as Pool, "2026-02-30")).rejects.toMatchObject({
+    await expect(
+      getDailyAgenda({} as Pool, "2026-02-30", "day", true),
+    ).rejects.toMatchObject({
       name: "ZodError",
     });
     expect(mocks.withUtcTransaction).not.toHaveBeenCalled();
     expect(mocks.listDailyAgendaItems).not.toHaveBeenCalled();
+    expect(mocks.listDailyPlanTasks).not.toHaveBeenCalled();
   });
 
   it("rejects an unsupported view before opening a database transaction", async () => {
     await expect(
-      getDailyAgenda({} as Pool, "2026-09-02", "quarter"),
+      getDailyAgenda({} as Pool, "2026-09-02", "quarter", true),
     ).rejects.toMatchObject({ name: "ZodError" });
     expect(mocks.withUtcTransaction).not.toHaveBeenCalled();
+    expect(mocks.listDailyPlanTasks).not.toHaveBeenCalled();
   });
 });

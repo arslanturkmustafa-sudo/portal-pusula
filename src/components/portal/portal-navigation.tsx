@@ -57,6 +57,7 @@ export const portalNavigationItems: readonly PortalNavigationItem[] = [
       "finance.receivables.read",
       "finance.expenses.read",
       "finance.cards.read",
+      "finance.accounts.read",
       "finance.partnership.read",
       "finance.reports.read",
     ],
@@ -170,6 +171,26 @@ function canSeeItem(
   );
 }
 
+function destinationForPrincipal(
+  principal: PermissionPrincipal,
+  item: PortalNavigationItem,
+): PortalNavigationItem {
+  if (item.icon !== "finance") return item;
+  const destination = [
+    ["finance.receivables.read", "/finans"],
+    ["finance.accounts.read", "/finans/hesaplar"],
+    ["finance.expenses.read", "/finans/giderler"],
+    ["finance.cards.read", "/finans/kartlar"],
+    ["finance.partnership.read", "/finans/ortaklik"],
+    ["finance.reports.read", "/finans/raporlar"],
+  ] as const satisfies readonly (readonly [PermissionCode, string])[];
+  const href = destination.find(([permission]) =>
+    hasPermission(principal, permission),
+  )?.[1];
+  if (href !== undefined && href !== item.href) return { ...item, href };
+  return item;
+}
+
 function NavigationLink({
   item,
   pathname,
@@ -195,9 +216,9 @@ export function PortalNavigation({
   principal,
 }: Readonly<{ principal: PermissionPrincipal }>) {
   const pathname = usePathname();
-  const items = portalNavigationItems.filter((item) =>
-    canSeeItem(principal, item),
-  );
+  const items = portalNavigationItems
+    .filter((item) => canSeeItem(principal, item))
+    .map((item) => destinationForPrincipal(principal, item));
   const primaryItems = items.filter(
     (item) => item.icon !== "account" && item.icon !== "users",
   ).slice(0, 4);

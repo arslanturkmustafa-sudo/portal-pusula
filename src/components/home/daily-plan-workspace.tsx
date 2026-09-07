@@ -1,9 +1,15 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ChangeEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 
 import { redirectToPortalLogin as redirectToLogin } from "@/platform/navigation/portal-return-path";
 
+import {
+  DailyPlanMonthGrid,
+  type DailyPlanMonthTask,
+  type DailyPlanMonthVisit,
+} from "./daily-plan-month-grid";
+import { DailyPlanDayTasks } from "./daily-plan-day-tasks";
 import { DailyPlanVisitCompletion } from "./daily-plan-visit-completion";
 
 type VisitResolutionStatus =
@@ -31,6 +37,7 @@ type DailyPlanPayload = Readonly<{
     endDate: string;
     startDate: string;
   }>;
+  tasks?: readonly DailyPlanMonthTask[];
   view: PlanView;
 }>;
 
@@ -38,6 +45,7 @@ type LoadState = "error" | "loading" | "ready";
 type PlanView = "day" | "week" | "month";
 
 type DailyPlanWorkspaceProps = Readonly<{
+  canWriteTasks?: boolean;
   canWriteVisits?: boolean;
 }>;
 
@@ -176,19 +184,29 @@ function statusClass(status: VisitResolutionStatus): string {
   return `daily-plan-status daily-plan-status-${status.replaceAll("_", "-")}`;
 }
 
+function canCompleteVisit(
+  canWriteVisits: boolean,
+  item: Pick<DailyPlanItem, "resolutionStatus">,
+): boolean {
+  return (
+    canWriteVisits &&
+    (item.resolutionStatus === "planned" ||
+      item.resolutionStatus === "makeup_pending")
+  );
+}
+
 function VisitDetails({
+  canWriteTasks,
   canWriteVisits,
   item,
   onCompleted,
 }: Readonly<{
+  canWriteTasks: boolean;
   canWriteVisits: boolean;
   item: DailyPlanItem;
   onCompleted: (visitId: string) => void;
 }>) {
-  const canComplete =
-    canWriteVisits &&
-    (item.resolutionStatus === "planned" ||
-      item.resolutionStatus === "makeup_pending");
+  const canComplete = canCompleteVisit(canWriteVisits, item);
 
   return (
     <article
@@ -211,6 +229,7 @@ function VisitDetails({
       </p>
       {canComplete ? (
         <DailyPlanVisitCompletion
+          canWriteTasks={canWriteTasks}
           onCompleted={onCompleted}
           target={{
             committedOn: item.committedOn,
@@ -226,15 +245,19 @@ function VisitDetails({
 }
 
 function PlanDaySection({
+  canWriteTasks,
   canWriteVisits,
   date,
   items,
   onCompleted,
+  tasks,
 }: Readonly<{
+  canWriteTasks: boolean;
   canWriteVisits: boolean;
   date: string;
   items: readonly DailyPlanItem[];
   onCompleted: (visitId: string) => void;
+  tasks: readonly DailyPlanMonthTask[];
 }>) {
   const timedItems = items.filter(
     (item) => item.internalPlannedAtUtc !== null,
@@ -250,7 +273,10 @@ function PlanDaySection({
     <section className="daily-plan-date-group" aria-labelledby={dateId}>
       <header className="daily-plan-date-heading">
         <h3 id={dateId}>{selectedDateLabel(date)}</h3>
-        <span>{items.length} ziyaret</span>
+        <span>
+          {items.length} ziyaret
+          {tasks.length > 0 ? ` · ${tasks.length} görev` : ""}
+        </span>
       </header>
 
       {timedItems.length > 0 ? (
@@ -270,6 +296,7 @@ function PlanDaySection({
                 </time>
                 <span className="daily-plan-timeline-marker" aria-hidden="true" />
                 <VisitDetails
+                  canWriteTasks={canWriteTasks}
                   canWriteVisits={canWriteVisits}
                   item={item}
                   onCompleted={onCompleted}
@@ -294,6 +321,7 @@ function PlanDaySection({
               <li key={item.visitId}>
                 <span className="daily-plan-untimed-label">Saat belirlenmedi</span>
                 <VisitDetails
+                  canWriteTasks={canWriteTasks}
                   canWriteVisits={canWriteVisits}
                   item={item}
                   onCompleted={onCompleted}
@@ -303,22 +331,27 @@ function PlanDaySection({
           </ul>
         </section>
       ) : null}
+
+      <DailyPlanDayTasks date={date} tasks={tasks} />
     </section>
   );
 }
 
 export function DailyPlanWorkspace({
+  canWriteTasks = false,
   canWriteVisits = false,
 }: DailyPlanWorkspaceProps) {
   const [selectedDate, setSelectedDate] = useState(() => istanbulDate());
   const [selectedView, setSelectedView] = useState<PlanView>("day");
   const [items, setItems] = useState<readonly DailyPlanItem[]>([]);
+  const [tasks, setTasks] = useState<readonly DailyPlanMonthTask[]>([]);
   const [loadedRange, setLoadedRange] = useState<DailyPlanPayload["range"] | null>(
     null,
   );
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [requestRevision, setRequestRevision] = useState(0);
   const [completionNotice, setCompletionNotice] = useState<string | null>(null);
+  const completionFocusVisitIdRef = useRef<string | null>(null);
   const today = useMemo(() => istanbulDate(), []);
 
   useEffect(() => {
@@ -353,13 +386,27 @@ export function DailyPlanWorkspace({
             (item) =>
               item.committedOn < payload.range.startDate ||
               item.committedOn > payload.range.endDate,
+          ) ||
+          (payload.tasks !== undefined && !Array.isArray(payload.tasks)) ||
+          (payload.tasks ?? []).some(
+            (task) =>
+              task.calendarOn < payload.range.startDate ||
+              task.calendarOn > payload.range.endDate,
           )
         ) {
           throw new Error("Daily plan response is invalid.");
         }
         setItems(payload.items);
+        setTasks(payload.tasks ?? []);
         setLoadedRange(payload.range);
         setLoadState("ready");
+        const focusVisitId = completionFocusVisitIdRef.current;
+        if (focusVisitId !== null) {
+          completionFocusVisitIdRef.current = null;
+          window.setTimeout(() => {
+            document.getElementById(`daily-plan-visit-${focusVisitId}`)?.focus();
+          }, 0);
+        }
       })
       .catch((error: unknown) => {
         if (!current) return;
@@ -374,19 +421,28 @@ export function DailyPlanWorkspace({
   }, [requestRevision, selectedDate, selectedView]);
 
   const days = useMemo(() => {
-    const grouped = new Map<string, DailyPlanItem[]>();
+    const grouped = new Map<
+      string,
+      { items: DailyPlanItem[]; tasks: DailyPlanMonthTask[] }
+    >();
     for (const item of items) {
-      const dayItems = grouped.get(item.committedOn) ?? [];
-      dayItems.push(item);
-      grouped.set(item.committedOn, dayItems);
+      const day = grouped.get(item.committedOn) ?? { items: [], tasks: [] };
+      day.items.push(item);
+      grouped.set(item.committedOn, day);
+    }
+    for (const task of tasks) {
+      const day = grouped.get(task.calendarOn) ?? { items: [], tasks: [] };
+      day.tasks.push(task);
+      grouped.set(task.calendarOn, day);
     }
     return [...grouped.entries()]
       .sort(([left], [right]) => left.localeCompare(right))
-      .map(([date, dayItems]) => ({ date, items: dayItems }));
-  }, [items]);
+      .map(([date, day]) => ({ date, ...day }));
+  }, [items, tasks]);
   const completedCount = items.filter(
     (item) => item.resolutionStatus === "completed",
   ).length;
+  const plannedDayCount = days.length;
   const isToday = selectedDate === today;
   const previousDate = shiftPeriod(selectedDate, selectedView, -1);
   const nextDate = shiftPeriod(selectedDate, selectedView, 1);
@@ -402,6 +458,7 @@ export function DailyPlanWorkspace({
   function openDate(date: string) {
     if (date === selectedDate) return;
     setItems([]);
+    setTasks([]);
     setLoadedRange(null);
     setCompletionNotice(null);
     setLoadState("loading");
@@ -411,6 +468,7 @@ export function DailyPlanWorkspace({
   function openView(view: PlanView) {
     if (view === selectedView) return;
     setItems([]);
+    setTasks([]);
     setLoadedRange(null);
     setCompletionNotice(null);
     setLoadState("loading");
@@ -423,21 +481,41 @@ export function DailyPlanWorkspace({
 
   function markCompleted(visitId: string) {
     const completedItem = items.find((item) => item.visitId === visitId);
-    setItems((current) =>
-      current.map((item) =>
-        item.visitId === visitId
-          ? { ...item, resolutionStatus: "completed" }
-          : item,
-      ),
-    );
     setCompletionNotice(
       completedItem
         ? `${completedItem.customerName} ziyareti tamamlandı.`
         : "Ziyaret tamamlandı.",
     );
-    window.setTimeout(() => {
-      document.getElementById(`daily-plan-visit-${visitId}`)?.focus();
-    }, 0);
+    completionFocusVisitIdRef.current = visitId;
+    setLoadState("loading");
+    setRequestRevision((current) => current + 1);
+  }
+
+  function openMonthDay(date: string) {
+    setItems([]);
+    setTasks([]);
+    setLoadedRange(null);
+    setCompletionNotice(null);
+    setLoadState("loading");
+    setSelectedDate(date);
+    setSelectedView("day");
+  }
+
+  function renderMonthVisitAction(visit: DailyPlanMonthVisit) {
+    if (!canCompleteVisit(canWriteVisits, visit)) return null;
+    return (
+      <DailyPlanVisitCompletion
+        canWriteTasks={canWriteTasks}
+        onCompleted={markCompleted}
+        target={{
+          committedOn: visit.committedOn,
+          contractId: visit.contractId,
+          customerId: visit.customerId,
+          customerName: visit.customerName,
+          visitId: visit.visitId,
+        }}
+      />
+    );
   }
 
   return (
@@ -521,6 +599,7 @@ export function DailyPlanWorkspace({
             type="button"
             onClick={() => {
               setItems([]);
+              setTasks([]);
               setLoadedRange(null);
               setLoadState("loading");
               setRequestRevision((current) => current + 1);
@@ -538,34 +617,55 @@ export function DailyPlanWorkspace({
         </p>
       ) : null}
 
-      {loadState === "ready" && items.length === 0 ? (
+      {loadState === "ready" &&
+      selectedView !== "month" &&
+      items.length === 0 &&
+      tasks.length === 0 ? (
         <div className="daily-plan-empty" role="status">
           <span aria-hidden="true">00</span>
           <div>
-            <strong>Bu dönem için planlanmış ziyaret bulunmuyor.</strong>
-            <p>Başka bir tarih veya görünüm seçerek ziyaret akışını inceleyebilirsiniz.</p>
+            <strong>Bu dönem için planlanmış ziyaret veya görev bulunmuyor.</strong>
+            <p>Başka bir tarih veya görünüm seçerek plan akışını inceleyebilirsiniz.</p>
           </div>
         </div>
       ) : null}
 
-      {loadState === "ready" && items.length > 0 ? (
+      {loadState === "ready" &&
+      (selectedView === "month" || items.length > 0 || tasks.length > 0) ? (
         <>
           <div className="daily-plan-summary" aria-label="Dönem özeti">
             <span><strong>{items.length}</strong> ziyaret</span>
-            <span><strong>{days.length}</strong> planlı gün</span>
-            <span><strong>{completedCount}</strong> tamamlandı</span>
+            <span><strong>{plannedDayCount}</strong> planlı gün</span>
+            <span><strong>{completedCount}</strong> tamamlanan ziyaret</span>
+            {tasks.length > 0 ? (
+              <span><strong>{tasks.length}</strong> görev</span>
+            ) : null}
           </div>
-          <div className="daily-plan-days">
-            {days.map((day) => (
-              <PlanDaySection
-                canWriteVisits={canWriteVisits}
-                date={day.date}
-                items={day.items}
-                key={day.date}
-                onCompleted={markCompleted}
-              />
-            ))}
-          </div>
+          {selectedView === "month" && loadedRange !== null ? (
+            <DailyPlanMonthGrid
+              endDate={loadedRange.endDate}
+              onOpenDay={openMonthDay}
+              renderVisitAction={renderMonthVisitAction}
+              startDate={loadedRange.startDate}
+              tasks={tasks}
+              today={today}
+              visits={items}
+            />
+          ) : (
+            <div className="daily-plan-days">
+              {days.map((day) => (
+                <PlanDaySection
+                  canWriteTasks={canWriteTasks}
+                  canWriteVisits={canWriteVisits}
+                  date={day.date}
+                  items={day.items}
+                  key={day.date}
+                  onCompleted={markCompleted}
+                  tasks={day.tasks}
+                />
+              ))}
+            </div>
+          )}
         </>
       ) : null}
     </section>
