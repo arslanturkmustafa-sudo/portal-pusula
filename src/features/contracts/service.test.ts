@@ -9,7 +9,7 @@ const mocks = vi.hoisted(() => ({
   appendAuditEvent: vi.fn(),
   contractHasReceivable: vi.fn(),
   contractHasVisitOutsideRange: vi.fn(),
-  deletePlannedMonthVisits: vi.fn(),
+  deleteEditableMonthVisits: vi.fn(),
   findActiveCustomerProjectForUpdate: vi.fn(),
   findCustomerForUpdate: vi.fn(),
   findOverlappingContract: vi.fn(),
@@ -32,7 +32,7 @@ vi.mock("@/features/customers/repository", () => ({
 vi.mock("@/features/contracts/repository", () => ({
   contractHasVisitOutsideRange: mocks.contractHasVisitOutsideRange,
   contractHasReceivable: mocks.contractHasReceivable,
-  deletePlannedMonthVisits: mocks.deletePlannedMonthVisits,
+  deleteEditableMonthVisits: mocks.deleteEditableMonthVisits,
   findOverlappingContract: mocks.findOverlappingContract,
   findOwnedContractForUpdate: mocks.findOwnedContractForUpdate,
   findOwnedVisitForUpdate: mocks.findOwnedVisitForUpdate,
@@ -188,6 +188,115 @@ describe("contract write service", () => {
       }),
     );
     expect(result.visits[0]?.locationLabel).toBe("Fabrika A");
+  });
+
+  it("edits a makeup visit while preserving finalized visits", async () => {
+    const makeupVisit = {
+      ...plannedVisit,
+      locationLabel: "Eski konum",
+      resolutionNote: "Telafi planlanacak",
+      resolutionStatus: "makeup_pending" as const,
+    };
+    const completedVisit = {
+      ...plannedVisit,
+      committedOn: "2026-09-10",
+      deliveredOn: "2026-09-10",
+      id: "40000000-0000-4000-8000-000000000002",
+      internalDurationMinutes: null,
+      internalPlannedAtUtc: null,
+      resolutionStatus: "completed" as const,
+    };
+    mocks.listMonthVisitRecords.mockResolvedValueOnce([
+      makeupVisit,
+      completedVisit,
+    ]);
+
+    const result = await replaceMonthlyVisitPlan(
+      {} as Pool,
+      customerId,
+      contractId,
+      "2026-09",
+      {
+        visits: [
+          {
+            committedOn: "2026-09-04",
+            id: visitId,
+            internalDurationMinutes: 120,
+            internalStartTime: "10:00",
+            locationLabel: "Yeni konum",
+          },
+          {
+            committedOn: completedVisit.committedOn,
+            id: completedVisit.id,
+            internalDurationMinutes: null,
+            internalStartTime: null,
+            locationLabel: completedVisit.locationLabel,
+          },
+        ],
+      },
+      context,
+    );
+
+    expect(mocks.deleteEditableMonthVisits).toHaveBeenCalledWith(
+      expect.anything(),
+      contractId,
+      "2026-09-01",
+      "2026-10-01",
+    );
+    expect(mocks.insertVisitRecords).toHaveBeenCalledWith(expect.anything(), [
+      expect.objectContaining({
+        committedOn: "2026-09-04",
+        id: visitId,
+        internalPlannedAtUtc: "2026-09-04 07:00:00.000000",
+        locationLabel: "Yeni konum",
+        resolutionStatus: "makeup_pending",
+      }),
+    ]);
+    expect(result.visits).toEqual([
+      expect.objectContaining({ id: visitId, resolutionStatus: "makeup_pending" }),
+      completedVisit,
+    ]);
+    expect(mocks.appendAuditEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        afterSummary: expect.objectContaining({
+          resolutionStatuses: ["makeup_pending", "completed"],
+          visitIds: [visitId, completedVisit.id],
+        }),
+      }),
+    );
+  });
+
+  it("can remove and recreate an editable visit on the same day", async () => {
+    mocks.listMonthVisitRecords.mockResolvedValueOnce([plannedVisit]);
+
+    const result = await replaceMonthlyVisitPlan(
+      {} as Pool,
+      customerId,
+      contractId,
+      "2026-09",
+      {
+        visits: [
+          {
+            committedOn: plannedVisit.committedOn,
+            internalDurationMinutes: null,
+            internalStartTime: null,
+            locationLabel: "Yeni ziyaret",
+          },
+        ],
+      },
+      context,
+    );
+
+    const inserted = mocks.insertVisitRecords.mock.calls[0]?.[1]?.[0];
+    expect(mocks.deleteEditableMonthVisits).toHaveBeenCalledOnce();
+    expect(inserted).toMatchObject({
+      committedOn: plannedVisit.committedOn,
+      locationLabel: "Yeni ziyaret",
+      resolutionStatus: "planned",
+    });
+    expect(inserted?.id).not.toBe(visitId);
+    expect(result.visits[0]?.id).toBe(inserted?.id);
   });
 
   it("completes a visit and links each work item as a done customer-project task", async () => {

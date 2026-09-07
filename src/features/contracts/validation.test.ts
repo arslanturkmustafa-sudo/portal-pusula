@@ -175,6 +175,43 @@ describe("monthly visit validation", () => {
     ).toBe(false);
   });
 
+  it("accepts existing visit ids and rejects duplicate visit identities", () => {
+    const id = "30000000-0000-4000-8000-000000000001";
+    expect(
+      monthlyVisitPlanInputSchema.parse({
+        visits: [
+          {
+            committedOn: "2026-09-03",
+            id,
+            internalDurationMinutes: null,
+            internalStartTime: null,
+            locationLabel: null,
+          },
+        ],
+      }).visits[0]?.id,
+    ).toBe(id);
+    expect(
+      monthlyVisitPlanInputSchema.safeParse({
+        visits: [
+          {
+            committedOn: "2026-09-03",
+            id,
+            internalDurationMinutes: null,
+            internalStartTime: null,
+            locationLabel: null,
+          },
+          {
+            committedOn: "2026-09-10",
+            id,
+            internalDurationMinutes: null,
+            internalStartTime: null,
+            locationLabel: null,
+          },
+        ],
+      }).success,
+    ).toBe(false);
+  });
+
   it("requires a delivered day for completion and a note for agreed cancellation", () => {
     expect(
       updateVisitResolutionInputSchema.safeParse({

@@ -1081,6 +1081,140 @@ describe("CustomerWorkspace reliable date writes", () => {
     });
   });
 
+  it("edits a makeup visit and replaces a planned visit while preserving completion", async () => {
+    const makeupVisitId = "30000000-0000-4000-8000-000000000001";
+    const completedVisitId = "30000000-0000-4000-8000-000000000002";
+    const plannedVisitId = "30000000-0000-4000-8000-000000000003";
+    const replacementVisitId = "30000000-0000-4000-8000-000000000004";
+    const makeupVisit = {
+      committedOn: "2026-09-03",
+      deliveredOn: null,
+      id: makeupVisitId,
+      internalDurationMinutes: 120,
+      internalPlannedAtUtc: "2026-09-03 06:00:00.000000",
+      locationLabel: "Eski konum",
+      resolutionNote: "Telafi planlanacak",
+      resolutionStatus: "makeup_pending" as const,
+    };
+    const completedVisit = {
+      committedOn: "2026-09-10",
+      deliveredOn: "2026-09-10",
+      id: completedVisitId,
+      internalDurationMinutes: null,
+      internalPlannedAtUtc: null,
+      locationLabel: "Merkez ofis",
+      resolutionNote: null,
+      resolutionStatus: "completed" as const,
+    };
+    const editablePlannedVisit = {
+      ...makeupVisit,
+      committedOn: "2026-09-17",
+      id: plannedVisitId,
+      locationLabel: "Planlanan konum",
+      resolutionNote: null,
+      resolutionStatus: "planned" as const,
+    };
+    const putBodies: Array<{
+      visits: Array<{
+        committedOn: string;
+        id?: string;
+        internalDurationMinutes: number | null;
+        internalStartTime: string | null;
+        locationLabel: string | null;
+      }>;
+    }> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (method === "GET" && url.endsWith("/contracts")) {
+        return jsonResponse({ contracts: [contract] });
+      }
+      if (method === "GET" && url.includes("/month-plans/")) {
+        return jsonResponse({
+          monthPlan: {
+            visits: [makeupVisit, editablePlannedVisit, completedVisit],
+          },
+        });
+      }
+      if (method === "PUT" && url.includes("/month-plans/")) {
+        const body = JSON.parse(String(init?.body)) as (typeof putBodies)[number];
+        putBodies.push(body);
+        return jsonResponse({
+          monthPlan: {
+            visits: body.visits.map((visit) => {
+              if (visit.id === completedVisitId) return completedVisit;
+              return {
+                committedOn: visit.committedOn,
+                deliveredOn: null,
+                id: visit.id ?? replacementVisitId,
+                internalDurationMinutes: visit.internalDurationMinutes,
+                internalPlannedAtUtc: null,
+                locationLabel: visit.locationLabel,
+                resolutionNote: visit.id === makeupVisitId ? makeupVisit.resolutionNote : null,
+                resolutionStatus:
+                  visit.id === makeupVisitId ? "makeup_pending" : "planned",
+              };
+            }),
+          },
+        });
+      }
+      throw new Error(`Unexpected request: ${method} ${url}`);
+    });
+    const user = userEvent.setup();
+    renderWorkspace(fetchMock);
+
+    const locations = await screen.findAllByLabelText("Konum / görüşme kanalı");
+    expect(locations[0]).toBeEnabled();
+    expect(locations[1]).toBeEnabled();
+    expect(locations[2]).toBeDisabled();
+    expect(screen.getByRole("button", { name: "+ Ziyaret satırı" })).toBeEnabled();
+    expect(
+      screen.getAllByRole("button", { name: "Ziyaret satırını kaldır" }),
+    ).toHaveLength(1);
+    await user.selectOptions(screen.getAllByLabelText("Durum")[0]!, "planned");
+    expect(
+      screen.getAllByRole("button", { name: "Ziyaret satırını kaldır" }),
+    ).toHaveLength(1);
+    await user.selectOptions(
+      screen.getAllByLabelText("Durum")[0]!,
+      "makeup_pending",
+    );
+
+    await user.clear(locations[0]!);
+    await user.type(locations[0]!, "Yeni konum");
+    await user.click(screen.getByRole("button", { name: "Aylık planı kaydet" }));
+    await waitFor(() => expect(putBodies).toHaveLength(1));
+    expect(putBodies[0]?.visits).toEqual([
+      expect.objectContaining({ id: makeupVisitId, locationLabel: "Yeni konum" }),
+      expect.objectContaining({ id: plannedVisitId }),
+      expect.objectContaining({ id: completedVisitId, locationLabel: "Merkez ofis" }),
+    ]);
+
+    await user.click(
+      await screen.findByRole("button", { name: "Ziyaret satırını kaldır" }),
+    );
+    await user.click(screen.getByRole("button", { name: "+ Ziyaret satırı" }));
+    const visitDates = screen.getAllByLabelText("Ziyaret günü");
+    const replacementDate = visitDates.at(-1) as HTMLInputElement;
+    fireEvent.input(replacementDate, {
+      target: { value: editablePlannedVisit.committedOn },
+    });
+    const nextLocations = screen.getAllByLabelText("Konum / görüşme kanalı");
+    await user.type(nextLocations.at(-1)!, "Yeniden planlandı");
+    await user.click(screen.getByRole("button", { name: "Aylık planı kaydet" }));
+    await waitFor(() => expect(putBodies).toHaveLength(2));
+    expect(putBodies[1]?.visits).toEqual([
+      expect.objectContaining({ id: makeupVisitId }),
+      expect.objectContaining({ id: completedVisitId }),
+      {
+        committedOn: editablePlannedVisit.committedOn,
+        internalDurationMinutes: null,
+        internalStartTime: null,
+        locationLabel: "Yeniden planlandı",
+      },
+    ]);
+  });
+
   it("keeps editing available but hides lifecycle and audit controls without exact capabilities", async () => {
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);

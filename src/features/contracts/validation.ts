@@ -158,6 +158,7 @@ export const monthlyVisitPlanInputSchema = z
         z
           .object({
             committedOn: isoDateSchema,
+            id: z.string().regex(CANONICAL_UUID_PATTERN).optional(),
             internalDurationMinutes: nullableDurationSchema,
             internalStartTime: nullableClockSchema,
             locationLabel: nullableLocationLabelSchema,
@@ -182,16 +183,25 @@ export const monthlyVisitPlanInputSchema = z
   })
   .strict()
   .superRefine((value, context) => {
-    const seen = new Set<string>();
+    const seenDates = new Set<string>();
+    const seenIds = new Set<string>();
     for (const [index, visit] of value.visits.entries()) {
-      if (seen.has(visit.committedOn)) {
+      if (seenDates.has(visit.committedOn)) {
         context.addIssue({
           code: "custom",
           message: "Aynı gün bir sözleşmede iki kez planlanamaz.",
           path: ["visits", index, "committedOn"],
         });
       }
-      seen.add(visit.committedOn);
+      seenDates.add(visit.committedOn);
+      if (visit.id !== undefined && seenIds.has(visit.id)) {
+        context.addIssue({
+          code: "custom",
+          message: "Aynı ziyaret kaydı iki kez gönderilemez.",
+          path: ["visits", index, "id"],
+        });
+      }
+      if (visit.id !== undefined) seenIds.add(visit.id);
     }
   });
 

@@ -12,7 +12,7 @@ import { summarizeVisitMonth } from "@/features/contracts/month-summary";
 import {
   contractHasVisitOutsideRange,
   contractHasReceivable,
-  deletePlannedMonthVisits,
+  deleteEditableMonthVisits,
   findOverlappingContract,
   findOwnedContractForUpdate,
   findOwnedVisitForUpdate,
@@ -124,6 +124,13 @@ export class VisitLockedError extends Error {
   }
 }
 
+export class VisitDayConflictError extends Error {
+  constructor() {
+    super("A visit already exists on the requested day.");
+    this.name = "VisitDayConflictError";
+  }
+}
+
 export type ContractWriteContext = Readonly<{
   actorId?: string;
   correlationId: string;
@@ -205,7 +212,9 @@ function planAuditSummary(month: string, visits: readonly MonthlyVisit[]) {
     committedOn: visits.map((visit) => visit.committedOn),
     locations: visits.map((visit) => visit.locationLabel),
     month,
+    resolutionStatuses: visits.map((visit) => visit.resolutionStatus),
     visitCount: visits.length,
+    visitIds: visits.map((visit) => visit.id),
   };
 }
 
@@ -217,7 +226,7 @@ function visitAuditSummary(visit: MonthlyVisit) {
   };
 }
 
-function samePlannedVisits(
+function sameVisitPlan(
   existing: readonly MonthlyVisit[],
   requested: readonly MonthlyVisit[],
 ): boolean {
@@ -226,13 +235,23 @@ function samePlannedVisits(
     const other = requested[index];
     return (
       other !== undefined &&
+      visit.id === other.id &&
       visit.committedOn === other.committedOn &&
       visit.internalPlannedAtUtc === other.internalPlannedAtUtc &&
       visit.internalDurationMinutes === other.internalDurationMinutes &&
       visit.locationLabel === other.locationLabel &&
-      visit.resolutionStatus === "planned"
+      visit.deliveredOn === other.deliveredOn &&
+      visit.resolutionNote === other.resolutionNote &&
+      visit.resolutionStatus === other.resolutionStatus
     );
   });
+}
+
+function isEditableVisit(visit: MonthlyVisit): boolean {
+  return (
+    visit.resolutionStatus === "planned" ||
+    visit.resolutionStatus === "makeup_pending"
+  );
 }
 
 function monthlyPlan(
@@ -519,52 +538,95 @@ export async function replaceMonthlyVisitPlan(
       nextMonthStart,
       true,
     );
-    if (existing.some((visit) => visit.resolutionStatus !== "planned")) {
-      throw new MonthPlanLockedError();
-    }
-
+    const existingById = new Map(existing.map((visit) => [visit.id, visit]));
+    const requestedIds = new Set(
+      input.visits.flatMap((visit) =>
+        visit.id === undefined ? [] : [visit.id],
+      ),
+    );
     const requested: MonthlyVisit[] = input.visits
       .map((visit) => ({
         committedOn: visit.committedOn,
         contractId,
-        createdAtUtc: now,
-        deliveredOn: null,
-        id: randomUUID(),
+        createdAtUtc:
+          visit.id === undefined
+            ? now
+            : (existingById.get(visit.id)?.createdAtUtc ?? now),
+        deliveredOn:
+          visit.id === undefined
+            ? null
+            : (existingById.get(visit.id)?.deliveredOn ?? null),
+        id: visit.id ?? randomUUID(),
         internalDurationMinutes: visit.internalDurationMinutes,
         internalPlannedAtUtc: localPlanDateTimeToUtc(
           visit.committedOn,
           visit.internalStartTime,
         ),
         locationLabel: visit.locationLabel,
-        resolutionNote: null,
-        resolutionStatus: "planned" as const,
+        resolutionNote:
+          visit.id === undefined
+            ? null
+            : (existingById.get(visit.id)?.resolutionNote ?? null),
+        resolutionStatus:
+          visit.id === undefined
+            ? ("planned" as const)
+            : (existingById.get(visit.id)?.resolutionStatus ?? "planned"),
         updatedAtUtc: now,
       }))
       .sort((left, right) => left.committedOn.localeCompare(right.committedOn));
 
-    if (samePlannedVisits(existing, requested)) {
+    for (const visit of requested) {
+      const before = existingById.get(visit.id);
+      if (requestedIds.has(visit.id) && before === undefined) {
+        throw new ContractResourceNotFoundError();
+      }
+      if (!before || isEditableVisit(before)) continue;
+      if (!sameVisitPlan([before], [visit])) throw new VisitLockedError();
+    }
+
+    const persistedRequested = requested.map((visit) => {
+      const before = existingById.get(visit.id);
+      return before && !isEditableVisit(before) ? before : visit;
+    });
+
+    const preserved = existing.filter(
+      (visit) =>
+        (!isEditableVisit(visit) ||
+          visit.resolutionStatus === "makeup_pending") &&
+        !requestedIds.has(visit.id),
+    );
+    const after = [...preserved, ...persistedRequested].sort((left, right) =>
+      left.committedOn === right.committedOn
+        ? left.id.localeCompare(right.id)
+        : left.committedOn.localeCompare(right.committedOn),
+    );
+    if (new Set(after.map((visit) => visit.committedOn)).size !== after.length) {
+      throw new VisitDayConflictError();
+    }
+
+    if (sameVisitPlan(existing, after)) {
       return monthlyPlan(contractId, month, existing);
     }
 
-    await deletePlannedMonthVisits(
+    await deleteEditableMonthVisits(
       connection,
       contractId,
       monthStart,
       nextMonthStart,
     );
-    await insertVisitRecords(connection, requested);
+    await insertVisitRecords(connection, after.filter(isEditableVisit));
     await appendAuditEvent(connection, {
       action: "monthly_visit_plan.replaced",
       actorId: context.actorId,
       actorType: "user",
-      afterSummary: planAuditSummary(month, requested),
+      afterSummary: planAuditSummary(month, after),
       beforeSummary: planAuditSummary(month, existing),
       correlationId: context.correlationId,
       entityId: contractId,
       entityType: "consulting_contract",
       occurredAtUtc: now,
     });
-    return monthlyPlan(contractId, month, requested);
+    return monthlyPlan(contractId, month, after);
   });
 }
 

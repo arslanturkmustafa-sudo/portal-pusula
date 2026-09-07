@@ -24,6 +24,32 @@ const weeklyReport = {
     status: "configured",
   },
   forecast: {
+    lines: [
+      {
+        amount: "500.0000",
+        bucket: "scheduled",
+        direction: "inflow",
+        entryCount: 1,
+        eventOn: "2026-09-10",
+        kind: "customer_receivable",
+      },
+      {
+        amount: "35.0000",
+        bucket: "overdue",
+        direction: "outflow",
+        entryCount: 1,
+        eventOn: "2026-09-15",
+        kind: "card_installment",
+      },
+      {
+        amount: "80.0000",
+        bucket: "scheduled",
+        direction: "outflow",
+        entryCount: 2,
+        eventOn: "2026-09-18",
+        kind: "card_installment",
+      },
+    ],
     overdue: {
       inflowAmount: "0.0000",
       netAmount: "-35.0000",
@@ -155,6 +181,22 @@ describe("CashFlowWorkspace", () => {
     expect(zeroPeriod).not.toBeNull();
     expect(within(zeroPeriod!).getByText("₺0 net").className).toMatch(/neutral/u);
     expect(screen.getByText("4 hesap hareketi")).toBeVisible();
+  });
+
+  it("shows only open card installments with their due date, status and amount", async () => {
+    render(<CashFlowWorkspace />);
+
+    const duePlan = await screen.findByRole("region", {
+      name: "Kredi kartı vade planı",
+    });
+    expect(within(duePlan).getByText("3 açık taksit")).toBeVisible();
+    expect(within(duePlan).getByText("15 Eyl 2026")).toBeVisible();
+    expect(within(duePlan).getByText("Gecikmiş · 1 taksit")).toBeVisible();
+    expect(within(duePlan).getByText("₺35")).toBeVisible();
+    expect(within(duePlan).getByText("18 Eyl 2026")).toBeVisible();
+    expect(within(duePlan).getByText("Planlandı · 2 taksit")).toBeVisible();
+    expect(within(duePlan).getByText("₺80")).toBeVisible();
+    expect(within(duePlan).queryByText("10 Eyl 2026")).not.toBeInTheDocument();
   });
 
   it("requests the exact inclusive range and selected monthly granularity", async () => {

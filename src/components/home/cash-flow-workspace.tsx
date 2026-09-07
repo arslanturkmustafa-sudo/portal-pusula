@@ -14,6 +14,20 @@ type Totals = Readonly<{
   outflowAmount: string;
 }>;
 
+type CashFlowForecastLine = Readonly<{
+  amount: string;
+  bucket: "overdue" | "scheduled" | "undated";
+  direction: "inflow" | "outflow";
+  entryCount: number;
+  eventOn: string | null;
+  kind:
+    | "card_installment"
+    | "commission_receivable"
+    | "customer_receivable"
+    | "direct_expense"
+    | "partner_contribution";
+}>;
+
 type CashFlowPeriod = Readonly<{
   accountOpeningAmount: string;
   actual: Totals & Readonly<{ entryCount: number }>;
@@ -36,6 +50,7 @@ type CashFlowPayload = Readonly<{
     status: "configured" | "not_configured";
   }>;
   forecast: Readonly<{
+    lines: readonly CashFlowForecastLine[];
     overdue: Totals;
     overdueInRange: Totals;
     scheduled: Totals;
@@ -209,6 +224,21 @@ export function CashFlowWorkspace() {
         new Decimal(0),
       )
     : new Decimal(0);
+  const cardInstallmentLines = payload
+    ? payload.forecast.lines
+        .filter(
+          (line): line is CashFlowForecastLine & Readonly<{ eventOn: string }> =>
+            line.kind === "card_installment" &&
+            line.direction === "outflow" &&
+            line.eventOn !== null &&
+            (line.bucket === "overdue" || line.bucket === "scheduled"),
+        )
+        .sort((left, right) => left.eventOn.localeCompare(right.eventOn))
+    : [];
+  const cardInstallmentCount = cardInstallmentLines.reduce(
+    (total, line) => total + line.entryCount,
+    0,
+  );
 
   function updateDraft(next: Partial<ReportFilter>): void {
     setValidationMessage(null);
@@ -544,6 +574,40 @@ export function CashFlowWorkspace() {
               </tfoot>
             </table>
           </div>
+
+          <section
+            className={styles.report}
+            aria-labelledby="cash-flow-card-due-title"
+          >
+            <div className={styles.sectionHeading}>
+              <div>
+                <p className="eyebrow">Açık kart borçları</p>
+                <h3 id="cash-flow-card-due-title">Kredi kartı vade planı</h3>
+              </div>
+              <span>{cardInstallmentCount} açık taksit</span>
+            </div>
+            {cardInstallmentLines.length === 0 ? (
+              <p className={styles.loading}>Gösterilecek açık kart taksiti yok.</p>
+            ) : (
+              <div className={styles.watchlist}>
+                {cardInstallmentLines.map((line) => (
+                  <article key={`${line.eventOn}-${line.bucket}`}>
+                    <span>
+                      Vade {" "}
+                      <time dateTime={line.eventOn}>{formatDate(line.eventOn)}</time>
+                    </span>
+                    <strong className={styles.negative}>
+                      {formatMoney(line.amount)}
+                    </strong>
+                    <small>
+                      {line.bucket === "overdue" ? "Gecikmiş" : "Planlandı"}
+                      {` · ${line.entryCount} taksit`}
+                    </small>
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
 
           <div className={styles.watchlist}>
             <article>

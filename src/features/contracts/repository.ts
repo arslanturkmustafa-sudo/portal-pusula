@@ -395,7 +395,7 @@ export async function listMonthVisitRecords(
   return rows.map(mapVisit);
 }
 
-export async function deletePlannedMonthVisits(
+export async function deleteEditableMonthVisits(
   connection: PoolConnection,
   contractId: string,
   monthStart: string,
@@ -406,7 +406,7 @@ export async function deletePlannedMonthVisits(
       WHERE contract_id = ?
         AND committed_on >= ?
         AND committed_on < ?
-        AND resolution_status = 'planned'`,
+        AND resolution_status IN ('planned', 'makeup_pending')`,
     [contractId, monthStart, nextMonthStart],
   );
 }

@@ -9,6 +9,8 @@ import {
   MonthPlanLockedError,
   monthlyVisitPlanInputSchema,
   replaceMonthlyVisitPlan,
+  VisitDayConflictError,
+  VisitLockedError,
 } from "@/features/contracts";
 import {
   authenticateAdminRequest,
@@ -63,6 +65,12 @@ function mappedError(error: unknown): NextResponse | null {
   }
   if (error instanceof MonthPlanLockedError) {
     return json({ status: "month_plan_locked" }, 409);
+  }
+  if (error instanceof VisitLockedError) {
+    return json({ status: "visit_locked" }, 409);
+  }
+  if (error instanceof VisitDayConflictError) {
+    return json({ status: "visit_day_conflict" }, 409);
   }
   return null;
 }

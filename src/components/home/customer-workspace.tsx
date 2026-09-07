@@ -66,6 +66,7 @@ type VisitDraft = {
   internalDurationMinutes: string;
   internalStartTime: string;
   locationLabel: string;
+  persistedResolutionStatus: VisitStatus | null;
   resolutionNote: string;
   resolutionStatus: VisitStatus;
 };
@@ -124,6 +125,7 @@ type CustomerWorkspaceProps = Readonly<{
     canLifecycleContracts: boolean;
     canLifecycleCustomers: boolean;
     canReadAudit: boolean;
+    canWriteVisits?: boolean;
   }>;
   customer: EditableCustomer;
   live: boolean;
@@ -136,6 +138,7 @@ const fullLifecycleCapabilities: NonNullable<CustomerWorkspaceProps["capabilitie
   canLifecycleContracts: true,
   canLifecycleCustomers: true,
   canReadAudit: true,
+  canWriteVisits: true,
 };
 
 type LoadState = "error" | "loading" | "ready";
@@ -205,6 +208,12 @@ function planErrorMessage(status: unknown): string {
   }
   if (status === "month_plan_locked") {
     return "Gerçekleşme kaydı bulunan ay topluca değiştirilemez.";
+  }
+  if (status === "visit_locked") {
+    return "Tamamlanmış veya iptal edilmiş ziyaret değiştirilemez.";
+  }
+  if (status === "visit_day_conflict") {
+    return "Bu sözleşmede aynı güne ait başka bir ziyaret kaydı var.";
   }
   if (status === "validation_error") {
     return "Ziyaret günleri tekrarlanamaz; tarih, saat ve süre alanlarını kontrol edin.";
@@ -340,6 +349,7 @@ function visitDraft(visit?: VisitDto): VisitDraft {
         : String(visit.internalDurationMinutes),
     internalStartTime: localTimeFromUtc(visit?.internalPlannedAtUtc ?? null),
     locationLabel: visit?.locationLabel ?? "",
+    persistedResolutionStatus: visit?.resolutionStatus ?? null,
     resolutionNote: visit?.resolutionNote ?? "",
     resolutionStatus: visit?.resolutionStatus ?? "planned",
   };
@@ -420,6 +430,10 @@ function visitStatusLabel(status: VisitStatus): string {
     makeup_pending: "Telafi bekliyor",
     planned: "Planlandı",
   }[status];
+}
+
+function isEditableVisitStatus(status: VisitStatus): boolean {
+  return status === "planned" || status === "makeup_pending";
 }
 
 export function CustomerWorkspace(props: CustomerWorkspaceProps) {
@@ -653,8 +667,9 @@ function CustomerWorkspaceSession({
     return { net: amount, total: amount, vat: 0 };
   }, [draft.monthlyFeeAmount, draft.vatMode, draft.vatRate]);
 
-  const monthLocked = visits.some(
-    (visit) => visit.resolutionStatus !== "planned",
+  const canWriteVisits = capabilities.canWriteVisits ?? false;
+  const hasLockedVisits = visits.some(
+    (visit) => !isEditableVisitStatus(visit.resolutionStatus),
   );
   const planMutationPending =
     planSaveState === "saving" || visitSaveId !== null;
@@ -925,22 +940,30 @@ function CustomerWorkspaceSession({
 
   async function savePlan(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!live || contract === null || monthLocked) return;
+    if (!live || contract === null || !canWriteVisits) return;
     const formData = new FormData(event.currentTarget);
     const planMonth = formText(formData, "selectedMonth");
-    const submittedVisits = visits.map((visit, index) => ({
-      committedOn: formText(formData, `visits.${index}.committedOn`),
-      internalDurationMinutes:
-        formText(formData, `visits.${index}.internalDurationMinutes`) === ""
-          ? null
-          : Number(
-              formText(formData, `visits.${index}.internalDurationMinutes`),
-            ),
-      internalStartTime:
-        formText(formData, `visits.${index}.internalStartTime`) || null,
-      locationLabel:
-        formText(formData, `visits.${index}.locationLabel`).trim() || null,
-    }));
+    const submittedVisits = visits.map((visit, index) => {
+      const editable = isEditableVisitStatus(visit.resolutionStatus);
+      const duration = editable
+        ? formText(formData, `visits.${index}.internalDurationMinutes`)
+        : visit.internalDurationMinutes;
+      const startTime = editable
+        ? formText(formData, `visits.${index}.internalStartTime`)
+        : visit.internalStartTime;
+      const location = editable
+        ? formText(formData, `visits.${index}.locationLabel`)
+        : visit.locationLabel;
+      return {
+        committedOn: editable
+          ? formText(formData, `visits.${index}.committedOn`)
+          : visit.committedOn,
+        ...(visit.id === null ? {} : { id: visit.id }),
+        internalDurationMinutes: duration === "" ? null : Number(duration),
+        internalStartTime: startTime || null,
+        locationLabel: location.trim() || null,
+      };
+    });
 
     if (
       !/^\d{4}-\d{2}$/u.test(planMonth) ||
@@ -1639,7 +1662,7 @@ function CustomerWorkspaceSession({
                   </label>
                   <button
                     className="text-action"
-                    disabled={monthLocked}
+                    disabled={!canWriteVisits || planMutationPending}
                     type="button"
                     onClick={() => setVisits((current) => [...current, visitDraft()])}
                   >
@@ -1658,7 +1681,11 @@ function CustomerWorkspaceSession({
                         <label>
                           <span>Ziyaret günü</span>
                           <input
-                            disabled={monthLocked}
+                            disabled={
+                              !canWriteVisits ||
+                              !isEditableVisitStatus(visit.resolutionStatus) ||
+                              planMutationPending
+                            }
                             name={`visits.${index}.committedOn`}
                             required
                             type="date"
@@ -1673,7 +1700,11 @@ function CustomerWorkspaceSession({
                         <label>
                           <span>Konum / görüşme kanalı</span>
                           <input
-                            disabled={monthLocked}
+                            disabled={
+                              !canWriteVisits ||
+                              !isEditableVisitStatus(visit.resolutionStatus) ||
+                              planMutationPending
+                            }
                             maxLength={191}
                             name={`visits.${index}.locationLabel`}
                             placeholder="Ofis, saha veya çevrim içi"
@@ -1688,7 +1719,11 @@ function CustomerWorkspaceSession({
                         <label>
                           <span>İç saat</span>
                           <input
-                            disabled={monthLocked}
+                            disabled={
+                              !canWriteVisits ||
+                              !isEditableVisitStatus(visit.resolutionStatus) ||
+                              planMutationPending
+                            }
                             name={`visits.${index}.internalStartTime`}
                             type="time"
                             value={visit.internalStartTime}
@@ -1700,7 +1735,11 @@ function CustomerWorkspaceSession({
                         <label>
                           <span>Süre (dk)</span>
                           <input
-                            disabled={monthLocked}
+                            disabled={
+                              !canWriteVisits ||
+                              !isEditableVisitStatus(visit.resolutionStatus) ||
+                              planMutationPending
+                            }
                             max={720}
                             min={15}
                             name={`visits.${index}.internalDurationMinutes`}
@@ -1714,10 +1753,14 @@ function CustomerWorkspaceSession({
                             }
                           />
                         </label>
-                        {visit.resolutionStatus === "planned" && !monthLocked ? (
+                        {canWriteVisits &&
+                        visit.resolutionStatus === "planned" &&
+                        (visit.persistedResolutionStatus === null ||
+                          visit.persistedResolutionStatus === "planned") ? (
                           <button
                             aria-label="Ziyaret satırını kaldır"
                             className="visit-remove"
+                            disabled={planMutationPending}
                             type="button"
                             onClick={() =>
                               setVisits((current) =>
@@ -1734,6 +1777,8 @@ function CustomerWorkspaceSession({
                               <span>Durum</span>
                               <select
                                 disabled={
+                                  !canWriteVisits ||
+                                  planMutationPending ||
                                   visit.resolutionStatus === "completed" ||
                                   visit.resolutionStatus === "cancelled_by_agreement"
                                 }
@@ -1759,6 +1804,7 @@ function CustomerWorkspaceSession({
                               <label>
                                 <span>Gerçekleşen gün</span>
                                 <input
+                                  disabled={!canWriteVisits || planMutationPending}
                                   name={`visits.${index}.deliveredOn`}
                                   type="date"
                                   value={visit.deliveredOn ?? visit.committedOn}
@@ -1774,6 +1820,7 @@ function CustomerWorkspaceSession({
                               <label className="visit-note">
                                 <span>Açıklama</span>
                                 <input
+                                  disabled={!canWriteVisits || planMutationPending}
                                   required={visit.resolutionStatus === "cancelled_by_agreement"}
                                   value={visit.resolutionNote}
                                   onChange={(event) =>
@@ -1784,7 +1831,7 @@ function CustomerWorkspaceSession({
                             ) : null}
                             <button
                               className="text-action visit-resolution-save"
-                              disabled={visitSaveId === visit.id}
+                              disabled={!canWriteVisits || planMutationPending}
                               type="button"
                               onClick={() => void saveVisitResolution(index)}
                             >
@@ -1802,18 +1849,25 @@ function CustomerWorkspaceSession({
                   </div>
                 )}
 
-                {monthLocked ? (
+                {!canWriteVisits ? (
                   <p className="plan-lock-note">
-                    Gerçekleşme kaydı bulunan ay topluca değiştirilmez; ziyaretleri tek tek güncelleyin.
+                    Bu planı değiştirmek için ziyaret düzenleme izni gerekir.
                   </p>
                 ) : (
-                  <button
-                    className="primary-action plan-submit"
-                    disabled={planSaveState === "saving"}
-                    type="submit"
-                  >
-                    {planSaveState === "saving" ? "Kaydediliyor…" : "Aylık planı kaydet"}
-                  </button>
+                  <>
+                    {hasLockedVisits ? (
+                      <p className="plan-lock-note">
+                        Tamamlanmış ve iptal edilmiş ziyaretler korunur; planlanan ve telafi bekleyen satırları düzenleyebilirsiniz.
+                      </p>
+                    ) : null}
+                    <button
+                      className="primary-action plan-submit"
+                      disabled={planMutationPending}
+                      type="submit"
+                    >
+                      {planSaveState === "saving" ? "Kaydediliyor…" : "Aylık planı kaydet"}
+                    </button>
+                  </>
                 )}
                 {planSaveState === "error" && planError !== null ? (
                   <p className="entry-error" role="alert">
