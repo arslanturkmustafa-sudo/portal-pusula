@@ -351,6 +351,7 @@ async function waitForBlockedMigrationRunners(
 async function resetKnownMigrationArtifacts(pool: Pool): Promise<void> {
   // These identifiers are compile-time constants and this suite is enabled only
   // for the disposable MariaDB provisioned by scripts/test-mariadb.mjs.
+  await pool.query(`DROP TABLE IF EXISTS \`${taxObligationTable}\``);
   await pool.query(`DROP TABLE IF EXISTS \`${workTaskVisitTable}\``);
   await pool.query(`DROP TABLE IF EXISTS \`${financeLedgerEntryTable}\``);
   await pool.query(`DROP TABLE IF EXISTS \`${financeTransactionTable}\``);
