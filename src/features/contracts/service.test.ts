@@ -567,6 +567,34 @@ describe("contract write service", () => {
     expect(mocks.createTaskInTransaction).not.toHaveBeenCalled();
   });
 
+  it("rejects legacy string work items when the visit is already completed", async () => {
+    const completedVisit = {
+      ...plannedVisit,
+      deliveredOn: "2026-09-03",
+      resolutionStatus: "completed" as const,
+    };
+    mocks.findOwnedVisitForUpdate.mockResolvedValue(completedVisit);
+
+    await expect(
+      updateMonthlyVisitWithWorkItems(
+        {} as Pool,
+        customerId,
+        contractId,
+        visitId,
+        {
+          deliveredOn: completedVisit.deliveredOn,
+          resolutionNote: completedVisit.resolutionNote,
+          resolutionStatus: "completed",
+          workItems: ["Retry ile yeniden gönderilen uygulama"],
+        },
+        context,
+      ),
+    ).rejects.toBeInstanceOf(VisitLockedError);
+    expect(mocks.updateVisitRecord).not.toHaveBeenCalled();
+    expect(mocks.listVisitWorkItemReferences).not.toHaveBeenCalled();
+    expect(mocks.createTaskInTransaction).not.toHaveBeenCalled();
+  });
+
   it("fails closed when a new work item identity belongs to another task", async () => {
     const completedVisit = {
       ...plannedVisit,

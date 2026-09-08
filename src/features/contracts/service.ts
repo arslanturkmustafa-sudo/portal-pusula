@@ -776,7 +776,7 @@ export async function updateMonthlyVisitWithWorkItems(
       input,
       context,
       now,
-      true,
+      !input.workItems.some((workItem) => typeof workItem === "string"),
     );
     const tasks: WorkTask[] = [];
 
