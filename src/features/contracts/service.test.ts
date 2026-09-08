@@ -72,6 +72,7 @@ import {
   replaceMonthlyVisitPlan,
   updateMonthlyVisitWithWorkItems,
   updateCustomerContract,
+  VisitLockedError,
 } from "@/features/contracts/service";
 
 const customerId = "10000000-0000-4000-8000-000000000001";
@@ -393,6 +394,62 @@ describe("contract write service", () => {
     expect(mocks.insertTaskVisitRecord.mock.calls[0]?.[0]).toBe(
       sharedConnection,
     );
+  });
+
+  it("edits only the note of a completed visit without duplicating work items", async () => {
+    const completedVisit = {
+      ...plannedVisit,
+      deliveredOn: "2026-09-03",
+      resolutionNote: "İlk ziyaret notu",
+      resolutionStatus: "completed" as const,
+    };
+    mocks.findOwnedVisitForUpdate.mockResolvedValue(completedVisit);
+
+    const result = await updateMonthlyVisitWithWorkItems(
+      {} as Pool,
+      customerId,
+      contractId,
+      visitId,
+      {
+        deliveredOn: completedVisit.deliveredOn,
+        resolutionNote: "Güncellenen ziyaret notu",
+        resolutionStatus: "completed",
+        workItems: [],
+      },
+      context,
+    );
+
+    expect(result.visit).toMatchObject({
+      deliveredOn: completedVisit.deliveredOn,
+      resolutionNote: "Güncellenen ziyaret notu",
+      resolutionStatus: "completed",
+    });
+    expect(mocks.updateVisitRecord).toHaveBeenCalledOnce();
+    expect(mocks.createTaskInTransaction).not.toHaveBeenCalled();
+    expect(mocks.appendAuditEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        action: "monthly_visit_commitment.updated",
+        entityId: visitId,
+      }),
+    );
+
+    await expect(
+      updateMonthlyVisitWithWorkItems(
+        {} as Pool,
+        customerId,
+        contractId,
+        visitId,
+        {
+          deliveredOn: completedVisit.deliveredOn,
+          resolutionNote: "Yeni çalışma eklenmemeli",
+          resolutionStatus: "completed",
+          workItems: ["Sonradan eklenen çalışma"],
+        },
+        context,
+      ),
+    ).rejects.toBeInstanceOf(VisitLockedError);
+    expect(mocks.updateVisitRecord).toHaveBeenCalledOnce();
   });
 
   it("rejects completed work items without a delivery date before a transaction", async () => {

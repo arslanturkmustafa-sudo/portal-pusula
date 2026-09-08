@@ -10,14 +10,14 @@
 .legend {
   padding: 0;
   color: #25324b;
-  font-size: 0.68rem;
+  font-size: 0.78rem;
   font-weight: 720;
 }
 
 .hint {
   margin: -0.25rem 0 0;
   color: #73809a;
-  font-size: 0.65rem;
+  font-size: 0.74rem;
   line-height: 1.45;
 }
 
@@ -41,7 +41,7 @@
   display: grid;
   gap: 0.35rem;
   color: #53617a;
-  font-size: 0.62rem;
+  font-size: 0.72rem;
   font-weight: 680;
 }
 
@@ -54,7 +54,7 @@
   background: #fff;
   color: #17233b;
   font: inherit;
-  font-size: 0.75rem;
+  font-size: 0.84rem;
 }
 
 .remove,
@@ -66,7 +66,7 @@
   color: #46536c;
   cursor: pointer;
   font: inherit;
-  font-size: 0.66rem;
+  font-size: 0.74rem;
   font-weight: 700;
 }
 

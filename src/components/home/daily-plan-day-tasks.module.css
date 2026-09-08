@@ -21,7 +21,7 @@
 .sectionHeading > span {
   color: var(--ink-soft);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 0.58rem;
+  font-size: 0.72rem;
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
@@ -29,7 +29,7 @@
 .sectionHeading h4 {
   margin-top: 0.18rem;
   font-family: Georgia, "Times New Roman", serif;
-  font-size: 1.08rem;
+  font-size: 1.22rem;
   font-weight: 500;
 }
 
@@ -65,7 +65,7 @@
 .itemHeading strong {
   min-width: 0;
   color: var(--ink);
-  font-size: 0.76rem;
+  font-size: 0.88rem;
   line-height: 1.4;
 }
 
@@ -75,7 +75,7 @@
   align-items: center;
   flex: 0 0 auto;
   border-radius: 999px;
-  font-size: 0.56rem;
+  font-size: 0.7rem;
   font-weight: 750;
   line-height: 1.25;
 }
@@ -90,7 +90,7 @@
 .context {
   margin: 0.45rem 0 0;
   color: var(--ink-soft);
-  font-size: 0.64rem;
+  font-size: 0.76rem;
   line-height: 1.45;
 }
 
@@ -102,7 +102,7 @@
   border-radius: 999px;
   background: var(--sheet);
   color: var(--ink);
-  font-size: 0.58rem;
+  font-size: 0.7rem;
   font-weight: 700;
 }
 
@@ -114,7 +114,7 @@
   margin: 0.65rem 0 0;
   color: var(--ink-soft);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 0.56rem;
+  font-size: 0.7rem;
 }
 
 .source {

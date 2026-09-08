@@ -1804,7 +1804,11 @@ function CustomerWorkspaceSession({
                               <label>
                                 <span>Gerçekleşen gün</span>
                                 <input
-                                  disabled={!canWriteVisits || planMutationPending}
+                                  disabled={
+                                    !canWriteVisits ||
+                                    planMutationPending ||
+                                    visit.persistedResolutionStatus === "completed"
+                                  }
                                   name={`visits.${index}.deliveredOn`}
                                   type="date"
                                   value={visit.deliveredOn ?? visit.committedOn}
@@ -1819,9 +1823,11 @@ function CustomerWorkspaceSession({
                             {visit.resolutionStatus !== "planned" ? (
                               <label className="visit-note">
                                 <span>Açıklama</span>
-                                <input
+                                <textarea
                                   disabled={!canWriteVisits || planMutationPending}
+                                  maxLength={2000}
                                   required={visit.resolutionStatus === "cancelled_by_agreement"}
+                                  rows={3}
                                   value={visit.resolutionNote}
                                   onChange={(event) =>
                                     updateVisit(index, { resolutionNote: event.target.value })
@@ -1837,7 +1843,9 @@ function CustomerWorkspaceSession({
                             >
                               {visitSaveId === visit.id
                                 ? "Kaydediliyor…"
-                                : visitStatusLabel(visit.resolutionStatus)}
+                                : visit.persistedResolutionStatus === "completed"
+                                  ? "Açıklamayı kaydet"
+                                  : visitStatusLabel(visit.resolutionStatus)}
                             </button>
                           </>
                         ) : null}
@@ -1857,7 +1865,9 @@ function CustomerWorkspaceSession({
                   <>
                     {hasLockedVisits ? (
                       <p className="plan-lock-note">
-                        Tamamlanmış ve iptal edilmiş ziyaretler korunur; planlanan ve telafi bekleyen satırları düzenleyebilirsiniz.
+                        Tamamlanan ziyaretlerin açıklamasını sonradan
+                        güncelleyebilirsiniz. Plan, gerçekleşme günü ve iptal
+                        edilmiş ziyaretler korunur.
                       </p>
                     ) : null}
                     <button

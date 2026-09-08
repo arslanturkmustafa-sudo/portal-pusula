@@ -11,7 +11,7 @@
   color: #273b63;
   cursor: pointer;
   font: inherit;
-  font-size: 0.65rem;
+  font-size: 0.76rem;
   font-weight: 720;
 }
 
@@ -66,7 +66,7 @@
 .header p {
   margin: 0 0 0.3rem;
   color: #73809a;
-  font-size: 0.62rem;
+  font-size: 0.72rem;
   font-weight: 720;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -75,7 +75,7 @@
 .header h2 {
   margin: 0;
   color: #17233b;
-  font-size: 1.08rem;
+  font-size: 1.24rem;
   letter-spacing: -0.02em;
 }
 
@@ -100,7 +100,7 @@
 .explanation {
   margin: 0;
   color: #65718a;
-  font-size: 0.75rem;
+  font-size: 0.84rem;
   line-height: 1.55;
 }
 
@@ -108,13 +108,13 @@
   display: grid;
   gap: 0.45rem;
   color: #25324b;
-  font-size: 0.68rem;
+  font-size: 0.78rem;
   font-weight: 720;
 }
 
 .field small {
   color: #8290a8;
-  font-size: 0.6rem;
+  font-size: 0.7rem;
   font-weight: 560;
 }
 
@@ -128,7 +128,7 @@
   background: #fff;
   color: #17233b;
   font: inherit;
-  font-size: 0.75rem;
+  font-size: 0.84rem;
 }
 
 .field textarea {
@@ -159,7 +159,7 @@
   border-radius: 9px;
   cursor: pointer;
   font: inherit;
-  font-size: 0.7rem;
+  font-size: 0.78rem;
   font-weight: 720;
 }
 
