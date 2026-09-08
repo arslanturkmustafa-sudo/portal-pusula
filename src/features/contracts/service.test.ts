@@ -15,9 +15,11 @@ const mocks = vi.hoisted(() => ({
   findOverlappingContract: vi.fn(),
   findOwnedContractForUpdate: vi.fn(),
   findOwnedVisitForUpdate: vi.fn(),
+  findTaskStateForUpdate: vi.fn(),
   insertContractRecord: vi.fn(),
   insertVisitRecords: vi.fn(),
   insertTaskVisitRecord: vi.fn(),
+  listVisitWorkItemReferences: vi.fn(),
   listMonthVisitRecords: vi.fn(),
   createTaskInTransaction: vi.fn(),
   updateContractRecord: vi.fn(),
@@ -48,8 +50,13 @@ vi.mock("@/features/tasks/service", () => ({
   createTaskInTransaction: mocks.createTaskInTransaction,
 }));
 
+vi.mock("@/features/tasks/repository", () => ({
+  findTaskStateForUpdate: mocks.findTaskStateForUpdate,
+}));
+
 vi.mock("@/features/tasks/visit-repository", () => ({
   insertTaskVisitRecord: mocks.insertTaskVisitRecord,
+  listVisitWorkItemReferences: mocks.listVisitWorkItemReferences,
 }));
 
 vi.mock("@/platform/audit/repository", () => ({
@@ -73,6 +80,7 @@ import {
   updateMonthlyVisitWithWorkItems,
   updateCustomerContract,
   VisitLockedError,
+  VisitWorkItemIdentityConflictError,
 } from "@/features/contracts/service";
 
 const customerId = "10000000-0000-4000-8000-000000000001";
@@ -145,7 +153,9 @@ describe("contract write service", () => {
       projectId,
     });
     mocks.findOverlappingContract.mockResolvedValue(null);
+    mocks.findTaskStateForUpdate.mockResolvedValue(null);
     mocks.listMonthVisitRecords.mockResolvedValue([]);
+    mocks.listVisitWorkItemReferences.mockResolvedValue([]);
     mocks.contractHasReceivable.mockResolvedValue(false);
     mocks.contractHasVisitOutsideRange.mockResolvedValue(false);
     mocks.updateContractRecord.mockResolvedValue(true);
@@ -396,7 +406,7 @@ describe("contract write service", () => {
     );
   });
 
-  it("edits only the note of a completed visit without duplicating work items", async () => {
+  it("edits only the note of a completed visit without creating work items", async () => {
     const completedVisit = {
       ...plannedVisit,
       deliveredOn: "2026-09-03",
@@ -426,6 +436,7 @@ describe("contract write service", () => {
     });
     expect(mocks.updateVisitRecord).toHaveBeenCalledOnce();
     expect(mocks.createTaskInTransaction).not.toHaveBeenCalled();
+    expect(mocks.listVisitWorkItemReferences).not.toHaveBeenCalled();
     expect(mocks.appendAuditEvent).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
@@ -433,6 +444,136 @@ describe("contract write service", () => {
         entityId: visitId,
       }),
     );
+  });
+
+  it("appends only new identified work items and treats their retry as a no-op", async () => {
+    const completedVisit = {
+      ...plannedVisit,
+      deliveredOn: "2026-09-03",
+      resolutionStatus: "completed" as const,
+    };
+    const existingTaskId = "50000000-0000-4000-8000-000000000001";
+    const newTaskId = "50000000-0000-4000-8000-000000000002";
+    const newTask = {
+      id: newTaskId,
+      status: "done",
+      title: "Sonradan eklenen uygulama",
+    };
+    const workItems = [
+      { id: existingTaskId, title: "Mevcut uygulama" },
+      { id: newTaskId, title: newTask.title },
+    ];
+    mocks.findOwnedVisitForUpdate.mockResolvedValue(completedVisit);
+    mocks.listVisitWorkItemReferences
+      .mockResolvedValueOnce([
+        { taskId: existingTaskId, title: "Mevcut uygulama" },
+      ])
+      .mockResolvedValueOnce([
+        { taskId: existingTaskId, title: "Mevcut uygulama" },
+        { taskId: newTaskId, title: newTask.title },
+      ]);
+    mocks.createTaskInTransaction.mockResolvedValue(newTask);
+
+    const first = await updateMonthlyVisitWithWorkItems(
+      {} as Pool,
+      customerId,
+      contractId,
+      visitId,
+      {
+        deliveredOn: completedVisit.deliveredOn,
+        resolutionNote: "Uygulama eklendi",
+        resolutionStatus: "completed",
+        workItems,
+      },
+      context,
+    );
+    const retry = await updateMonthlyVisitWithWorkItems(
+      {} as Pool,
+      customerId,
+      contractId,
+      visitId,
+      {
+        deliveredOn: completedVisit.deliveredOn,
+        resolutionNote: "Uygulama eklendi",
+        resolutionStatus: "completed",
+        workItems,
+      },
+      context,
+    );
+
+    expect(first.tasks).toEqual([newTask]);
+    expect(retry.tasks).toEqual([]);
+    expect(mocks.createTaskInTransaction).toHaveBeenCalledOnce();
+    expect(mocks.createTaskInTransaction).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ title: newTask.title }),
+      expect.objectContaining({ now: context.now }),
+      newTaskId,
+    );
+    expect(mocks.insertTaskVisitRecord).toHaveBeenCalledOnce();
+    expect(mocks.insertTaskVisitRecord).toHaveBeenCalledWith(
+      expect.anything(),
+      newTaskId,
+      visitId,
+      "2026-09-01 12:00:00.000000",
+    );
+    expect(mocks.findTaskStateForUpdate).toHaveBeenCalledOnce();
+  });
+
+  it("keeps a completed visit date and status locked while appending", async () => {
+    const completedVisit = {
+      ...plannedVisit,
+      deliveredOn: "2026-09-03",
+      resolutionStatus: "completed" as const,
+    };
+    mocks.findOwnedVisitForUpdate.mockResolvedValue(completedVisit);
+
+    await expect(
+      updateMonthlyVisitWithWorkItems(
+        {} as Pool,
+        customerId,
+        contractId,
+        visitId,
+        {
+          deliveredOn: "2026-09-04",
+          resolutionNote: completedVisit.resolutionNote,
+          resolutionStatus: "completed",
+          workItems: [
+            {
+              id: "50000000-0000-4000-8000-000000000001",
+              title: "Sonradan eklenen uygulama",
+            },
+          ],
+        },
+        context,
+      ),
+    ).rejects.toBeInstanceOf(VisitLockedError);
+    await expect(
+      updateMonthlyVisitWithWorkItems(
+        {} as Pool,
+        customerId,
+        contractId,
+        visitId,
+        {
+          deliveredOn: null,
+          resolutionNote: "Telafiye alınmamalı",
+          resolutionStatus: "makeup_pending",
+          workItems: [],
+        },
+        context,
+      ),
+    ).rejects.toBeInstanceOf(VisitLockedError);
+    expect(mocks.updateVisitRecord).not.toHaveBeenCalled();
+    expect(mocks.createTaskInTransaction).not.toHaveBeenCalled();
+  });
+
+  it("rejects legacy string work items when the visit is already completed", async () => {
+    const completedVisit = {
+      ...plannedVisit,
+      deliveredOn: "2026-09-03",
+      resolutionStatus: "completed" as const,
+    };
+    mocks.findOwnedVisitForUpdate.mockResolvedValue(completedVisit);
 
     await expect(
       updateMonthlyVisitWithWorkItems(
@@ -442,14 +583,47 @@ describe("contract write service", () => {
         visitId,
         {
           deliveredOn: completedVisit.deliveredOn,
-          resolutionNote: "Yeni çalışma eklenmemeli",
+          resolutionNote: completedVisit.resolutionNote,
           resolutionStatus: "completed",
-          workItems: ["Sonradan eklenen çalışma"],
+          workItems: ["Retry ile yeniden gönderilen uygulama"],
         },
         context,
       ),
     ).rejects.toBeInstanceOf(VisitLockedError);
-    expect(mocks.updateVisitRecord).toHaveBeenCalledOnce();
+    expect(mocks.updateVisitRecord).not.toHaveBeenCalled();
+    expect(mocks.listVisitWorkItemReferences).not.toHaveBeenCalled();
+    expect(mocks.createTaskInTransaction).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when a new work item identity belongs to another task", async () => {
+    const completedVisit = {
+      ...plannedVisit,
+      deliveredOn: "2026-09-03",
+      resolutionStatus: "completed" as const,
+    };
+    const conflictingTaskId = "50000000-0000-4000-8000-000000000001";
+    mocks.findOwnedVisitForUpdate.mockResolvedValue(completedVisit);
+    mocks.findTaskStateForUpdate.mockResolvedValue({ id: conflictingTaskId });
+
+    await expect(
+      updateMonthlyVisitWithWorkItems(
+        {} as Pool,
+        customerId,
+        contractId,
+        visitId,
+        {
+          deliveredOn: completedVisit.deliveredOn,
+          resolutionNote: null,
+          resolutionStatus: "completed",
+          workItems: [
+            { id: conflictingTaskId, title: "Çakışan uygulama" },
+          ],
+        },
+        context,
+      ),
+    ).rejects.toBeInstanceOf(VisitWorkItemIdentityConflictError);
+    expect(mocks.createTaskInTransaction).not.toHaveBeenCalled();
+    expect(mocks.insertTaskVisitRecord).not.toHaveBeenCalled();
   });
 
   it("rejects completed work items without a delivery date before a transaction", async () => {

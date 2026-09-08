@@ -8,6 +8,7 @@ vi.mock("server-only", () => ({}));
 import {
   findTaskVisitLinkForUpdate,
   insertTaskVisitRecord,
+  listVisitWorkItemReferences,
 } from "@/features/tasks/visit-repository";
 
 describe("task visit repository", () => {
@@ -41,6 +42,37 @@ describe("task visit repository", () => {
         "30000000-0000-4000-8000-000000000001",
       ),
     ).resolves.toBeNull();
+  });
+
+  it("lists task identities already linked to a visit", async () => {
+    const visitId = "40000000-0000-4000-8000-000000000001";
+    const execute = vi.fn().mockResolvedValue([
+      [
+        {
+          task_id: "30000000-0000-4000-8000-000000000001",
+          title: "Mevcut uygulama",
+        },
+      ],
+      [],
+    ]);
+
+    await expect(
+      listVisitWorkItemReferences(
+        { execute } as unknown as PoolConnection,
+        visitId,
+      ),
+    ).resolves.toEqual([
+      {
+        taskId: "30000000-0000-4000-8000-000000000001",
+        title: "Mevcut uygulama",
+      },
+    ]);
+    expect(execute).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /FROM work_task_visit AS task_visit[\s\S]*INNER JOIN work_task AS task[\s\S]*WHERE task_visit.visit_id = \?/u,
+      ),
+      [visitId],
+    );
   });
 
   it("inserts one immutable task-to-visit link with caller timestamps", async () => {

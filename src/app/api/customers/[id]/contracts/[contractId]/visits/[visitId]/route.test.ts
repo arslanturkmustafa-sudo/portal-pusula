@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => {
   class ContractResourceNotFoundError extends Error {}
   class MonthOutsideContractError extends Error {}
   class VisitLockedError extends Error {}
+  class VisitWorkItemIdentityConflictError extends Error {}
   return {
     authenticateAdminRequest: vi.fn(),
     ContractClosedError,
@@ -18,6 +19,7 @@ const mocks = vi.hoisted(() => {
     parseInput: vi.fn(),
     updateMonthlyVisitWithWorkItems: vi.fn(),
     VisitLockedError,
+    VisitWorkItemIdentityConflictError,
   };
 });
 
@@ -28,6 +30,7 @@ vi.mock("@/features/contracts", () => ({
   updateMonthlyVisitWithWorkItems: mocks.updateMonthlyVisitWithWorkItems,
   updateVisitWithWorkItemsInputSchema: { parse: mocks.parseInput },
   VisitLockedError: mocks.VisitLockedError,
+  VisitWorkItemIdentityConflictError: mocks.VisitWorkItemIdentityConflictError,
 }));
 
 vi.mock("@/platform/auth/server-auth", () => ({
@@ -188,5 +191,18 @@ describe("visit work item API", () => {
     expect(response.status).toBe(503);
     expect(JSON.parse(body)).toEqual({ status: "service_unavailable" });
     expect(body).not.toContain("sentinel");
+  });
+
+  it("returns a conflict when a work item identity is already in use", async () => {
+    mocks.updateMonthlyVisitWithWorkItems.mockRejectedValue(
+      new mocks.VisitWorkItemIdentityConflictError(),
+    );
+
+    const response = await PATCH(request(), context);
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      status: "work_item_identity_conflict",
+    });
   });
 });

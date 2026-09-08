@@ -242,10 +242,40 @@ export const updateVisitResolutionInputSchema = z
     }
   });
 
+const visitWorkItemTitleSchema = z
+  .string()
+  .trim()
+  .max(MAX_VISIT_WORK_ITEM_LENGTH);
+
+const identifiedVisitWorkItemSchema = z
+  .object({
+    id: z.string().regex(CANONICAL_UUID_PATTERN),
+    title: visitWorkItemTitleSchema,
+  })
+  .strict();
+
 const visitWorkItemsSchema = z
-  .array(z.string().trim().max(MAX_VISIT_WORK_ITEM_LENGTH))
+  .array(z.union([visitWorkItemTitleSchema, identifiedVisitWorkItemSchema]))
   .max(MAX_VISIT_WORK_ITEMS)
-  .transform((items) => items.filter((item) => item.length > 0));
+  .superRefine((items, context) => {
+    const seenIds = new Set<string>();
+    for (const [index, item] of items.entries()) {
+      if (typeof item === "string") continue;
+      if (seenIds.has(item.id)) {
+        context.addIssue({
+          code: "custom",
+          message: "Aynı çalışma maddesi iki kez gönderilemez.",
+          path: [index, "id"],
+        });
+      }
+      seenIds.add(item.id);
+    }
+  })
+  .transform((items) =>
+    items.filter((item) =>
+      typeof item === "string" ? item.length > 0 : item.title.length > 0,
+    ),
+  );
 
 export const updateVisitWithWorkItemsInputSchema = z
   .object({

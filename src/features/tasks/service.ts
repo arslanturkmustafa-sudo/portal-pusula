@@ -167,8 +167,10 @@ export async function createTaskInTransaction(
   connection: PoolConnection,
   rawInput: CreateTaskInput,
   context: TaskWriteContext,
+  taskId: string = randomUUID(),
 ): Promise<WorkTask> {
   const input = createTaskInputSchema.parse(rawInput);
+  assertCanonicalUuid(taskId);
   if (context.actorId !== undefined) assertCanonicalUuid(context.actorId);
   const now = toUtcDateTime6(context.now ?? new Date());
   const assigneeUserAccountId =
@@ -185,7 +187,7 @@ export async function createTaskInTransaction(
     customerId: input.customerId,
     description: input.description,
     dueOn: input.dueOn,
-    id: randomUUID(),
+    id: taskId,
     priority: input.priority,
     projectId: input.projectId,
     status: input.status,

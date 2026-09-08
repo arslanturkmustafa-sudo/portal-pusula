@@ -8,6 +8,7 @@ import {
   updateMonthlyVisitWithWorkItems,
   updateVisitWithWorkItemsInputSchema,
   VisitLockedError,
+  VisitWorkItemIdentityConflictError,
 } from "@/features/contracts";
 import { hasPermission } from "@/platform/auth/permissions";
 import { authenticateAdminRequest } from "@/platform/auth/server-auth";
@@ -100,6 +101,9 @@ export async function PATCH(
     }
     if (error instanceof VisitLockedError) {
       return json({ status: "visit_locked" }, 409);
+    }
+    if (error instanceof VisitWorkItemIdentityConflictError) {
+      return json({ status: "work_item_identity_conflict" }, 409);
     }
     return json({ status: "service_unavailable" }, 503);
   }

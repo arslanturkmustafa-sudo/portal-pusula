@@ -898,6 +898,19 @@ button, a { color: inherit; }
   font-size: 0.62rem;
 }
 .visit-note { grid-column: span 2; }
+.visit-work-items {
+  grid-column: 1 / -1;
+  margin-top: 0.1rem;
+  padding: 0.8rem;
+  border: 1px solid var(--line);
+  background: var(--sheet-soft);
+}
+.visit-work-items-permission {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 0.64rem;
+  line-height: 1.45;
+}
 .visit-resolution-save { grid-column: -2 / -1; }
 .plan-submit { margin-top: 0.9rem; }
 .plan-lock-note {
@@ -1419,7 +1432,8 @@ button, a { color: inherit; }
   }
   .visit-row > * { grid-column: auto; }
   .visit-row > label:first-child,
-  .visit-note { grid-column: 1 / -1; }
+  .visit-note,
+  .visit-work-items { grid-column: 1 / -1; }
   .visit-remove,
   .visit-resolution-save { grid-column: 2; }
   .account-workspace-grid { grid-template-columns: 1fr; }
@@ -1513,6 +1527,7 @@ button, a { color: inherit; }
   .visit-row > *,
   .visit-row > label:first-child,
   .visit-note,
+  .visit-work-items,
   .visit-remove,
   .visit-resolution-save { grid-column: 1; }
   .visit-remove,
@@ -1538,6 +1553,9 @@ button, a { color: inherit; }
 
 /* Günlük plan çalışma alanı */
 .daily-plan-workspace { max-width: 1040px; }
+@media (min-width: 1100px) {
+  .daily-plan-workspace { max-width: none; }
+}
 .daily-plan-heading {
   min-height: 82px;
   align-items: flex-end;

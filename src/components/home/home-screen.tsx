@@ -354,6 +354,7 @@ type HomeScreenProps = Readonly<{
     canLifecycleContracts: boolean;
     canLifecycleCustomers: boolean;
     canWriteCustomers: boolean;
+    canWriteTasks?: boolean;
     canWriteVisits?: boolean;
   }>;
   live?: boolean;
@@ -369,6 +370,7 @@ const fullCapabilities: NonNullable<HomeScreenProps["capabilities"]> = {
   canLifecycleContracts: true,
   canLifecycleCustomers: true,
   canWriteCustomers: true,
+  canWriteTasks: true,
   canWriteVisits: true,
 };
 
@@ -1081,6 +1083,7 @@ export function HomeScreen({
                 canLifecycleContracts: capabilities.canLifecycleContracts,
                 canLifecycleCustomers: capabilities.canLifecycleCustomers,
                 canReadAudit: capabilities.canReadAudit,
+                canWriteTasks: capabilities.canWriteTasks ?? false,
                 canWriteVisits: capabilities.canWriteVisits ?? false,
               }}
               live={live}

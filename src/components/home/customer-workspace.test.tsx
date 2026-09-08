@@ -1215,7 +1215,7 @@ describe("CustomerWorkspace reliable date writes", () => {
     ]);
   });
 
-  it("updates a completed visit note while keeping its date and status fixed", async () => {
+  it("appends only new applications to a completed visit with a stable retry id", async () => {
     const completedVisit = {
       committedOn: "2026-09-10",
       deliveredOn: "2026-09-10",
@@ -1244,7 +1244,9 @@ describe("CustomerWorkspace reliable date writes", () => {
         }
         if (method === "PATCH" && url.endsWith(`/visits/${completedVisit.id}`)) {
           patchBodies.push(JSON.parse(String(init?.body)));
-          return jsonResponse({ visit: updatedVisit });
+          return patchBodies.length === 1
+            ? jsonResponse({ status: "service_unavailable" }, 503)
+            : jsonResponse({ createdTaskCount: 1, visit: updatedVisit });
         }
         throw new Error(`Unexpected request: ${method} ${url}`);
       },
@@ -1263,21 +1265,55 @@ describe("CustomerWorkspace reliable date writes", () => {
     const note = await screen.findByLabelText("Açıklama");
     expect(screen.getByLabelText("Gerçekleşen gün")).toBeDisabled();
     expect(
-      screen.getByRole("button", { name: "Açıklamayı kaydet" }),
+      screen.getByRole("group", { name: "Yeni yapılan uygulamalar" }),
+    ).toHaveTextContent("Daha önce kaydedilen uygulamalar görevlerde korunur.");
+    expect(
+      screen.getByRole("button", { name: "Ziyaret içeriğini kaydet" }),
     ).toBeEnabled();
     await user.clear(note);
     await user.type(note, "Güncellenen ziyaret özeti");
+    await user.type(
+      screen.getByRole("textbox", { name: "Yeni uygulama 1" }),
+      "Yeni kontrol listesi hazırlandı",
+    );
+    await user.click(screen.getByRole("button", { name: "+ Yeni uygulama ekle" }));
     await user.click(
-      screen.getByRole("button", { name: "Açıklamayı kaydet" }),
+      screen.getByRole("button", { name: "Ziyaret içeriğini kaydet" }),
     );
 
     await waitFor(() => expect(patchBodies).toHaveLength(1));
-    expect(patchBodies[0]).toEqual({
+    expect(screen.getByRole("textbox", { name: "Yeni uygulama 1" })).toHaveValue(
+      "Yeni kontrol listesi hazırlandı",
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Ziyaret içeriğini kaydet" }),
+    );
+
+    await waitFor(() => expect(patchBodies).toHaveLength(2));
+    const firstBody = patchBodies[0] as {
+      workItems: Array<{ id: string; title: string }>;
+    };
+    expect(firstBody).toEqual({
       deliveredOn: completedVisit.deliveredOn,
       resolutionNote: "Güncellenen ziyaret özeti",
       resolutionStatus: "completed",
+      workItems: [
+        {
+          id: expect.stringMatching(
+            /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u,
+          ),
+          title: "Yeni kontrol listesi hazırlandı",
+        },
+      ],
     });
+    expect(patchBodies[1]).toEqual(firstBody);
     expect(onVisitsSaved).toHaveBeenCalledWith([updatedVisit]);
+    expect(screen.getByRole("textbox", { name: "Yeni uygulama 1" })).toHaveValue(
+      "",
+    );
+    expect(
+      screen.queryByRole("textbox", { name: "Yeni uygulama 2" }),
+    ).not.toBeInTheDocument();
   });
 
   it("keeps editing available but hides lifecycle and audit controls without exact capabilities", async () => {

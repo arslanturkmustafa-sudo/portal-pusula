@@ -197,6 +197,7 @@ describe("task service", () => {
         title: "Ziyaret çalışma maddesi",
       },
       context,
+      taskId,
     );
 
     expect(mocks.insertTaskRecord).toHaveBeenCalledWith(
@@ -204,6 +205,7 @@ describe("task service", () => {
       expect.objectContaining({
         completedAtUtc: nowSql,
         dueOn: "2026-09-03",
+        id: taskId,
         status: "done",
       }),
     );
