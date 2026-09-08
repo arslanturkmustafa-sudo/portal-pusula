@@ -420,14 +420,37 @@
   overflow: auto;
 }
 
-.tableHint {
-  display: none;
+.tableNote {
+  color: var(--ink-soft, #66716c);
+  font-size: 0.8rem;
+  line-height: 1.5;
+  margin: 0.7rem 0;
 }
 
 .tableFrame table {
   border-collapse: collapse;
-  min-width: 66rem;
+  min-width: 44rem;
   width: 100%;
+}
+
+.movementTable {
+  table-layout: fixed;
+}
+
+.movementTable th:nth-child(1) {
+  width: 9rem;
+}
+
+.movementTable th:nth-child(3) {
+  width: 8.5rem;
+}
+
+.movementTable th:nth-child(4) {
+  width: 7rem;
+}
+
+.movementTable th:nth-child(5) {
+  width: 10rem;
 }
 
 .tableFrame caption {
@@ -477,16 +500,79 @@
   font-variant-numeric: tabular-nums;
 }
 
-.tableFrame tbody tr:last-child th,
-.tableFrame tbody tr:last-child td {
-  border-bottom: 1px solid var(--line-strong, #9fa69f);
+.movementCell {
+  overflow-wrap: anywhere;
+  text-align: left !important;
+  white-space: normal !important;
 }
 
-.tableFrame tfoot th,
-.tableFrame tfoot td {
-  background: color-mix(in srgb, var(--sheet-soft, #f8f5ed) 84%, var(--forest, #183d32));
-  border-bottom: 0;
+.movementCell strong,
+.movementCell small {
+  display: block;
+}
+
+.movementCell strong {
+  color: var(--ink, #1d2925);
+  line-height: 1.35;
+}
+
+.movementCell small {
+  color: var(--ink-soft, #66716c);
+  line-height: 1.35;
+  margin-top: 0.2rem;
+}
+
+.badge {
+  border: 1px solid transparent;
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 0.73rem;
+  font-weight: 760;
+  line-height: 1;
+  padding: 0.38rem 0.55rem;
+  white-space: nowrap;
+}
+
+.status_actual {
+  background: #e7f4ee;
+  border-color: #b7d8ca;
+  color: #175944;
+}
+
+.status_scheduled {
+  background: #eaf2f7;
+  border-color: #bfd3df;
+  color: #28586f;
+}
+
+.status_overdue {
+  background: #fff0e7;
+  border-color: #e6c0a8;
+  color: #8a3f20;
+}
+
+.direction_inflow {
+  background: #edf7f2;
+  border-color: #c5dfd3;
+  color: #15634d;
+}
+
+.direction_outflow {
+  background: #faefec;
+  border-color: #e3c6bf;
+  color: #913b2c;
+}
+
+.amountCell {
   font-weight: 780;
+  text-align: right;
+}
+
+.emptyMovement {
+  color: var(--ink-soft, #66716c);
+  padding: 1.5rem !important;
+  text-align: center !important;
+  white-space: normal !important;
 }
 
 .watchlist {
@@ -625,20 +711,6 @@
     text-align: left;
   }
 
-  .tableHint {
-    align-items: center;
-    color: var(--ink-soft, #58635e);
-    display: flex;
-    font-size: 0.8rem;
-    font-weight: 650;
-    gap: 0.45rem;
-    margin: 0 0 -0.45rem;
-  }
-
-  .tableHint::before {
-    content: "↔";
-    font-size: 1rem;
-  }
 }
 
 @media (max-width: 620px) {
@@ -694,6 +766,87 @@
 
   .legend {
     justify-content: flex-start;
+  }
+
+  .tableFrame {
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    overflow: visible;
+  }
+
+  .movementTable {
+    display: block;
+    min-width: 0 !important;
+  }
+
+  .movementTable thead {
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    position: absolute;
+    white-space: nowrap;
+    width: 1px;
+  }
+
+  .movementTable tbody {
+    display: grid;
+    gap: 0.7rem;
+  }
+
+  .movementTable tbody tr {
+    background: var(--sheet, #fffef9);
+    border: 1px solid var(--line, #cbc8bd);
+    border-radius: 0.85rem;
+    display: grid;
+    gap: 0.55rem 0.75rem;
+    grid-template-areas:
+      "date amount"
+      "movement movement"
+      "status direction";
+    grid-template-columns: minmax(0, 1fr) auto;
+    padding: 0.85rem;
+  }
+
+  .movementTable tbody th,
+  .movementTable tbody td {
+    border: 0;
+    padding: 0;
+    text-align: left;
+    white-space: normal;
+  }
+
+  .movementTable tbody th {
+    background: transparent;
+    grid-area: date;
+    position: static;
+  }
+
+  .movementCell {
+    grid-area: movement;
+  }
+
+  .statusCell {
+    grid-area: status;
+  }
+
+  .directionCell {
+    grid-area: direction;
+    justify-self: end;
+  }
+
+  .amountCell {
+    grid-area: amount;
+    justify-self: end;
+    text-align: right !important;
+  }
+
+  .emptyMovement {
+    grid-column: 1 / -1;
+    padding: 0.25rem !important;
+    text-align: left !important;
   }
 
   .watchlist {

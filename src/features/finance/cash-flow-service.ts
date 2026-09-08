@@ -10,6 +10,7 @@ import {
   type CashFlowActualDailyAggregate,
   type CashFlowForecastAggregate,
   type CashFlowLedgerSnapshot,
+  type CashFlowMovement,
 } from "@/features/finance/cash-flow-repository";
 import {
   cashFlowFilterSchema,
@@ -58,6 +59,7 @@ export type CashFlowReport = Readonly<{
   }>;
   generatedOn: string;
   granularity: CashFlowGranularity;
+  movements: readonly CashFlowMovement[];
   periods: readonly CashFlowPeriodReport[];
   range: Readonly<{ from: string; to: string }>;
   unclassifiedExpenses: Readonly<{ amount: string; entryCount: number }>;
@@ -166,6 +168,24 @@ function inPeriod(eventOn: string | null, period: PeriodBounds): boolean {
   return eventOn !== null && eventOn >= period.startOn && eventOn <= period.endOn;
 }
 
+function reportMovements(
+  movements: readonly CashFlowMovement[],
+  filter: CashFlowFilter,
+): readonly CashFlowMovement[] {
+  return movements
+    .filter(
+      (movement) =>
+        movement.eventOn >= filter.from && movement.eventOn <= filter.to,
+    )
+    .sort((left, right) =>
+      left.eventOn.localeCompare(right.eventOn) ||
+      left.status.localeCompare(right.status) ||
+      left.direction.localeCompare(right.direction) ||
+      left.kind.localeCompare(right.kind) ||
+      left.id.localeCompare(right.id),
+    );
+}
+
 export function composeCashFlowReport(
   snapshot: CashFlowLedgerSnapshot,
   rawFilter: CashFlowFilter,
@@ -218,7 +238,8 @@ export function composeCashFlowReport(
   return {
     actual: actualTotals(snapshot.actual),
     assumptions: [
-      "Gerçekleşen gelir ve giderler, hesap hareketleri defterinden alınır; iç transferler brüt giriş veya çıkışı şişirmez.",
+      "Hesap defteri özeti ve bakiye hesabı yalnız hesap hareketleri defterinden alınır; iç transferler brüt giriş veya çıkışı şişirmez.",
+      "Hareket listesi, hesap defteri satırları ile operasyon modüllerindeki gerçekleşmeleri ayrı kaynaklar olarak gösterir; aralarında otomatik eşleştirme veya birleşik toplam yapılmaz.",
       "Dönem açılışı yalnız Europe/Istanbul iş gününe göre dönemden önce oluşturulmuş hesapların başlangıç bakiyelerini içerir; dönem içinde açılan hesapların başlangıç bakiyesi ayrı gösterilir ve kapanışta uzlaştırılır.",
       "Gerçekleşen hareketler Europe/Istanbul iş gününe göre bugünle sınırlandırılır; ileri tarihli açık kalemler tahmin olarak ayrı gösterilir.",
       "Gecikmiş toplam, seçilen aralıktan önce doğmuş olsa da bugün hâlâ açık olan tüm vadeli kalemleri içerir; dönem satırları yalnız kendi tarih aralığına düşen gecikmeleri gösterir.",
@@ -241,6 +262,7 @@ export function composeCashFlowReport(
     },
     generatedOn,
     granularity: filter.granularity,
+    movements: reportMovements(snapshot.movements, filter),
     periods,
     range: { from: filter.from, to: filter.to },
     unclassifiedExpenses: {
