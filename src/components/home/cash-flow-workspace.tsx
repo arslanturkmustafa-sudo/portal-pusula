@@ -23,20 +23,34 @@ type CashFlowForecastLine = Readonly<{
   kind:
     | "card_installment"
     | "commission_receivable"
-    | "customer_receivable"
-    | "direct_expense"
-    | "partner_contribution";
+     | "customer_receivable"
+     | "direct_expense"
+     | "partner_contribution"
+     | "tax_payment";
 }>;
 
-type CashFlowMovement = Readonly<{
-  amount: string;
+type CashFlowDueItem = Readonly<{
   direction: "inflow" | "outflow";
-  eventOn: string;
+  dueOn: string;
   id: string;
-  kind: string;
+  kind:
+    | "card_payment"
+     | "customer_receivable"
+     | "other_expense"
+     | "partner_contribution"
+     | "tax_payment";
   label: string;
+  remainingAmount: string;
+  settledAmount: string;
   sourceLabel: string | null;
-  status: "actual" | "overdue" | "scheduled";
+  status:
+    | "actual"
+    | "overdue"
+    | "partial"
+    | "planned"
+    | "scheduled"
+    | "settled";
+  totalAmount: string;
 }>;
 
 type CashFlowPeriod = Readonly<{
@@ -57,9 +71,11 @@ type CashFlowPayload = Readonly<{
     accountCount: number;
     asOfOn: string;
     closingBalanceAmount: string;
+    currentAssetAmount: string;
     openingBalanceAmount: string;
     status: "configured" | "not_configured";
   }>;
+  dueItems: readonly CashFlowDueItem[];
   forecast: Readonly<{
     lines: readonly CashFlowForecastLine[];
     overdue: Totals;
@@ -69,7 +85,6 @@ type CashFlowPayload = Readonly<{
   }>;
   generatedOn: string;
   granularity: Granularity;
-  movements: readonly CashFlowMovement[];
   periods: readonly CashFlowPeriod[];
   range: Readonly<{ from: string; to: string }>;
   unclassifiedExpenses: Readonly<{ amount: string; entryCount: number }>;
@@ -162,29 +177,41 @@ function tone(value: string): string {
   return amount.isNegative() ? styles.negative : styles.positive;
 }
 
-function movementStatusLabel(status: CashFlowMovement["status"]): string {
+function dueItemStatusLabel(item: CashFlowDueItem): string {
+  if (item.kind === "other_expense") {
+    return "Planlanan diğer ödeme";
+  }
+  if (item.status === "settled") {
+    return item.direction === "inflow" ? "Alındı" : "Ödendi";
+  }
+  if (item.status === "partial") {
+    return item.direction === "inflow" ? "Kısmen alındı" : "Kısmen ödendi";
+  }
+  if (item.status === "overdue") {
+    return item.direction === "inflow"
+      ? "Gecikmiş alacak"
+      : "Gecikmiş ödeme";
+  }
+  return item.direction === "inflow" ? "Alınacak" : "Ödenecek";
+}
+
+function dueItemKindLabel(kind: CashFlowDueItem["kind"]): string {
   return {
-    actual: "Gerçekleşti",
-    overdue: "Gecikmiş",
-    scheduled: "Planlandı",
-  }[status];
+    card_payment: "Kredi kartı",
+    customer_receivable: "Müşteri alacağı",
+    other_expense: "Diğer ödeme",
+    partner_contribution: "Ortaklık katkısı",
+    tax_payment: "Vergi",
+  }[kind];
 }
 
-function movementDirectionLabel(
-  direction: CashFlowMovement["direction"],
-): string {
-  return direction === "inflow" ? "Giriş" : "Çıkış";
-}
-
-function signedMoney(movement: CashFlowMovement): string {
-  const sign = movement.direction === "inflow" ? "+" : "−";
-  return `${sign}${formatMoney(movement.amount)}`;
-}
-
-const movementStatusOrder: Readonly<Record<CashFlowMovement["status"], number>> = {
+const dueItemStatusOrder: Readonly<Record<CashFlowDueItem["status"], number>> = {
   actual: 0,
-  scheduled: 1,
-  overdue: 2,
+  settled: 1,
+  partial: 2,
+  planned: 3,
+  scheduled: 4,
+  overdue: 5,
 };
 
 function barSize(value: string, maximum: Decimal): CSSProperties {
@@ -261,18 +288,17 @@ export function CashFlowWorkspace() {
         new Decimal(0),
       )
     : new Decimal(0);
-  const movements = payload
-    ? payload.movements
+  const dueItems = payload
+    ? payload.dueItems
         .filter(
-          (movement) =>
-            movement.eventOn >= payload.range.from &&
-            movement.eventOn <= payload.range.to,
+          (item) =>
+            item.dueOn >= payload.range.from && item.dueOn <= payload.range.to,
         )
         .sort((left, right) => {
-          const dateComparison = left.eventOn.localeCompare(right.eventOn);
+          const dateComparison = left.dueOn.localeCompare(right.dueOn);
           if (dateComparison !== 0) return dateComparison;
           const statusComparison =
-            movementStatusOrder[left.status] - movementStatusOrder[right.status];
+            dueItemStatusOrder[left.status] - dueItemStatusOrder[right.status];
           if (statusComparison !== 0) return statusComparison;
           const directionComparison = left.direction.localeCompare(
             right.direction,
@@ -282,6 +308,30 @@ export function CashFlowWorkspace() {
             : left.id.localeCompare(right.id);
         })
     : [];
+  const carryoverNetAmount = payload
+    ? new Decimal(payload.forecast.overdue.netAmount)
+        .minus(payload.forecast.overdueInRange.netAmount)
+        .toFixed(4)
+    : "0.0000";
+  let projectedBalance = new Decimal(
+    payload?.balance.currentAssetAmount ?? "0",
+  ).plus(carryoverNetAmount);
+  const projectionByDueOn = new Map<string, string>();
+  for (const item of dueItems) {
+    if (item.status !== "actual" && item.status !== "settled") {
+      projectedBalance =
+        item.direction === "inflow"
+          ? projectedBalance.plus(item.remainingAmount)
+          : projectedBalance.minus(item.remainingAmount);
+    }
+    projectionByDueOn.set(item.dueOn, projectedBalance.toFixed(4));
+  }
+  const projectedDueItems = dueItems.map((item) => ({
+    ...item,
+    projectedBalanceAmount:
+      projectionByDueOn.get(item.dueOn) ?? projectedBalance.toFixed(4),
+  }));
+  const endProjectedBalanceAmount = projectedBalance.toFixed(4);
 
   function updateDraft(next: Partial<ReportFilter>): void {
     setValidationMessage(null);
@@ -302,20 +352,20 @@ export function CashFlowWorkspace() {
           <p className="eyebrow">Likidite ve dönem raporu</p>
           <h2 id="cash-flow-title">Nakit akışı</h2>
           <p>
-            Seçtiğiniz dönemdeki gerçekleşen ve beklenen tüm giriş ve çıkışları
-            tek bir tarih akışında görün; haftalık veya aylık eğilimi izleyin.
+            Hesap defteri hareketlerini dönemsel izleyin; alacak ve ödemelerin
+            gerçekleşen veya beklenen durumunu vade tarihine göre görün.
           </p>
         </div>
       </header>
 
       <aside className={styles.scopeNotice} aria-label="Nakit akışı rapor kapsamı">
-        <strong>Birleşik tablo kapsamı</strong>
+        <strong>İki ayrı görünüm</strong>
         <p>
-          Hesap defterine işlenen hareketler, kendi modülünde ödendi veya tahsil
-          edildi olarak kapanan kayıtlar ve açık planlanan ya da gecikmiş
-          kalemler bu tabloda birlikte görünür. Modül kayıtlarıyla hesap
-          hareketleri arasında doğrudan bağ kurulamadığı için aynı işlem iki
-          ayrı satırda görünebilir; birleşik toplam gösterilmez.
+          Üst bölüm hesap defterindeki gerçekleşen giriş ve çıkışları korur. Alt
+          bölüm yalnız alacak ve tahsilatları, kredi kartlarının vade bazındaki
+          toplam ödemelerini ve ileri tarihli diğer ödeme planlarını kategori ve
+          tarih bazında
+          gösterir; tek tek kredi kartı harcamaları burada listelenmez.
         </p>
       </aside>
 
@@ -540,82 +590,145 @@ export function CashFlowWorkspace() {
           <section aria-labelledby="cash-flow-movements-title">
             <div className={styles.sectionHeading}>
               <div>
-                <p className="eyebrow">Birleşik hareket görünümü</p>
-                <h3 id="cash-flow-movements-title">Nakit hareketleri</h3>
+                <p className="eyebrow">Vade takibi</p>
+                <h3 id="cash-flow-movements-title">Vade planı</h3>
               </div>
-              <span>{movements.length} hareket</span>
+              <span>{projectedDueItems.length} vadeli kayıt</span>
             </div>
             <p className={styles.tableNote} id="cash-flow-movements-note" role="note">
-              Aynı ekonomik işlem, kaynak kaydıyla hesap hareketi
-              eşleştirilemediğinde birden fazla satırda görünebilir. Satırlar
-              birleştirilmez ve bu tablodan toplam hesaplanmaz.
+              Alacaklar; kredi kartı borçları kart ve vade bazında toplam olarak;
+              ileri tarihli diğer ödeme planları ise kategori ve tarih bazında
+              gösterilir. Tekil kart
+              harcamaları ve hesap defteri hareketleri burada tekrarlanmaz.
+              Öngörü, bugünkü gerçek varlığa devreden gecikmiş açıkları ve bu
+              aralıktaki kalan tutarları gün gün uygular. Kapanmış kayıtlar
+              bakiyeye yeniden eklenmez. Tahsilat veya ödeme durumunu kapatmak
+              gerçek varlığı tek başına değiştirmez; gerçek bakiye için ilgili
+              hesap hareketi de Hesaplar bölümüne işlenmelidir.
             </p>
+            <dl className={styles.projectionSummary}>
+              <div>
+                <dt>Gerçek varlık</dt>
+                <dd>{formatMoney(payload.balance.currentAssetAmount)}</dd>
+                <small>{formatDate(payload.generatedOn)} itibarıyla</small>
+              </div>
+              <div>
+                <dt>Devreden gecikmiş açıklar</dt>
+                <dd className={tone(carryoverNetAmount)}>
+                  {formatMoney(carryoverNetAmount)}
+                </dd>
+                <small>Seçilen aralığın öncesinden</small>
+              </div>
+              <div>
+                <dt>Dönem sonu öngörülen varlık</dt>
+                <dd className={tone(endProjectedBalanceAmount)}>
+                  {formatMoney(endProjectedBalanceAmount)}
+                </dd>
+                <small>Açık kalan tutarlar sonrası</small>
+              </div>
+            </dl>
             <div
               className={styles.tableFrame}
               role="region"
               aria-describedby="cash-flow-movements-note"
-              aria-label="Nakit hareketleri tablosu"
+              aria-label="Vade planı tablosu"
               tabIndex={0}
             >
               <table className={styles.movementTable}>
                 <caption>
-                  Seçilen tarih aralığındaki gerçekleşen, planlanan ve gecikmiş
-                  nakit giriş ve çıkışları
+                  Seçilen tarih aralığındaki vadesi gelen alacak ve ödemeler
                 </caption>
                 <thead>
                   <tr>
-                    <th scope="col">Tarih</th>
-                    <th scope="col">Hareket</th>
+                    <th scope="col">Vade</th>
+                    <th scope="col">Kalem</th>
                     <th scope="col">Durum</th>
-                    <th scope="col">Yön</th>
-                    <th scope="col">Tutar</th>
+                    <th scope="col">Toplam</th>
+                    <th scope="col">Alınan / ödenen</th>
+                    <th scope="col">Kalan</th>
+                    <th scope="col">Adım sonrası öngörülen varlık</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {movements.map((movement) => (
-                    <tr key={movement.id}>
-                      <th data-label="Tarih" scope="row">
-                        <time dateTime={movement.eventOn}>
-                          {formatDate(movement.eventOn)}
+                  {projectedDueItems.map((item) => (
+                    <tr key={item.id}>
+                      <th data-label="Vade" scope="row">
+                        <time dateTime={item.dueOn}>
+                          {formatDate(item.dueOn)}
                         </time>
                       </th>
-                      <td className={styles.movementCell} data-label="Hareket">
-                        <strong>{movement.label}</strong>
-                        {movement.sourceLabel ? (
-                          <small>{movement.sourceLabel}</small>
-                        ) : null}
+                      <td className={styles.movementCell} data-label="Kalem">
+                        <strong>{item.label}</strong>
+                        <small>
+                          {dueItemKindLabel(item.kind)}
+                          {item.sourceLabel ? ` · ${item.sourceLabel}` : ""}
+                        </small>
                       </td>
                       <td className={styles.statusCell} data-label="Durum">
                         <span
-                          className={`${styles.badge} ${styles[`status_${movement.status}`]}`}
+                          className={`${styles.badge} ${styles[`status_${item.status}`]}`}
                         >
-                          {movementStatusLabel(movement.status)}
-                        </span>
-                      </td>
-                      <td className={styles.directionCell} data-label="Yön">
-                        <span
-                          className={`${styles.badge} ${styles[`direction_${movement.direction}`]}`}
-                        >
-                          {movementDirectionLabel(movement.direction)}
+                          {dueItemStatusLabel(item)}
                         </span>
                       </td>
                       <td
-                        className={`${styles.amountCell} ${
-                          movement.direction === "inflow"
+                        className={`${styles.amountCell} ${styles.totalCell} ${
+                          item.direction === "inflow"
                             ? styles.inflowCell
                             : styles.outflowCell
                         }`}
-                        data-label="Tutar"
+                        data-label="Toplam"
                       >
-                        {signedMoney(movement)}
+                        <span className={styles.mobileCellLabel}>Toplam</span>
+                        {formatMoney(item.totalAmount)}
+                      </td>
+                      <td
+                        className={`${styles.amountCell} ${styles.settledCell} ${
+                          item.kind === "other_expense" && item.status === "actual"
+                            ? styles.neutral
+                            : item.direction === "inflow"
+                              ? styles.inflowCell
+                              : styles.outflowCell
+                        }`}
+                        data-label="Alınan / ödenen"
+                      >
+                        <span className={styles.mobileCellLabel}>Alınan / ödenen</span>
+                        {item.kind === "other_expense" && item.status === "actual"
+                          ? "—"
+                          : formatMoney(item.settledAmount)}
+                      </td>
+                      <td
+                        className={`${styles.amountCell} ${styles.remainingCell} ${
+                          (item.kind === "other_expense" && item.status === "actual") ||
+                          new Decimal(item.remainingAmount).isZero()
+                            ? styles.neutral
+                            : item.direction === "inflow"
+                              ? styles.inflowCell
+                              : styles.outflowCell
+                        }`}
+                        data-label="Kalan"
+                      >
+                        <span className={styles.mobileCellLabel}>Kalan</span>
+                        {item.kind === "other_expense" && item.status === "actual"
+                          ? "—"
+                          : formatMoney(item.remainingAmount)}
+                      </td>
+                      <td
+                        className={`${styles.projectionCell} ${tone(
+                          item.projectedBalanceAmount,
+                        )}`}
+                        data-label="Öngörülen varlık"
+                      >
+                        <span className={styles.mobileCellLabel}>Öngörülen varlık</span>
+                        {formatMoney(item.projectedBalanceAmount)}
                       </td>
                     </tr>
                   ))}
-                  {movements.length === 0 ? (
+                  {projectedDueItems.length === 0 ? (
                     <tr>
-                      <td className={styles.emptyMovement} colSpan={5}>
-                        Seçilen tarih aralığında gerçekleşen, planlanan veya
-                        gecikmiş nakit hareketi yok.
+                      <td className={styles.emptyMovement} colSpan={7}>
+                        Seçilen tarih aralığında vadeli alacak, tahsilat veya
+                        ödeme kaydı yok.
                       </td>
                     </tr>
                   ) : null}
@@ -633,7 +746,7 @@ export function CashFlowWorkspace() {
             <article>
               <span>Planlanan çıkış</span>
               <strong>{formatMoney(payload.forecast.scheduled.outflowAmount)}</strong>
-              <small>Seçilen aralıktaki taksit ve ileri tarihli giderler</small>
+              <small>Seçilen aralıktaki kart vade toplamları ve diğer ödemeler</small>
             </article>
             <article>
               <span>Tüm açık gecikmiş net</span>

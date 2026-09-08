@@ -9,6 +9,7 @@ const financeSections = [
   { href: "/finans/giderler", label: "Giderler" },
   { href: "/finans/kartlar", label: "Kartlar ve ödeme planı" },
   { href: "/finans/nakit-akisi", label: "Nakit akışı" },
+  { href: "/finans/vergiler", label: "Vergiler" },
   { href: "/finans/raporlar", label: "Proje görünümü" },
   { href: "/finans/ortaklik", label: "Ortaklık hesabı" },
 ] as const;

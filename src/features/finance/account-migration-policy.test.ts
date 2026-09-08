@@ -53,7 +53,9 @@ describe("finance accounts ledger migration policy", () => {
     expect(migration.slice(drop, add)).toMatch(
       /^ALTER TABLE `user_permission` DROP CONSTRAINT `chk_user_permission_code`;--> statement-breakpoint\r?\n$/u,
     );
-    for (const permission of PERMISSION_CODES) {
+    for (const permission of PERMISSION_CODES.filter(
+      (code) => !code.startsWith("finance.taxes."),
+    )) {
       expect(migration).toContain(`BINARY '${permission}'`);
     }
   });

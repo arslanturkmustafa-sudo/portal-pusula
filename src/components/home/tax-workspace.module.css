@@ -1,0 +1,720 @@
+.workspace {
+  min-width: 0;
+  padding: 0 0 2.5rem;
+}
+
+.commandBar {
+  min-height: 126px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 2rem;
+  padding: 1.6rem 0 1.15rem;
+}
+
+.commandBar h2,
+.editor h3,
+.vatPanel h3,
+.register h3 {
+  margin: 0;
+  color: var(--ink);
+  font-family: var(--font-geist-sans), Inter, sans-serif;
+  letter-spacing: -0.035em;
+}
+
+.commandBar h2 {
+  max-width: 670px;
+  font-size: clamp(1.75rem, 3.4vw, 2.85rem);
+  font-weight: 650;
+  line-height: 1.02;
+}
+
+.commandBar > div:first-child > p:last-child,
+.vatHeading p,
+.registerHeading p {
+  max-width: 720px;
+  margin: 0.62rem 0 0;
+  color: var(--ink-soft);
+  font-size: 0.82rem;
+  line-height: 1.55;
+}
+
+.kicker {
+  margin: 0 0 0.45rem;
+  color: var(--terracotta);
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 0.62rem;
+  font-weight: 750;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.commandActions {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.65rem;
+}
+
+.commandActions label,
+.form label,
+.amountFields label,
+.lifecycleFields label {
+  display: grid;
+  gap: 0.38rem;
+}
+
+.commandActions label > span,
+.form label > span,
+.amountFields label > span,
+.lifecycleFields label > span {
+  color: var(--ink-soft);
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.045em;
+  text-transform: uppercase;
+}
+
+.commandActions input,
+.form input,
+.form select,
+.form textarea {
+  width: 100%;
+  min-height: 43px;
+  padding: 0.62rem 0.72rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--sheet);
+  color: var(--ink);
+  font: inherit;
+}
+
+.form textarea {
+  min-height: 88px;
+  resize: vertical;
+}
+
+.commandActions input:focus,
+.form input:focus,
+.form select:focus,
+.form textarea:focus {
+  border-color: var(--focus);
+  outline: 2px solid color-mix(in srgb, var(--focus) 18%, transparent);
+  outline-offset: 0;
+}
+
+.primaryButton,
+.quietButton,
+.quickCreate button,
+.rowActions button,
+.error button {
+  min-height: 42px;
+  padding: 0.64rem 0.86rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--sheet);
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-weight: 720;
+}
+
+.primaryButton {
+  border-color: var(--forest);
+  background: var(--forest);
+  color: var(--sheet);
+}
+
+.primaryButton:hover,
+.primaryButton:focus-visible {
+  background: color-mix(in srgb, var(--forest) 88%, #fff);
+}
+
+.quietButton:hover,
+.quickCreate button:hover,
+.rowActions button:hover,
+.error button:hover {
+  border-color: var(--ink);
+  background: var(--sheet-soft);
+}
+
+.primaryButton:disabled,
+.quietButton:disabled,
+.rowActions button:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+
+.summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-bottom: 1rem;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--sheet);
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--ink) 5%, transparent);
+}
+
+.summary > div {
+  min-width: 0;
+  display: grid;
+  gap: 0.42rem;
+  padding: 1rem 1.1rem;
+  border-right: 1px solid var(--line);
+}
+
+.summary > div:last-child {
+  border-right: 0;
+}
+
+.summary span,
+.vatEquation span,
+.vatOutcomes span,
+.formEstimate span {
+  color: var(--ink-soft);
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.summary strong {
+  font-size: clamp(1.08rem, 2vw, 1.45rem);
+  letter-spacing: -0.025em;
+}
+
+.alertSummary {
+  background: color-mix(in srgb, #b44429 7%, var(--sheet));
+  color: #9a321e;
+}
+
+.positiveSummary {
+  background: color-mix(in srgb, #20785d 7%, var(--sheet));
+  color: #176049;
+}
+
+.vatPanel,
+.register,
+.editor {
+  margin-top: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--sheet);
+  box-shadow: 0 10px 30px color-mix(in srgb, var(--ink) 5%, transparent);
+}
+
+.vatPanel {
+  overflow: hidden;
+}
+
+.vatHeading,
+.registerHeading,
+.editorHeading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1.2rem 1.25rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.vatPanel h3,
+.register h3,
+.editor h3 {
+  font-size: 1.25rem;
+  font-weight: 650;
+}
+
+.vatHeading > div,
+.registerHeading > div,
+.editorHeading > div {
+  min-width: 0;
+}
+
+.vatEquation {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 0.8rem;
+  padding: 1.25rem;
+  background: color-mix(in srgb, var(--sheet-soft) 78%, transparent);
+}
+
+.vatEquation > div {
+  min-height: 112px;
+  display: grid;
+  align-content: center;
+  gap: 0.45rem;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--sheet);
+}
+
+.vatEquation > b {
+  color: var(--ink-soft);
+  font-size: 1.35rem;
+}
+
+.vatEquation strong {
+  font-size: clamp(1.2rem, 2.6vw, 1.75rem);
+  letter-spacing: -0.035em;
+}
+
+.vatEquation small,
+.form label small,
+.tableWrap td small,
+.emptyState span {
+  color: var(--ink-soft);
+  font-size: 0.66rem;
+}
+
+.netVat {
+  border-color: color-mix(in srgb, var(--terracotta) 50%, var(--line)) !important;
+  background: color-mix(in srgb, var(--terracotta) 5%, var(--sheet)) !important;
+}
+
+.vatWarning {
+  margin: 0;
+  padding: 0.72rem 1.25rem;
+  border-top: 1px solid #e4b09f;
+  background: #fff5f1;
+  color: #8b3d28;
+  font-size: 0.74rem;
+  line-height: 1.5;
+}
+
+.vatReconciliation {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+  border-top: 1px solid var(--line);
+}
+
+.vatReconciliation dl {
+  margin: 0;
+  padding: 1.15rem 1.25rem;
+  border-right: 1px solid var(--line);
+}
+
+.vatReconciliation dl > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.48rem 0;
+  border-bottom: 1px dashed var(--line);
+}
+
+.vatReconciliation dl > div:last-child {
+  border-bottom: 0;
+}
+
+.vatReconciliation dt {
+  color: var(--ink-soft);
+  font-size: 0.76rem;
+}
+
+.vatReconciliation dd {
+  margin: 0;
+  font-size: 0.82rem;
+  font-weight: 720;
+}
+
+.vatOutcomes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.vatOutcomes > div {
+  display: grid;
+  align-content: center;
+  gap: 0.48rem;
+  padding: 1.2rem;
+  border-right: 1px solid var(--line);
+}
+
+.vatOutcomes > div:last-child {
+  border-right: 0;
+  background: color-mix(in srgb, #20785d 6%, var(--sheet));
+}
+
+.vatOutcomes strong {
+  font-size: clamp(1.12rem, 2vw, 1.55rem);
+  letter-spacing: -0.03em;
+}
+
+.quickCreate,
+.rowActions,
+.formActions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.quickCreate button,
+.rowActions button {
+  min-height: 36px;
+  padding: 0.48rem 0.65rem;
+  font-size: 0.67rem;
+}
+
+.tableWrap {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.tableWrap table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.75rem;
+}
+
+.tableWrap th {
+  padding: 0.7rem 0.85rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--sheet-soft);
+  color: var(--ink-soft);
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 0.56rem;
+  letter-spacing: 0.05em;
+  text-align: left;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.tableWrap td {
+  padding: 0.85rem;
+  border-bottom: 1px solid var(--line);
+  vertical-align: middle;
+}
+
+.tableWrap tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.tableWrap td > strong,
+.tableWrap td > small {
+  display: block;
+}
+
+.tableWrap td > small {
+  margin-top: 0.24rem;
+}
+
+.status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 0.25rem 0.52rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 0.62rem;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.planned {
+  background: #f4f1e8;
+  color: #645b43;
+}
+
+.overdue {
+  border-color: color-mix(in srgb, #b44429 35%, var(--line));
+  background: #fff1ed;
+  color: #9a321e;
+}
+
+.paid {
+  border-color: color-mix(in srgb, #20785d 35%, var(--line));
+  background: #edf9f4;
+  color: #176049;
+}
+
+.voided {
+  background: #f1f2f4;
+  color: #66716c;
+  text-decoration: line-through;
+}
+
+.emptyState,
+.message,
+.error {
+  padding: 1.2rem 1.25rem;
+  color: var(--ink-soft);
+  font-size: 0.8rem;
+}
+
+.emptyState {
+  display: grid;
+  justify-items: start;
+  gap: 0.3rem;
+}
+
+.emptyState strong {
+  color: var(--ink);
+}
+
+.message {
+  margin: 1rem 0 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--sheet);
+}
+
+.error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin: 0 0 1rem;
+  border: 1px solid #d39a8c;
+  border-radius: 10px;
+  background: #fff1ed;
+  color: #8b2b18;
+}
+
+.editor {
+  scroll-margin-top: 1rem;
+}
+
+.form {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+  padding: 1.25rem;
+}
+
+.wideField,
+.amountFields,
+.lifecycleFields,
+.formActions,
+.formError {
+  grid-column: 1 / -1;
+}
+
+.moneyField {
+  grid-column: span 2;
+}
+
+.amountFields,
+.lifecycleFields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin: 0;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--sheet-soft);
+}
+
+.amountFields legend,
+.lifecycleFields legend {
+  padding: 0 0.45rem;
+  color: var(--ink-soft);
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 0.58rem;
+  font-weight: 750;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.formEstimate {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-top: 0.8rem;
+  border-top: 1px dashed var(--line);
+}
+
+.formEstimate strong {
+  font-size: 0.78rem;
+}
+
+.formError {
+  margin: 0;
+  padding: 0.72rem;
+  border: 1px solid #d39a8c;
+  border-radius: 8px;
+  background: #fff1ed;
+  color: #8b2b18;
+  font-size: 0.76rem;
+}
+
+@media (max-width: 880px) {
+  .commandBar {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .commandActions {
+    justify-content: space-between;
+  }
+
+  .summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .summary > div:nth-child(2) {
+    border-right: 0;
+  }
+
+  .summary > div:nth-child(-n + 2) {
+    border-bottom: 1px solid var(--line);
+  }
+
+  .vatEquation {
+    grid-template-columns: 1fr;
+  }
+
+  .vatEquation > b {
+    display: none;
+  }
+
+  .vatReconciliation {
+    grid-template-columns: 1fr;
+  }
+
+  .vatReconciliation dl {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .form {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 650px) {
+  .commandActions,
+  .vatHeading,
+  .registerHeading,
+  .editorHeading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .commandActions label,
+  .commandActions .primaryButton,
+  .vatHeading .quietButton,
+  .editorHeading .quietButton {
+    width: 100%;
+  }
+
+  .summary,
+  .vatOutcomes,
+  .form,
+  .amountFields,
+  .lifecycleFields {
+    grid-template-columns: 1fr;
+  }
+
+  .summary > div,
+  .summary > div:nth-child(2),
+  .summary > div:nth-child(3) {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .summary > div:last-child {
+    border-bottom: 0;
+  }
+
+  .vatOutcomes > div {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .vatOutcomes > div:last-child {
+    border-bottom: 0;
+  }
+
+  .wideField,
+  .moneyField,
+  .amountFields,
+  .lifecycleFields,
+  .formActions,
+  .formError,
+  .formEstimate {
+    grid-column: 1;
+  }
+
+  .formEstimate {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .quickCreate,
+  .formActions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .quickCreate button,
+  .formActions button {
+    width: 100%;
+  }
+
+  .tableWrap {
+    overflow: visible;
+  }
+
+  .tableWrap table,
+  .tableWrap tbody {
+    display: block;
+  }
+
+  .tableWrap thead {
+    display: none;
+  }
+
+  .tableWrap tr {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding: 0.55rem 1rem;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .tableWrap tbody tr:last-child {
+    border-bottom: 0;
+  }
+
+  .tableWrap td {
+    min-width: 0;
+    display: grid;
+    align-content: start;
+    gap: 0.3rem;
+    padding: 0.65rem 0.25rem;
+    border: 0;
+  }
+
+  .tableWrap td::before {
+    color: var(--ink-soft);
+    content: attr(data-label);
+    font-family: var(--font-geist-mono), ui-monospace, monospace;
+    font-size: 0.54rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  .tableWrap td:first-child,
+  .tableWrap td[data-label="İşlem"] {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 420px) {
+  .tableWrap tr {
+    grid-template-columns: 1fr;
+  }
+
+  .tableWrap td {
+    grid-column: 1 / -1;
+  }
+}

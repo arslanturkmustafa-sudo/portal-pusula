@@ -11,26 +11,34 @@ export type CashFlowForecastKind =
   | "commission_receivable"
   | "customer_receivable"
   | "direct_expense"
-  | "partner_contribution";
+  | "partner_contribution"
+  | "tax_payment";
 export type CashFlowForecastBucket = "overdue" | "scheduled" | "undated";
 
-export type CashFlowMovementKind =
-  | "card_installment"
-  | "commission_receivable"
+export type CashFlowDueItemKind =
+  | "card_payment"
   | "customer_receivable"
-  | "direct_expense"
-  | "finance_transaction"
-  | "partner_contribution";
+  | "other_expense"
+  | "partner_contribution"
+  | "tax_payment";
 
-export type CashFlowMovement = Readonly<{
-  amount: string;
+export type CashFlowDueItem = Readonly<{
   direction: CashFlowDirection;
-  eventOn: string;
+  dueOn: string;
   id: string;
-  kind: CashFlowMovementKind;
+  kind: CashFlowDueItemKind;
   label: string;
+  remainingAmount: string;
+  settledAmount: string;
   sourceLabel: string | null;
-  status: "actual" | "overdue" | "scheduled";
+  status:
+    | "actual"
+    | "overdue"
+    | "partial"
+    | "planned"
+    | "scheduled"
+    | "settled";
+  totalAmount: string;
 }>;
 
 export type CashFlowActualDailyAggregate = Readonly<{
@@ -58,6 +66,7 @@ export type CashFlowForecastAggregate = Readonly<{
 export type CashFlowBalanceSnapshot = Readonly<{
   accountCount: number;
   closingBalanceAmount: string;
+  currentAssetAmount: string;
   openingBalanceAmount: string;
 }>;
 
@@ -65,8 +74,8 @@ export type CashFlowLedgerSnapshot = Readonly<{
   accountOpenings: readonly CashFlowAccountOpeningDailyAggregate[];
   actual: readonly CashFlowActualDailyAggregate[];
   balance: CashFlowBalanceSnapshot;
+  dueItems: readonly CashFlowDueItem[];
   forecast: readonly CashFlowForecastAggregate[];
-  movements: readonly CashFlowMovement[];
   unclassifiedExpenseAmount: string;
   unclassifiedExpenseCount: number;
 }>;
@@ -74,6 +83,7 @@ export type CashFlowLedgerSnapshot = Readonly<{
 type BalanceRow = RowDataPacket & {
   account_count: number | string;
   closing_balance_amount: string;
+  current_asset_amount: string;
   opening_balance_amount: string;
 };
 
@@ -99,15 +109,17 @@ type ForecastRow = RowDataPacket & {
   kind: string;
 };
 
-type MovementRow = RowDataPacket & {
-  amount: string;
+type DueItemRow = RowDataPacket & {
   direction: string;
-  event_on: string | Date;
+  due_on: string | Date;
   id: string;
   kind: string;
   label: string;
+  remaining_amount: string;
+  settled_amount: string;
   source_label: string | null;
   status: string;
+  total_amount: string;
 };
 
 type UnclassifiedRow = RowDataPacket & {
@@ -144,7 +156,8 @@ function forecastKind(value: string): CashFlowForecastKind {
     value !== "commission_receivable" &&
     value !== "customer_receivable" &&
     value !== "direct_expense" &&
-    value !== "partner_contribution"
+    value !== "partner_contribution" &&
+    value !== "tax_payment"
   ) {
     throw new Error("Cash flow forecast kind is invalid.");
   }
@@ -158,25 +171,31 @@ function bucket(value: string): CashFlowForecastBucket {
   return value;
 }
 
-function movementKind(value: string): CashFlowMovementKind {
+function dueItemKind(value: string): CashFlowDueItemKind {
   if (
-    value !== "card_installment" &&
-    value !== "commission_receivable" &&
+    value !== "card_payment" &&
     value !== "customer_receivable" &&
-    value !== "direct_expense" &&
-    value !== "finance_transaction" &&
-    value !== "partner_contribution"
+    value !== "other_expense" &&
+    value !== "partner_contribution" &&
+    value !== "tax_payment"
   ) {
-    throw new Error("Cash flow movement kind is invalid.");
+    throw new Error("Cash flow due item kind is invalid.");
   }
   return value;
 }
 
-function movementStatus(
+function dueItemStatus(
   value: string,
-): "actual" | "overdue" | "scheduled" {
-  if (value !== "actual" && value !== "overdue" && value !== "scheduled") {
-    throw new Error("Cash flow movement status is invalid.");
+): CashFlowDueItem["status"] {
+  if (
+    value !== "actual" &&
+    value !== "overdue" &&
+    value !== "partial" &&
+    value !== "planned" &&
+    value !== "scheduled" &&
+    value !== "settled"
+  ) {
+    throw new Error("Cash flow due item status is invalid.");
   }
   return value;
 }
@@ -236,7 +255,27 @@ export async function readCashFlowLedger(
               WHERE t.occurred_on <= ? AND t.occurred_on <= ?
            ), 0.0000)
          AS DECIMAL(65,4)
-       ) AS closing_balance_amount`,
+       ) AS closing_balance_amount,
+       CAST(
+         COALESCE((
+           SELECT SUM(a.opening_balance_amount)
+             FROM finance_account a
+            WHERE DATE(CONVERT_TZ(a.created_at_utc, '+00:00', '+03:00')) <= ?
+         ), 0.0000)
+         + COALESCE((
+             SELECT SUM(
+               CASE
+                 WHEN BINARY le.entry_side = BINARY 'inflow' THEN le.amount
+                 WHEN BINARY le.entry_side = BINARY 'outflow' THEN -le.amount
+                 ELSE 0.0000
+               END
+             )
+               FROM finance_ledger_entry le
+               JOIN finance_transaction t ON t.id = le.transaction_id
+              WHERE t.occurred_on <= ?
+           ), 0.0000)
+         AS DECIMAL(65,4)
+       ) AS current_asset_amount`,
     [
       range.endOn,
       generatedOn,
@@ -247,6 +286,8 @@ export async function readCashFlowLedger(
       range.endOn,
       generatedOn,
       range.endOn,
+      generatedOn,
+      generatedOn,
       generatedOn,
     ],
   );
@@ -326,17 +367,31 @@ export async function readCashFlowLedger(
             AND pc.expected_amount - pc.received_amount > 0
          UNION ALL
          SELECT cci.due_on, 'card_installment', 'outflow',
-                CASE WHEN cci.due_on < ? THEN 'overdue' ELSE 'scheduled' END,
-                cci.amount
+                 CASE WHEN cci.due_on < ? THEN 'overdue' ELSE 'scheduled' END,
+                 cci.amount
            FROM credit_card_installment cci
-          JOIN expense e ON e.id = cci.expense_id
-          WHERE e.status = 'active' AND cci.status = 'planned'
-            AND (cci.due_on < ? OR (cci.due_on >= ? AND cci.due_on <= ?))
+           JOIN expense e ON e.id = cci.expense_id
+           WHERE e.status = 'active' AND cci.status = 'planned'
+             AND (cci.due_on < ? OR (cci.due_on >= ? AND cci.due_on <= ?))
+         UNION ALL
+         SELECT tax_forecast.due_on, 'tax_payment', 'outflow',
+                CASE
+                  WHEN tax_forecast.due_on < ? THEN 'overdue'
+                  ELSE 'scheduled'
+                END,
+                tax_forecast.payable_amount
+           FROM tax_obligation tax_forecast
+          WHERE BINARY tax_forecast.status = BINARY 'planned'
+            AND tax_forecast.payable_amount > 0
+            AND (
+              tax_forecast.due_on < ?
+              OR (tax_forecast.due_on >= ? AND tax_forecast.due_on <= ?)
+            )
          UNION ALL
          SELECT e.incurred_on, 'direct_expense', 'outflow', 'scheduled', e.total_amount
            FROM expense e
           WHERE e.status = 'active'
-            AND e.payment_method IN ('cash', 'bank_transfer')
+            AND e.payment_method IN ('cash', 'bank_transfer', 'other')
             AND e.incurred_on >= ? AND e.incurred_on <= ?
             AND e.incurred_on > ?
          UNION ALL
@@ -360,211 +415,235 @@ export async function readCashFlowLedger(
       generatedOn,
       range.startOn,
       range.endOn,
+      generatedOn,
+      generatedOn,
+      range.startOn,
+      range.endOn,
       range.startOn,
       range.endOn,
       generatedOn,
     ],
   );
 
-  const [movementRows] = await connection.execute<MovementRow[]>(
-    `SELECT movement.id, movement.event_on, movement.label,
-            movement.source_label, movement.status, movement.direction,
-            movement.amount, movement.kind
+  const [dueItemRows] = await connection.execute<DueItemRow[]>(
+    `SELECT due_item.id, due_item.due_on, due_item.label,
+            due_item.source_label, due_item.status, due_item.direction,
+            due_item.total_amount, due_item.settled_amount,
+            due_item.remaining_amount, due_item.kind
        FROM (
-         SELECT CONCAT('finance_transaction:', t.id) AS id,
-                DATE_FORMAT(t.occurred_on, '%Y-%m-%d') AS event_on,
-                t.description AS label,
+         SELECT CONCAT('receivable:', receivable.id) AS id,
+                receivable.due_on, receivable.description AS label,
+                CONCAT_WS(
+                  ' · ', customer.display_name, project.display_name
+                ) AS source_label,
                 CASE
-                  WHEN BINARY t.transaction_type = BINARY 'income'
-                    THEN target_account.display_name
-                  ELSE source_account.display_name
-                END AS source_label,
-                'actual' AS status,
-                CASE
-                  WHEN BINARY t.transaction_type = BINARY 'income'
-                    THEN 'inflow'
-                  ELSE 'outflow'
-                END AS direction,
-                CAST(t.amount AS DECIMAL(65,4)) AS amount,
-                'finance_transaction' AS kind
-           FROM finance_transaction t
-           LEFT JOIN finance_account source_account
-             ON source_account.id = t.source_account_id
-           LEFT JOIN finance_account target_account
-             ON target_account.id = t.target_account_id
-          WHERE t.occurred_on >= ? AND t.occurred_on <= ?
-            AND t.occurred_on <= ?
-            AND BINARY t.transaction_type IN (BINARY 'income', BINARY 'expense')
-         UNION ALL
-         SELECT CONCAT('receivable_collection:', collection.id),
-                collection.collected_on, receivable.description,
-                CONCAT_WS(' · ', customer.display_name, project.display_name),
-                'actual',
-                CASE
-                  WHEN BINARY collection.entry_type = BINARY 'reversal'
-                    THEN 'outflow'
-                  ELSE 'inflow'
-                END,
-                CAST(collection.amount AS DECIMAL(65,4)),
-                'customer_receivable'
-           FROM receivable_collection collection
-           JOIN receivable receivable ON receivable.id = collection.receivable_id
+                  WHEN receivable.total_amount -
+                       COALESCE(collection.collected_amount, 0.0000) <= 0
+                    THEN 'settled'
+                  WHEN receivable.due_on < ? THEN 'overdue'
+                  WHEN COALESCE(collection.collected_amount, 0.0000) > 0
+                    THEN 'partial'
+                  ELSE 'planned'
+                END AS status,
+                'inflow' AS direction,
+                CAST(receivable.total_amount AS DECIMAL(65,4)) AS total_amount,
+                CAST(LEAST(
+                  receivable.total_amount,
+                  GREATEST(COALESCE(collection.collected_amount, 0.0000), 0.0000)
+                ) AS DECIMAL(65,4)) AS settled_amount,
+                CAST(GREATEST(
+                  receivable.total_amount - COALESCE(collection.collected_amount, 0.0000),
+                  0.0000
+                ) AS DECIMAL(65,4)) AS remaining_amount,
+                'customer_receivable' AS kind
+           FROM receivable receivable
            JOIN customer customer ON customer.id = receivable.customer_id
            LEFT JOIN project project ON project.id = receivable.project_id
-          WHERE collection.collected_on >= ? AND collection.collected_on <= ?
-            AND collection.collected_on <= ?
-         UNION ALL
-         SELECT CONCAT('partner_contribution_receipt:', receipt.id),
-                receipt.received_on, contribution.description,
-                project.display_name, 'actual',
-                CASE
-                  WHEN BINARY receipt.entry_type = BINARY 'reversal'
-                    THEN 'outflow'
-                  ELSE 'inflow'
-                END,
-                CAST(receipt.amount AS DECIMAL(65,4)),
-                'partner_contribution'
-           FROM partnership_contribution_receipt receipt
-           JOIN partnership_contribution contribution
-             ON contribution.id = receipt.contribution_id
-           JOIN project project ON project.id = contribution.project_id
-          WHERE receipt.received_on >= ? AND receipt.received_on <= ?
-            AND receipt.received_on <= ?
-         UNION ALL
-         SELECT CONCAT('paid_card_installment:', installment.id),
-                installment.paid_on, expense.description,
-                CONCAT_WS(
-                  ' · ', expense.vendor_name, card.display_name, project.display_name
-                ),
-                'actual', 'outflow',
-                CAST(installment.amount AS DECIMAL(65,4)),
-                'card_installment'
-           FROM credit_card_installment installment
-           JOIN expense expense ON expense.id = installment.expense_id
-           JOIN credit_card card ON card.id = expense.credit_card_id
-           LEFT JOIN project project ON project.id = expense.project_id
-          WHERE expense.status = 'active' AND installment.status = 'paid'
-            AND installment.paid_on IS NOT NULL
-            AND installment.paid_on >= ? AND installment.paid_on <= ?
-            AND installment.paid_on <= ?
-         UNION ALL
-         SELECT CONCAT('paid_partnership_commission:', commission.id),
-                commission.paid_on, commission.description,
-                project.display_name, 'actual', 'inflow',
-                CAST(commission.share_amount AS DECIMAL(65,4)),
-                'commission_receivable'
-           FROM partnership_commission commission
-           JOIN project project ON project.id = commission.project_id
-          WHERE commission.status = 'paid' AND commission.paid_on IS NOT NULL
-            AND commission.paid_on >= ? AND commission.paid_on <= ?
-            AND commission.paid_on <= ?
-         UNION ALL
-         SELECT CONCAT('actual_direct_expense:', expense.id), expense.incurred_on,
-                expense.description,
-                NULLIF(CONCAT_WS(' · ', expense.vendor_name, project.display_name), ''),
-                'actual', 'outflow',
-                CAST(expense.total_amount AS DECIMAL(65,4)), 'direct_expense'
-           FROM expense expense
-           LEFT JOIN project project ON project.id = expense.project_id
-          WHERE expense.status = 'active'
-            AND expense.payment_method IN ('cash', 'bank_transfer')
-            AND expense.incurred_on >= ? AND expense.incurred_on <= ?
-            AND expense.incurred_on <= ?
-         UNION ALL
-         SELECT CONCAT('customer_receivable:', r.id), r.due_on, r.description,
-                CONCAT_WS(' · ', customer.display_name, project.display_name),
-                CASE WHEN r.due_on < ? THEN 'overdue' ELSE 'scheduled' END,
-                'inflow',
-                CAST(GREATEST(
-                  r.total_amount - COALESCE(collection.collected_amount, 0.0000),
-                  0.0000
-                ) AS DECIMAL(65,4)),
-                'customer_receivable'
-           FROM receivable r
-           JOIN customer customer ON customer.id = r.customer_id
-           LEFT JOIN project project ON project.id = r.project_id
            LEFT JOIN (
              SELECT receivable_id,
                     SUM(CASE WHEN entry_type = 'reversal' THEN -amount ELSE amount END)
                       AS collected_amount
                FROM receivable_collection
+              WHERE collected_on <= ?
               GROUP BY receivable_id
-           ) collection ON collection.receivable_id = r.id
-          WHERE r.record_state = 'active'
-            AND r.due_on >= ? AND r.due_on <= ?
-            AND r.total_amount - COALESCE(collection.collected_amount, 0.0000) > 0
+           ) collection ON collection.receivable_id = receivable.id
+          WHERE receivable.record_state = 'active'
+            AND (
+              (receivable.due_on >= ? AND receivable.due_on <= ?)
+              OR (
+                receivable.due_on < ? AND receivable.due_on < ?
+                AND receivable.total_amount -
+                    COALESCE(collection.collected_amount, 0.0000) > 0
+              )
+            )
          UNION ALL
          SELECT CONCAT('partner_contribution:', contribution.id),
                 contribution.due_on, contribution.description,
                 project.display_name,
-                CASE WHEN contribution.due_on < ? THEN 'overdue' ELSE 'scheduled' END,
+                CASE
+                  WHEN contribution.expected_amount - contribution.received_amount <= 0
+                    THEN 'settled'
+                  WHEN contribution.due_on < ? THEN 'overdue'
+                  WHEN contribution.received_amount > 0 THEN 'partial'
+                  ELSE 'planned'
+                END,
                 'inflow',
-                CAST(contribution.expected_amount - contribution.received_amount
-                  AS DECIMAL(65,4)),
+                CAST(contribution.expected_amount AS DECIMAL(65,4)),
+                CAST(contribution.received_amount AS DECIMAL(65,4)),
+                CAST(GREATEST(
+                  contribution.expected_amount - contribution.received_amount,
+                  0.0000
+                ) AS DECIMAL(65,4)),
                 'partner_contribution'
            FROM partnership_contribution contribution
            JOIN project project ON project.id = contribution.project_id
-          WHERE contribution.status IN ('expected', 'partial')
-            AND contribution.due_on >= ? AND contribution.due_on <= ?
-            AND contribution.expected_amount - contribution.received_amount > 0
+          WHERE contribution.status <> 'cancelled'
+            AND (
+              (contribution.due_on >= ? AND contribution.due_on <= ?)
+              OR (
+                contribution.due_on < ? AND contribution.due_on < ?
+                AND contribution.expected_amount - contribution.received_amount > 0
+              )
+            )
          UNION ALL
-         SELECT CONCAT('card_installment:', installment.id), installment.due_on,
-                expense.description,
-                CONCAT_WS(
-                  ' · ', expense.vendor_name, card.display_name, project.display_name
+         SELECT CONCAT(
+                  'card_payment:', card_due.card_id, ':',
+                  DATE_FORMAT(card_due.due_on, '%Y-%m-%d')
                 ),
-                CASE WHEN installment.due_on < ? THEN 'overdue' ELSE 'scheduled' END,
-                'outflow', CAST(installment.amount AS DECIMAL(65,4)),
-                'card_installment'
-           FROM credit_card_installment installment
-           JOIN expense expense ON expense.id = installment.expense_id
-           JOIN credit_card card ON card.id = expense.credit_card_id
-           LEFT JOIN project project ON project.id = expense.project_id
-          WHERE expense.status = 'active' AND installment.status = 'planned'
-            AND installment.due_on >= ? AND installment.due_on <= ?
+                card_due.due_on,
+                CONCAT(card_due.display_name, ' kart borcu'),
+                card_due.bank_name,
+                CASE
+                  WHEN card_due.total_amount - card_due.settled_amount <= 0
+                    THEN 'settled'
+                  WHEN card_due.due_on < ? THEN 'overdue'
+                  WHEN card_due.settled_amount > 0 THEN 'partial'
+                  ELSE 'planned'
+                END,
+                'outflow',
+                CAST(card_due.total_amount AS DECIMAL(65,4)),
+                CAST(card_due.settled_amount AS DECIMAL(65,4)),
+                CAST(GREATEST(
+                  card_due.total_amount - card_due.settled_amount,
+                  0.0000
+                ) AS DECIMAL(65,4)),
+                'card_payment'
+           FROM (
+             SELECT card.id AS card_id, card.display_name, card.bank_name,
+                    installment.due_on,
+                    SUM(installment.amount) AS total_amount,
+                    SUM(CASE
+                      WHEN installment.status = 'paid' AND installment.paid_on <= ?
+                        THEN installment.amount
+                      ELSE 0.0000
+                    END) AS settled_amount
+               FROM credit_card_installment installment
+               JOIN expense expense ON expense.id = installment.expense_id
+               JOIN credit_card card ON card.id = expense.credit_card_id
+              WHERE expense.status = 'active'
+                AND (
+                  (installment.due_on >= ? AND installment.due_on <= ?)
+                  OR (
+                    installment.due_on < ? AND installment.due_on < ?
+                  )
+                )
+              GROUP BY card.id, card.display_name, card.bank_name,
+                       installment.due_on
+           ) card_due
+         WHERE card_due.due_on >= ?
+             OR card_due.total_amount - card_due.settled_amount > 0
          UNION ALL
-         SELECT CONCAT('direct_expense:', expense.id), expense.incurred_on,
-                expense.description,
-                NULLIF(CONCAT_WS(' · ', expense.vendor_name, project.display_name), ''),
-                'scheduled', 'outflow',
-                CAST(expense.total_amount AS DECIMAL(65,4)), 'direct_expense'
+         SELECT CONCAT('tax_payment:', tax_due.id),
+                tax_due.due_on,
+                CASE BINARY tax_due.tax_type
+                  WHEN BINARY 'vat' THEN 'KDV'
+                  WHEN BINARY 'income_tax' THEN 'Gelir vergisi'
+                  WHEN BINARY 'provisional_tax' THEN 'Geçici vergi'
+                END,
+                DATE_FORMAT(tax_due.period_month, '%Y-%m'),
+                CASE
+                  WHEN BINARY tax_due.status = BINARY 'paid' THEN 'settled'
+                  WHEN tax_due.due_on < ? THEN 'overdue'
+                  ELSE 'planned'
+                END,
+                'outflow',
+                CAST(tax_due.payable_amount AS DECIMAL(65,4)),
+                CAST(CASE
+                  WHEN BINARY tax_due.status = BINARY 'paid'
+                    THEN tax_due.payable_amount
+                  ELSE 0.0000
+                END AS DECIMAL(65,4)),
+                CAST(CASE
+                  WHEN BINARY tax_due.status = BINARY 'paid' THEN 0.0000
+                  ELSE tax_due.payable_amount
+                END AS DECIMAL(65,4)),
+                'tax_payment'
+           FROM tax_obligation tax_due
+          WHERE BINARY tax_due.status <> BINARY 'voided'
+            AND tax_due.payable_amount > 0
+            AND (
+              (tax_due.due_on >= ? AND tax_due.due_on <= ?)
+              OR (
+                BINARY tax_due.status = BINARY 'planned'
+                AND tax_due.due_on < ? AND tax_due.due_on < ?
+              )
+            )
+         UNION ALL
+         SELECT CONCAT(
+                  'other_expense:', expense.category, ':',
+                  DATE_FORMAT(expense.incurred_on, '%Y-%m-%d')
+                ),
+                expense.incurred_on,
+                CONCAT(
+                  COALESCE(category.display_name, expense.category),
+                  ' · ', COUNT(*), ' kayıt'
+                ),
+                NULL,
+                'scheduled',
+                'outflow',
+                CAST(SUM(expense.total_amount) AS DECIMAL(65,4)),
+                CAST(0.0000 AS DECIMAL(65,4)),
+                CAST(SUM(expense.total_amount) AS DECIMAL(65,4)),
+                'other_expense'
            FROM expense expense
-           LEFT JOIN project project ON project.id = expense.project_id
+           LEFT JOIN expense_category category ON category.code = expense.category
           WHERE expense.status = 'active'
-            AND expense.payment_method IN ('cash', 'bank_transfer')
+            AND expense.payment_method IN ('cash', 'bank_transfer', 'other')
             AND expense.incurred_on >= ? AND expense.incurred_on <= ?
             AND expense.incurred_on > ?
-       ) movement
-      ORDER BY movement.event_on ASC, movement.status ASC,
-               movement.direction ASC, movement.kind ASC, movement.id ASC`,
+          GROUP BY expense.category, category.display_name, expense.incurred_on
+       ) due_item
+      ORDER BY due_item.due_on ASC, due_item.status ASC,
+               due_item.direction ASC, due_item.kind ASC, due_item.id ASC`,
     [
-      range.startOn,
-      range.endOn,
-      generatedOn,
-      range.startOn,
-      range.endOn,
-      generatedOn,
-      range.startOn,
-      range.endOn,
-      generatedOn,
-      range.startOn,
-      range.endOn,
-      generatedOn,
-      range.startOn,
-      range.endOn,
-      generatedOn,
-      range.startOn,
-      range.endOn,
+      // Customer receivable: status date, collection cut-off, range/carry-over.
       generatedOn,
       generatedOn,
       range.startOn,
       range.endOn,
+      range.startOn,
+      generatedOn,
+      // Partner contribution: status date and range/carry-over.
       generatedOn,
       range.startOn,
       range.endOn,
+      range.startOn,
+      generatedOn,
+      // Card total: status date, payment cut-off, range/carry-over.
+      generatedOn,
       generatedOn,
       range.startOn,
       range.endOn,
+      range.startOn,
+      generatedOn,
+      range.startOn,
+      // Tax obligation: due-based status and selected range/open carry-over.
+      generatedOn,
+      range.startOn,
+      range.endOn,
+      range.startOn,
+      generatedOn,
+      // Aggregated non-card expense: only future-dated planned obligations.
       range.startOn,
       range.endOn,
       generatedOn,
@@ -598,8 +677,21 @@ export async function readCashFlowLedger(
     balance: {
       accountCount: count(balance.account_count),
       closingBalanceAmount: money(balance.closing_balance_amount),
+      currentAssetAmount: money(balance.current_asset_amount),
       openingBalanceAmount: money(balance.opening_balance_amount),
     },
+    dueItems: dueItemRows.map((row) => ({
+      direction: direction(row.direction),
+      dueOn: canonicalDate(row.due_on),
+      id: row.id,
+      kind: dueItemKind(row.kind),
+      label: row.label,
+      remainingAmount: money(row.remaining_amount),
+      settledAmount: money(row.settled_amount),
+      sourceLabel: row.source_label,
+      status: dueItemStatus(row.status),
+      totalAmount: money(row.total_amount),
+    })),
     forecast: forecastRows.map((row) => ({
       amount: money(row.amount),
       bucket: bucket(row.bucket),
@@ -607,16 +699,6 @@ export async function readCashFlowLedger(
       entryCount: count(row.entry_count),
       eventOn: row.event_on === null ? null : canonicalDate(row.event_on),
       kind: forecastKind(row.kind),
-    })),
-    movements: movementRows.map((row) => ({
-      amount: money(row.amount),
-      direction: direction(row.direction),
-      eventOn: canonicalDate(row.event_on),
-      id: row.id,
-      kind: movementKind(row.kind),
-      label: row.label,
-      sourceLabel: row.source_label,
-      status: movementStatus(row.status),
     })),
     unclassifiedExpenseAmount: money(unclassified.amount),
     unclassifiedExpenseCount: count(unclassified.entry_count),

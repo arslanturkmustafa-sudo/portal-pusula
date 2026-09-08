@@ -42,6 +42,7 @@ const FINANCE_ACCOUNTS_LEDGER_MIGRATION_TAG =
   "0016_finance_accounts_ledger";
 const PLANNING_EXPENSE_CATEGORIES_MIGRATION_TAG =
   "0018_planning_expense_categories";
+const TAX_OBLIGATIONS_MIGRATION_TAG = "0019_tax_obligations";
 
 const EXPENSE_CATEGORY_SEED_ROWS = Object.freeze([
   ["81000000-0000-4000-8000-000000000001", "rent", "82000000-0000-4000-8000-000000000001", "Kira"],
@@ -120,6 +121,7 @@ const managedDroppedChecks = new Set([
   `${FINANCE_ACCOUNTS_LEDGER_MIGRATION_TAG}:user_permission:chk_user_permission_code`,
   `${PLANNING_EXPENSE_CATEGORIES_MIGRATION_TAG}:expense:chk_expense_category`,
   `${PLANNING_EXPENSE_CATEGORIES_MIGRATION_TAG}:monthly_visit_commitment:chk_monthly_visit_optional_fields`,
+  `${TAX_OBLIGATIONS_MIGRATION_TAG}:user_permission:chk_user_permission_code`,
 ]);
 
 const managedDroppedIndexes = new Map([
@@ -585,7 +587,8 @@ function parseManagedForwardStatement(statement, migrationTag) {
     migrationTag !== RECORD_LIFECYCLE_MIGRATION_TAG &&
     migrationTag !== FINANCIAL_REVERSALS_MIGRATION_TAG &&
     migrationTag !== FINANCE_ACCOUNTS_LEDGER_MIGRATION_TAG &&
-    migrationTag !== PLANNING_EXPENSE_CATEGORIES_MIGRATION_TAG
+    migrationTag !== PLANNING_EXPENSE_CATEGORIES_MIGRATION_TAG &&
+    migrationTag !== TAX_OBLIGATIONS_MIGRATION_TAG
   ) {
     return null;
   }

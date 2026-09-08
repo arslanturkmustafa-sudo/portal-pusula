@@ -69,6 +69,7 @@ describe("PortalNavigation", () => {
     ["finance.expenses.read", "/finans/giderler"],
     ["finance.cards.read", "/finans/kartlar"],
     ["finance.partnership.read", "/finans/ortaklik"],
+    ["finance.taxes.read", "/finans/vergiler"],
     ["finance.reports.read", "/finans/raporlar"],
   ] as const)(
     "routes an isolated %s grant to its readable finance workspace",

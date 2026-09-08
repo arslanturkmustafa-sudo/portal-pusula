@@ -1,5 +1,5 @@
 import { render, screen, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({ pathname: "/finans/giderler" }));
 
@@ -10,6 +10,10 @@ vi.mock("next/navigation", () => ({
 import { FinanceSubnavigation } from "@/components/home/finance-subnavigation";
 
 describe("FinanceSubnavigation", () => {
+  beforeEach(() => {
+    mocks.pathname = "/finans/giderler";
+  });
+
   it("links the finance workspaces and marks only the exact section", () => {
     render(<FinanceSubnavigation />);
     const navigation = screen.getByRole("navigation", { name: "Finans bölümleri" });
@@ -25,6 +29,8 @@ describe("FinanceSubnavigation", () => {
     ).toHaveAttribute("href", "/finans/kartlar");
     expect(within(navigation).getByRole("link", { name: "Nakit akışı" }))
       .toHaveAttribute("href", "/finans/nakit-akisi");
+    expect(within(navigation).getByRole("link", { name: "Vergiler" }))
+      .toHaveAttribute("href", "/finans/vergiler");
     expect(within(navigation).getByRole("link", { name: "Proje görünümü" }))
       .toHaveAttribute("href", "/finans/raporlar");
     expect(within(navigation).getByRole("link", { name: "Ortaklık hesabı" }))
@@ -32,6 +38,16 @@ describe("FinanceSubnavigation", () => {
     expect(within(navigation).getByRole("link", { name: "Giderler" }))
       .toHaveAttribute("aria-current", "page");
     expect(within(navigation).getByRole("link", { name: "Alacaklar" }))
+      .not.toHaveAttribute("aria-current");
+  });
+
+  it("marks the tax workspace as the current finance section", () => {
+    mocks.pathname = "/finans/vergiler";
+    render(<FinanceSubnavigation />);
+
+    expect(screen.getByRole("link", { name: "Vergiler" }))
+      .toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: "Giderler" }))
       .not.toHaveAttribute("aria-current");
   });
 });

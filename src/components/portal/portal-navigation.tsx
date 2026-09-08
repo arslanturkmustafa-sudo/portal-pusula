@@ -59,6 +59,7 @@ export const portalNavigationItems: readonly PortalNavigationItem[] = [
       "finance.cards.read",
       "finance.accounts.read",
       "finance.partnership.read",
+      "finance.taxes.read",
       "finance.reports.read",
     ],
     shortLabel: "Finans",
@@ -182,6 +183,7 @@ function destinationForPrincipal(
     ["finance.expenses.read", "/finans/giderler"],
     ["finance.cards.read", "/finans/kartlar"],
     ["finance.partnership.read", "/finans/ortaklik"],
+    ["finance.taxes.read", "/finans/vergiler"],
     ["finance.reports.read", "/finans/raporlar"],
   ] as const satisfies readonly (readonly [PermissionCode, string])[];
   const href = destination.find(([permission]) =>
