@@ -52,6 +52,7 @@ export const userPermission = mysqlTable(
         BINARY 'finance.accounts.read', BINARY 'finance.accounts.write',
         BINARY 'finance.partnership.read', BINARY 'finance.partnership.write',
         BINARY 'finance.partnership.reverse',
+        BINARY 'finance.taxes.read', BINARY 'finance.taxes.write',
         BINARY 'finance.reports.read', BINARY 'finance.reports.export',
         BINARY 'audit.read'
       )`,

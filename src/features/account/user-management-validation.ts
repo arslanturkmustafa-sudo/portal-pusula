@@ -58,6 +58,7 @@ function validatePermissionDependencies(
     ["finance.partnership.write", "finance.partnership.read"],
     ["finance.partnership.reverse", "finance.partnership.read"],
     ["finance.partnership.reverse", "finance.partnership.write"],
+    ["finance.taxes.write", "finance.taxes.read"],
     ["finance.reports.export", "finance.reports.read"],
   ];
   for (const [permission, required] of dependencies) {

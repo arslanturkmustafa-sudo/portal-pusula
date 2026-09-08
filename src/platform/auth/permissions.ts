@@ -33,6 +33,8 @@ export const PERMISSION_CODES = [
   "finance.partnership.read",
   "finance.partnership.write",
   "finance.partnership.reverse",
+  "finance.taxes.read",
+  "finance.taxes.write",
   "finance.reports.read",
   "finance.reports.export",
   "audit.read",

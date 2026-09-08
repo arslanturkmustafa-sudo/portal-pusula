@@ -20,6 +20,7 @@ const weeklyReport = {
     accountCount: 2,
     asOfOn: "2026-09-20",
     closingBalanceAmount: "1500.0000",
+    currentAssetAmount: "1500.0000",
     openingBalanceAmount: "1000.0000",
     status: "configured",
   },
@@ -52,8 +53,8 @@ const weeklyReport = {
     ],
     overdue: {
       inflowAmount: "0.0000",
-      netAmount: "-35.0000",
-      outflowAmount: "35.0000",
+      netAmount: "-55.0000",
+      outflowAmount: "55.0000",
     },
     overdueInRange: {
       inflowAmount: "0.0000",
@@ -62,65 +63,99 @@ const weeklyReport = {
     },
     scheduled: {
       inflowAmount: "500.0000",
-      netAmount: "420.0000",
-      outflowAmount: "80.0000",
+      netAmount: "400.0000",
+      outflowAmount: "100.0000",
     },
     undatedInflowAmount: "25.0000",
   },
-  generatedOn: "2026-09-20",
-  granularity: "weekly",
-  movements: [
+  dueItems: [
     {
-      amount: "300.0000",
       direction: "inflow",
-      eventOn: "2026-09-08",
-      id: "actual-1",
-      kind: "finance_transaction",
-      label: "Müşteri tahsilatı",
-      sourceLabel: "Ana banka",
-      status: "actual",
+      dueOn: "2026-09-08",
+      id: "receivable-settled-1",
+      kind: "customer_receivable",
+      label: "Ağustos danışmanlık alacağı",
+      remainingAmount: "0.0000",
+      settledAmount: "300.0000",
+      sourceLabel: "Acme AŞ",
+      status: "settled",
+      totalAmount: "300.0000",
     },
     {
-      amount: "45.0000",
       direction: "outflow",
-      eventOn: "2026-09-09",
-      id: "module-actual-1",
-      kind: "direct_expense",
-      label: "Ödenen ofis gideri",
-      sourceLabel: "Giderler",
+      dueOn: "2026-09-10",
+      id: "expense-actual-1",
+      kind: "other_expense",
+      label: "Ofis giderleri",
+      remainingAmount: "0.0000",
+      settledAmount: "45.0000",
+      sourceLabel: "1 gider kaydı",
       status: "actual",
+      totalAmount: "45.0000",
     },
     {
-      amount: "35.0000",
+      direction: "inflow",
+      dueOn: "2026-09-12",
+      id: "receivable-planned-1",
+      kind: "customer_receivable",
+      label: "Eylül danışmanlık alacağı",
+      remainingAmount: "500.0000",
+      settledAmount: "0.0000",
+      sourceLabel: "Acme AŞ",
+      status: "planned",
+      totalAmount: "500.0000",
+    },
+    {
       direction: "outflow",
-      eventOn: "2026-09-15",
-      id: "overdue-1",
-      kind: "card_installment",
-      label: "Kredi kartı taksiti",
-      sourceLabel: "Şirket kartı",
+      dueOn: "2026-09-15",
+      id: "card-overdue-1",
+      kind: "card_payment",
+      label: "Şirket kartı",
+      remainingAmount: "35.0000",
+      settledAmount: "0.0000",
+      sourceLabel: "2 harcama · vade toplamı",
       status: "overdue",
+      totalAmount: "35.0000",
     },
     {
-      amount: "80.0000",
       direction: "outflow",
-      eventOn: "2026-09-18",
-      id: "scheduled-1",
-      kind: "card_installment",
-      label: "Kredi kartı taksiti",
-      sourceLabel: "Şirket kartı",
+      dueOn: "2026-09-18",
+      id: "card-planned-1",
+      kind: "card_payment",
+      label: "Şirket kartı",
+      remainingAmount: "80.0000",
+      settledAmount: "0.0000",
+      sourceLabel: "3 harcama · vade toplamı",
+      status: "planned",
+      totalAmount: "80.0000",
+    },
+    {
+      direction: "outflow",
+      dueOn: "2026-09-18",
+      id: "expense-scheduled-1",
+      kind: "other_expense",
+      label: "Vergi giderleri",
+      remainingAmount: "20.0000",
+      settledAmount: "0.0000",
+      sourceLabel: "1 gider kaydı",
       status: "scheduled",
+      totalAmount: "20.0000",
     },
     {
-      amount: "90.0000",
       direction: "outflow",
-      eventOn: "2026-09-21",
+      dueOn: "2026-09-21",
       id: "outside-range",
-      kind: "direct_expense",
+      kind: "other_expense",
       label: "Aralık dışı gider",
-      sourceLabel: null,
+      remainingAmount: "90.0000",
+      settledAmount: "0.0000",
+      sourceLabel: "1 gider kaydı",
       status: "scheduled",
+      totalAmount: "90.0000",
     },
   ],
+  generatedOn: "2026-09-20",
+  granularity: "weekly",
   periods: [
     {
       accountOpeningAmount: "0.0000",
@@ -221,14 +256,14 @@ describe("CashFlowWorkspace", () => {
     expect(within(closing!).getByText("₺1.500")).toBeVisible();
 
     const detail = screen.getByRole("region", {
-      name: "Nakit hareketleri tablosu",
+      name: "Vade planı tablosu",
     });
     expect(detail).toHaveAttribute("tabindex", "0");
     expect(
-      within(detail).getByRole("columnheader", { name: "Tarih" }),
+      within(detail).getByRole("columnheader", { name: "Vade" }),
     ).toBeVisible();
     expect(
-      within(detail).getByRole("columnheader", { name: "Hareket" }),
+      within(detail).getByRole("columnheader", { name: "Kalem" }),
     ).toBeVisible();
     expect(
       screen.getByRole("img", { name: "7 Eyl – 13 Eyl 2026 gelir ₺300" }),
@@ -236,26 +271,26 @@ describe("CashFlowWorkspace", () => {
     expect(screen.getByText("Gelir ₺300")).toBeInTheDocument();
     expect(screen.getByText("Gider ₺50")).toBeInTheDocument();
     expect(
-      screen.getByText(/kaynak kaydıyla hesap hareketi eşleştirilemediğinde/iu),
+      screen.getByText(/kredi kartı borçları kart ve vade bazında toplam/iu),
     ).toBeVisible();
-    expect(screen.getByText(/bu tablodan toplam hesaplanmaz/iu)).toBeVisible();
+    expect(screen.getByText(/tekil kart harcamaları.*tekrarlanmaz/iu)).toBeVisible();
     const scope = screen.getByRole("complementary", {
       name: "Nakit akışı rapor kapsamı",
     });
-    expect(within(scope).getByText("Birleşik tablo kapsamı")).toBeVisible();
+    expect(within(scope).getByText("İki ayrı görünüm")).toBeVisible();
     expect(
-      within(scope).getByText(/hesap defterine işlenen hareketler/iu),
+      within(scope).getByText(/hesap defterindeki gerçekleşen giriş ve çıkışları korur/iu),
     ).toBeVisible();
     expect(
-      within(scope).getByText(/kendi modülünde ödendi veya tahsil edildi/iu),
+      within(scope).getByText(/alacak ve tahsilatları/iu),
     ).toBeVisible();
     expect(
-      within(scope).getByText(/açık planlanan ya da gecikmiş kalemler/iu),
+      within(scope).getByText(/kredi kartlarının vade bazındaki toplam ödemelerini/iu),
     ).toBeVisible();
     expect(
-      within(scope).getByText(/aynı işlem iki ayrı satırda görünebilir/iu),
+      within(scope).getByText(/ileri tarihli diğer ödeme planlarını kategori ve.*tarih bazında/iu),
     ).toBeVisible();
-    expect(within(scope).getByText(/birleşik toplam gösterilmez/iu)).toBeVisible();
+    expect(within(scope).getByText(/tek tek kredi kartı harcamaları/iu)).toBeVisible();
     const trend = screen.getByRole("region", {
       name: "Dönemsel hesap giriş / çıkışı",
     });
@@ -266,36 +301,65 @@ describe("CashFlowWorkspace", () => {
     expect(screen.getByText("4 hesap hareketi")).toBeVisible();
   });
 
-  it("shows all in-range movements in date order with explicit status and direction", async () => {
+  it("shows due-based totals and a day-end asset projection without replaying settled items", async () => {
     render(<CashFlowWorkspace />);
 
     const movementRegion = await screen.findByRole("region", {
-      name: "Nakit hareketleri tablosu",
+      name: "Vade planı tablosu",
     });
     const rows = within(movementRegion).getAllByRole("row");
-    expect(rows).toHaveLength(5);
+    expect(rows).toHaveLength(7);
+
+    const actualAsset = screen.getByText("Gerçek varlık").closest("div");
+    const carryover = screen.getByText("Devreden gecikmiş açıklar").closest("div");
+    const projectedAsset = screen
+      .getByText("Dönem sonu öngörülen varlık")
+      .closest("div");
+    expect(within(actualAsset!).getByText("₺1.500")).toBeVisible();
+    expect(within(carryover!).getByText("₺-20")).toBeVisible();
+    expect(within(projectedAsset!).getByText("₺1.845")).toBeVisible();
 
     expect(within(rows[1]!).getByText("8 Eyl 2026")).toBeVisible();
-    expect(within(rows[1]!).getByText("Müşteri tahsilatı")).toBeVisible();
-    expect(within(rows[1]!).getByText("Ana banka")).toBeVisible();
-    expect(within(rows[1]!).getByText("Gerçekleşti")).toBeVisible();
-    expect(within(rows[1]!).getByText("Giriş")).toBeVisible();
-    expect(within(rows[1]!).getByText("+₺300")).toBeVisible();
+    expect(within(rows[1]!).getByText("Ağustos danışmanlık alacağı")).toBeVisible();
+    expect(within(rows[1]!).getByText("Müşteri alacağı · Acme AŞ")).toBeVisible();
+    expect(within(rows[1]!).getByText("Alındı")).toBeVisible();
+    expect(within(rows[1]!).getAllByText("₺300")).toHaveLength(2);
+    expect(within(rows[1]!).getByText("₺1.480")).toBeVisible();
 
-    expect(within(rows[2]!).getByText("9 Eyl 2026")).toBeVisible();
-    expect(within(rows[2]!).getByText("Ödenen ofis gideri")).toBeVisible();
-    expect(within(rows[2]!).getByText("Giderler")).toBeVisible();
-    expect(within(rows[2]!).getByText("Gerçekleşti")).toBeVisible();
-    expect(within(rows[2]!).getByText("Çıkış")).toBeVisible();
-    expect(within(rows[2]!).getByText("−₺45")).toBeVisible();
+    expect(within(rows[2]!).getByText("10 Eyl 2026")).toBeVisible();
+    expect(within(rows[2]!).getByText("Ofis giderleri")).toBeVisible();
+    expect(
+      within(rows[2]!).getByText("Diğer ödeme · 1 gider kaydı"),
+    ).toBeVisible();
+    expect(within(rows[2]!).getByText("Planlanan diğer ödeme")).toBeVisible();
+    expect(within(rows[2]!).getByText("₺45")).toBeVisible();
+    expect(within(rows[2]!).getAllByText("—")).toHaveLength(2);
+    expect(within(rows[2]!).getByText("₺1.480")).toBeVisible();
 
-    expect(within(rows[3]!).getByText("15 Eyl 2026")).toBeVisible();
-    expect(within(rows[3]!).getByText("Gecikmiş")).toBeVisible();
-    expect(within(rows[3]!).getByText("−₺35")).toBeVisible();
+    expect(within(rows[3]!).getByText("12 Eyl 2026")).toBeVisible();
+    expect(within(rows[3]!).getByText("Eylül danışmanlık alacağı")).toBeVisible();
+    expect(within(rows[3]!).getByText("Alınacak")).toBeVisible();
+    expect(within(rows[3]!).getAllByText("₺500")).toHaveLength(2);
+    expect(within(rows[3]!).getByText("₺1.980")).toBeVisible();
 
-    expect(within(rows[4]!).getByText("18 Eyl 2026")).toBeVisible();
-    expect(within(rows[4]!).getByText("Planlandı")).toBeVisible();
-    expect(within(rows[4]!).getByText("−₺80")).toBeVisible();
+    expect(within(rows[4]!).getByText("15 Eyl 2026")).toBeVisible();
+    expect(within(rows[4]!).getByText("Gecikmiş ödeme")).toBeVisible();
+    expect(
+      within(rows[4]!).getByText("Kredi kartı · 2 harcama · vade toplamı"),
+    ).toBeVisible();
+    expect(within(rows[4]!).getAllByText("₺35")).toHaveLength(2);
+    expect(within(rows[4]!).getByText("₺1.945")).toBeVisible();
+
+    expect(within(rows[5]!).getByText("18 Eyl 2026")).toBeVisible();
+    expect(within(rows[5]!).getByText("Ödenecek")).toBeVisible();
+    expect(within(rows[5]!).getByText("Şirket kartı")).toBeVisible();
+    expect(within(rows[5]!).getAllByText("₺80")).toHaveLength(2);
+    expect(within(rows[5]!).getByText("₺1.845")).toBeVisible();
+
+    expect(within(rows[6]!).getByText("18 Eyl 2026")).toBeVisible();
+    expect(within(rows[6]!).getByText("Vergi giderleri")).toBeVisible();
+    expect(within(rows[6]!).getByText("Planlanan diğer ödeme")).toBeVisible();
+    expect(within(rows[6]!).getByText("₺1.845")).toBeVisible();
     expect(
       within(movementRegion).queryByText("Aralık dışı gider"),
     ).not.toBeInTheDocument();
@@ -304,22 +368,53 @@ describe("CashFlowWorkspace", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("shows an honest empty state when the range has no movements", async () => {
+  it("shows an honest empty state when the range has no due items", async () => {
     vi.mocked(fetch).mockResolvedValueOnce(
-      jsonResponse({ ...weeklyReport, movements: [] }),
+      jsonResponse({ ...weeklyReport, dueItems: [] }),
     );
 
     render(<CashFlowWorkspace />);
 
     const movementRegion = await screen.findByRole("region", {
-      name: "Nakit hareketleri tablosu",
+      name: "Vade planı tablosu",
     });
     expect(
       within(movementRegion).getByText(
-        "Seçilen tarih aralığında gerçekleşen, planlanan veya gecikmiş nakit hareketi yok.",
+        "Seçilen tarih aralığında vadeli alacak, tahsilat veya ödeme kaydı yok.",
       ),
     ).toBeVisible();
     expect(within(movementRegion).getAllByRole("row")).toHaveLength(2);
+  });
+
+  it("labels tax obligations separately and keeps their source period visible", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      jsonResponse({
+        ...weeklyReport,
+        dueItems: [
+          {
+            direction: "outflow",
+            dueOn: "2026-09-18",
+            id: "tax-payment-1",
+            kind: "tax_payment",
+            label: "Geçici vergi",
+            remainingAmount: "80.0000",
+            settledAmount: "0.0000",
+            sourceLabel: "2026-08",
+            status: "planned",
+            totalAmount: "80.0000",
+          },
+        ],
+      }),
+    );
+
+    render(<CashFlowWorkspace />);
+
+    const movementRegion = await screen.findByRole("region", {
+      name: "Vade planı tablosu",
+    });
+    expect(within(movementRegion).getByText("Geçici vergi")).toBeVisible();
+    expect(within(movementRegion).getByText("Vergi · 2026-08")).toBeVisible();
+    expect(within(movementRegion).getByText("Ödenecek")).toBeVisible();
   });
 
   it("requests the exact inclusive range and selected monthly granularity", async () => {

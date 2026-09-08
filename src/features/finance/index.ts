@@ -18,4 +18,7 @@ export * from "./card-plan";
 export * from "./spending-repository";
 export * from "./spending-service";
 export * from "./spending-validation";
+export * from "./tax-repository";
+export * from "./tax-service";
+export * from "./tax-validation";
 export * from "./validation";

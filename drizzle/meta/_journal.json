@@ -134,6 +134,13 @@
       "when": 1788799557949,
       "tag": "0018_planning_expense_categories",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "5",
+      "when": 1788832085941,
+      "tag": "0019_tax_obligations",
+      "breakpoints": true
     }
   ]
 }

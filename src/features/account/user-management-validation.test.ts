@@ -49,6 +49,12 @@ describe("managed user validation", () => {
         status: "active",
       }),
     ).toThrow();
+    expect(() =>
+      updateManagedUserInputSchema.parse({
+        permissions: ["finance.taxes.write"],
+        status: "active",
+      }),
+    ).toThrow();
   });
 
   it("accepts coherent lifecycle and reversal permissions", () => {
@@ -65,6 +71,8 @@ describe("managed user validation", () => {
           "finance.receivables.reverse",
           "finance.accounts.read",
           "finance.accounts.write",
+          "finance.taxes.read",
+          "finance.taxes.write",
           "audit.read",
         ],
         status: "active",

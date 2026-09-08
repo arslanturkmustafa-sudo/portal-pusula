@@ -45,6 +45,7 @@ const financeAccountTable = "finance_account";
 const financeLedgerEntryTable = "finance_ledger_entry";
 const financeTransactionTable = "finance_transaction";
 const workTaskVisitTable = "work_task_visit";
+const taxObligationTable = "tax_obligation";
 const platformTables = [
   "audit_event",
   "job_run",
@@ -77,9 +78,10 @@ const allMigratedPlatformTables = [
   financeLedgerEntryTable,
   financeTransactionTable,
   workTaskVisitTable,
+  taxObligationTable,
 ] as const;
 const repositoryRoot = process.cwd();
-const expectedMigrationCount = 19;
+const expectedMigrationCount = 20;
 const migrationLockWaitTimeoutMs = 5_000;
 const migrationLockPollIntervalMs = 25;
 
@@ -1198,7 +1200,7 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
       ]);
     });
 
-    it("records the immutable 0000 through 0018 migration hash chain", async () => {
+    it("records the immutable 0000 through 0019 migration hash chain", async () => {
       const [rows] = await pool.query<MigrationRow[]>(
         `SELECT id, hash, created_at FROM \`${migrationTable}\` ORDER BY id`,
       );
@@ -1297,6 +1299,11 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
           created_at: 1788799557949,
           hash: "48286e594051f082b85891e043f9578dfa2105fb50aef98b878e8d476cdbba6f",
           id: 19,
+        },
+        {
+          created_at: 1788832085941,
+          hash: "9c200e015a6565f6cdc681fab1dfebefc5015759fa75ef1f9862d7e7a1a01abe",
+          id: 20,
         },
       ]);
     });

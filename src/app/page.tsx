@@ -16,6 +16,7 @@ const MODULE_HOMES: readonly Readonly<{
   { href: "/finans/kartlar", permission: "finance.cards.read" },
   { href: "/finans/hesaplar", permission: "finance.accounts.read" },
   { href: "/finans/ortaklik", permission: "finance.partnership.read" },
+  { href: "/finans/vergiler", permission: "finance.taxes.read" },
   { href: "/finans/raporlar", permission: "finance.reports.read" },
 ];
 

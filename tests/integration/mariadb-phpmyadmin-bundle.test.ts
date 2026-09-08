@@ -480,8 +480,8 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
           },
           sessionRestored: true,
         });
-        expect(await tableNames(pool)).toHaveLength(30);
-        expect(await journalRows(pool)).toHaveLength(19);
+        expect(await tableNames(pool)).toHaveLength(31);
+        expect(await journalRows(pool)).toHaveLength(20);
       } catch (error) {
         reusable = false;
         throw error;
@@ -719,7 +719,7 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
 
       const bundleSchema = await schemaDefinitionSnapshot(pool);
       await expect(runMigration()).resolves.toBeUndefined();
-      expect(await journalRows(pool)).toHaveLength(19);
+      expect(await journalRows(pool)).toHaveLength(20);
       expect(await schemaDefinitionSnapshot(pool)).toEqual(bundleSchema);
 
       await resetKnownTables(pool);

@@ -8,9 +8,9 @@ import {
   readCashFlowLedger,
   type CashFlowAccountOpeningDailyAggregate,
   type CashFlowActualDailyAggregate,
+  type CashFlowDueItem,
   type CashFlowForecastAggregate,
   type CashFlowLedgerSnapshot,
-  type CashFlowMovement,
 } from "@/features/finance/cash-flow-repository";
 import {
   cashFlowFilterSchema,
@@ -47,9 +47,11 @@ export type CashFlowReport = Readonly<{
     accountCount: number;
     asOfOn: string;
     closingBalanceAmount: string;
+    currentAssetAmount: string;
     openingBalanceAmount: string;
     status: "configured" | "not_configured";
   }>;
+  dueItems: readonly CashFlowDueItem[];
   forecast: Readonly<{
     lines: readonly CashFlowForecastAggregate[];
     overdue: CashFlowTotals;
@@ -59,7 +61,6 @@ export type CashFlowReport = Readonly<{
   }>;
   generatedOn: string;
   granularity: CashFlowGranularity;
-  movements: readonly CashFlowMovement[];
   periods: readonly CashFlowPeriodReport[];
   range: Readonly<{ from: string; to: string }>;
   unclassifiedExpenses: Readonly<{ amount: string; entryCount: number }>;
@@ -168,17 +169,18 @@ function inPeriod(eventOn: string | null, period: PeriodBounds): boolean {
   return eventOn !== null && eventOn >= period.startOn && eventOn <= period.endOn;
 }
 
-function reportMovements(
-  movements: readonly CashFlowMovement[],
+function reportDueItems(
+  items: readonly CashFlowDueItem[],
   filter: CashFlowFilter,
-): readonly CashFlowMovement[] {
-  return movements
+): readonly CashFlowDueItem[] {
+  return items
     .filter(
-      (movement) =>
-        movement.eventOn >= filter.from && movement.eventOn <= filter.to,
+      (item) =>
+        (item.dueOn >= filter.from && item.dueOn <= filter.to) ||
+        (item.dueOn < filter.from && item.status === "overdue"),
     )
     .sort((left, right) =>
-      left.eventOn.localeCompare(right.eventOn) ||
+      left.dueOn.localeCompare(right.dueOn) ||
       left.status.localeCompare(right.status) ||
       left.direction.localeCompare(right.direction) ||
       left.kind.localeCompare(right.kind) ||
@@ -239,7 +241,10 @@ export function composeCashFlowReport(
     actual: actualTotals(snapshot.actual),
     assumptions: [
       "Hesap defteri özeti ve bakiye hesabı yalnız hesap hareketleri defterinden alınır; iç transferler brüt giriş veya çıkışı şişirmez.",
-      "Hareket listesi, hesap defteri satırları ile operasyon modüllerindeki gerçekleşmeleri ayrı kaynaklar olarak gösterir; aralarında otomatik eşleştirme veya birleşik toplam yapılmaz.",
+      "Vade planı hesap defteri ayrıntılarını tekrarlamaz; alacaklar ve ortak katkıları kayıt bazında, kredi kartlarını kart ve vade günü bazında toplar.",
+      "Kart planında harcama açıklamaları gösterilmez; toplam, ödenen ve kalan tutar aynı vade satırında sunulur.",
+      "Vergi yükümlülükleri KDV, gelir vergisi veya geçici vergi olarak kendi vade gününde gösterilir; yalnız açık tutarlar nakit tahminine eklenir.",
+      "Kart dışı giderlerden yalnız ileri tarihli planlar kategori ve tarih bazında gruplanır; geçmiş giderler üstteki hesap defteri görünümünde kalır.",
       "Dönem açılışı yalnız Europe/Istanbul iş gününe göre dönemden önce oluşturulmuş hesapların başlangıç bakiyelerini içerir; dönem içinde açılan hesapların başlangıç bakiyesi ayrı gösterilir ve kapanışta uzlaştırılır.",
       "Gerçekleşen hareketler Europe/Istanbul iş gününe göre bugünle sınırlandırılır; ileri tarihli açık kalemler tahmin olarak ayrı gösterilir.",
       "Gecikmiş toplam, seçilen aralıktan önce doğmuş olsa da bugün hâlâ açık olan tüm vadeli kalemleri içerir; dönem satırları yalnız kendi tarih aralığına düşen gecikmeleri gösterir.",
@@ -250,9 +255,11 @@ export function composeCashFlowReport(
       accountCount: snapshot.balance.accountCount,
       asOfOn: filter.to < generatedOn ? filter.to : generatedOn,
       closingBalanceAmount: snapshot.balance.closingBalanceAmount,
+      currentAssetAmount: snapshot.balance.currentAssetAmount,
       openingBalanceAmount: snapshot.balance.openingBalanceAmount,
       status: snapshot.balance.accountCount > 0 ? "configured" : "not_configured",
     },
+    dueItems: reportDueItems(snapshot.dueItems, filter),
     forecast: {
       lines: snapshot.forecast,
       overdue: forecastTotals(overdue),
@@ -262,7 +269,6 @@ export function composeCashFlowReport(
     },
     generatedOn,
     granularity: filter.granularity,
-    movements: reportMovements(snapshot.movements, filter),
     periods,
     range: { from: filter.from, to: filter.to },
     unclassifiedExpenses: {

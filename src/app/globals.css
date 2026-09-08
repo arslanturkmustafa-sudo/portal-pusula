@@ -2955,7 +2955,7 @@ button, a { color: inherit; }
   font-size: 0.58rem;
 }
 .finance-subnav a > strong {
-  overflow-wrap: anywhere;
+  white-space: nowrap;
   font-size: 0.7rem;
 }
 
@@ -4326,8 +4326,9 @@ select {
 }
 
 .finance-subnav {
-  grid-template-columns: repeat(7, minmax(0, 1fr));
-  overflow: hidden;
+  grid-template-columns: 0.8fr 1.25fr 0.75fr 1.75fr 1fr 0.8fr 1.15fr 1.15fr;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
   border: 1px solid var(--line);
   border-radius: 11px;
   background: var(--sheet);
@@ -4335,6 +4336,9 @@ select {
 
 .finance-subnav a {
   border-color: var(--line);
+  gap: 0.4rem;
+  padding-right: 0.65rem;
+  padding-left: 0.65rem;
 }
 
 .portal-access-denied {

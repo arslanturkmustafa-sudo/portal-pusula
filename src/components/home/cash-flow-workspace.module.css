@@ -427,6 +427,49 @@
   margin: 0.7rem 0;
 }
 
+.projectionSummary {
+  background: var(--line, #cbc8bd);
+  border: 1px solid var(--line, #cbc8bd);
+  border-radius: 0.9rem;
+  display: grid;
+  gap: 1px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0 0 0.8rem;
+  overflow: hidden;
+}
+
+.projectionSummary > div {
+  background: var(--sheet, #fffef9);
+  min-width: 0;
+  padding: 0.9rem 1rem;
+}
+
+.projectionSummary dt,
+.projectionSummary small {
+  color: var(--ink-soft, #66716c);
+}
+
+.projectionSummary dt {
+  font-size: 0.76rem;
+  font-weight: 720;
+  margin-bottom: 0.35rem;
+}
+
+.projectionSummary dd {
+  font-size: clamp(1.05rem, 1.8vw, 1.45rem);
+  font-variant-numeric: tabular-nums;
+  font-weight: 780;
+  letter-spacing: -0.035em;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.projectionSummary small {
+  display: block;
+  font-size: 0.74rem;
+  margin-top: 0.25rem;
+}
+
 .tableFrame table {
   border-collapse: collapse;
   min-width: 44rem;
@@ -434,6 +477,7 @@
 }
 
 .movementTable {
+  min-width: 70rem !important;
   table-layout: fixed;
 }
 
@@ -442,15 +486,23 @@
 }
 
 .movementTable th:nth-child(3) {
-  width: 8.5rem;
+  width: 11.5rem;
 }
 
 .movementTable th:nth-child(4) {
-  width: 7rem;
+  width: 9rem;
 }
 
 .movementTable th:nth-child(5) {
   width: 10rem;
+}
+
+.movementTable th:nth-child(6) {
+  width: 9rem;
+}
+
+.movementTable th:nth-child(7) {
+  width: 13rem;
 }
 
 .tableFrame caption {
@@ -534,15 +586,28 @@
 }
 
 .status_actual {
+  background: #f4f1e9;
+  border-color: #d8d1c2;
+  color: #5f5748;
+}
+
+.status_scheduled,
+.status_planned {
+  background: #eaf2f7;
+  border-color: #bfd3df;
+  color: #28586f;
+}
+
+.status_settled {
   background: #e7f4ee;
   border-color: #b7d8ca;
   color: #175944;
 }
 
-.status_scheduled {
-  background: #eaf2f7;
-  border-color: #bfd3df;
-  color: #28586f;
+.status_partial {
+  background: #fff7df;
+  border-color: #e4cf8e;
+  color: #6f5513;
 }
 
 .status_overdue {
@@ -566,6 +631,15 @@
 .amountCell {
   font-weight: 780;
   text-align: right;
+}
+
+.projectionCell {
+  font-weight: 780;
+  text-align: right;
+}
+
+.mobileCellLabel {
+  display: none;
 }
 
 .emptyMovement {
@@ -737,6 +811,10 @@
     grid-template-columns: 1fr 1fr;
   }
 
+  .projectionSummary {
+    grid-template-columns: 1fr;
+  }
+
   .summary > div {
     padding: 0.85rem;
   }
@@ -803,9 +881,12 @@
     display: grid;
     gap: 0.55rem 0.75rem;
     grid-template-areas:
-      "date amount"
+      "date status"
       "movement movement"
-      "status direction";
+      "total total"
+      "settled settled"
+      "remaining remaining"
+      "projection projection";
     grid-template-columns: minmax(0, 1fr) auto;
     padding: 0.85rem;
   }
@@ -830,17 +911,43 @@
 
   .statusCell {
     grid-area: status;
-  }
-
-  .directionCell {
-    grid-area: direction;
     justify-self: end;
   }
 
   .amountCell {
-    grid-area: amount;
-    justify-self: end;
+    align-items: center;
+    display: flex;
+    justify-content: space-between;
     text-align: right !important;
+  }
+
+  .totalCell {
+    grid-area: total;
+  }
+
+  .settledCell {
+    grid-area: settled;
+  }
+
+  .remainingCell {
+    grid-area: remaining;
+  }
+
+  .projectionCell {
+    align-items: center;
+    border-top: 1px solid var(--line, #cbc8bd) !important;
+    display: flex;
+    grid-area: projection;
+    justify-content: space-between;
+    padding-top: 0.55rem !important;
+    text-align: right !important;
+  }
+
+  .mobileCellLabel {
+    color: var(--ink-soft, #66716c);
+    display: inline;
+    font-size: 0.74rem;
+    font-weight: 720;
   }
 
   .emptyMovement {

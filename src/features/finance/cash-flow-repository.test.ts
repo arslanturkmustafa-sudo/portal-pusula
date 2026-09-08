@@ -18,6 +18,7 @@ describe("cash flow repository", () => {
           {
             account_count: 2,
             closing_balance_amount: "1325.2500",
+            current_asset_amount: "1500.0000",
             opening_balance_amount: "1000.0000",
           },
         ],
@@ -62,40 +63,90 @@ describe("cash flow repository", () => {
             event_on: null,
             kind: "commission_receivable",
           },
+          {
+            amount: "80.0000",
+            bucket: "scheduled",
+            direction: "outflow",
+            entry_count: "1",
+            event_on: "2026-09-27",
+            kind: "tax_payment",
+          },
         ],
         [],
       ])
       .mockResolvedValueOnce([
         [
           {
-            amount: "75.0000",
-            direction: "outflow",
-            event_on: "2026-09-07",
-            id: "finance_transaction:30000000-0000-4000-8000-000000000001",
-            kind: "finance_transaction",
-            label: "Ofis gideri",
-            source_label: "Ana banka hesabı",
-            status: "actual",
-          },
-          {
-            amount: "600.0000",
             direction: "inflow",
-            event_on: "2026-09-20",
-            id: "customer_receivable:30000000-0000-4000-8000-000000000002",
+            due_on: "2026-09-20",
+            id: "receivable:30000000-0000-4000-8000-000000000001",
             kind: "customer_receivable",
             label: "Eylül danışmanlık hizmeti",
+            remaining_amount: "400.0000",
+            settled_amount: "200.0000",
             source_label: "Acme · Danışmanlık",
-            status: "scheduled",
+            status: "partial",
+            total_amount: "600.0000",
           },
           {
-            amount: "125.0000",
+            direction: "outflow",
+            due_on: "2026-09-25",
+            id: "card_payment:30000000-0000-4000-8000-000000000002:2026-09-25",
+            kind: "card_payment",
+            label: "Şirket kartı kart borcu",
+            remaining_amount: "600.0000",
+            settled_amount: "300.0000",
+            source_label: "Örnek Banka",
+            status: "partial",
+            total_amount: "900.0000",
+          },
+          {
+            direction: "outflow",
+            due_on: "2026-09-22",
+            id: "other_expense:rent:2026-09-22",
+            kind: "other_expense",
+            label: "Kira · 1 kayıt",
+            remaining_amount: "250.0000",
+            settled_amount: "0.0000",
+            source_label: null,
+            status: "scheduled",
+            total_amount: "250.0000",
+          },
+          {
             direction: "inflow",
-            event_on: "2026-09-21",
-            id: "paid_partnership_commission:30000000-0000-4000-8000-000000000003",
-            kind: "commission_receivable",
-            label: "Kiralama komisyonu",
+            due_on: "2026-08-31",
+            id: "partner_contribution:30000000-0000-4000-8000-000000000003",
+            kind: "partner_contribution",
+            label: "Ortak katkısı",
+            remaining_amount: "800.0000",
+            settled_amount: "200.0000",
             source_label: "Gayrimenkul projesi",
-            status: "actual",
+            status: "overdue",
+            total_amount: "1000.0000",
+          },
+          {
+            direction: "outflow",
+            due_on: "2026-09-10",
+            id: "tax_payment:30000000-0000-4000-8000-000000000004",
+            kind: "tax_payment",
+            label: "KDV",
+            remaining_amount: "0.0000",
+            settled_amount: "120.0000",
+            source_label: "2026-08",
+            status: "settled",
+            total_amount: "120.0000",
+          },
+          {
+            direction: "outflow",
+            due_on: "2026-09-27",
+            id: "tax_payment:30000000-0000-4000-8000-000000000005",
+            kind: "tax_payment",
+            label: "Gelir vergisi",
+            remaining_amount: "80.0000",
+            settled_amount: "0.0000",
+            source_label: "2026-08",
+            status: "planned",
+            total_amount: "80.0000",
           },
         ],
         [],
@@ -127,8 +178,83 @@ describe("cash flow repository", () => {
       balance: {
         accountCount: 2,
         closingBalanceAmount: "1325.2500",
+        currentAssetAmount: "1500.0000",
         openingBalanceAmount: "1000.0000",
       },
+      dueItems: [
+        {
+          direction: "inflow",
+          dueOn: "2026-09-20",
+          id: "receivable:30000000-0000-4000-8000-000000000001",
+          kind: "customer_receivable",
+          label: "Eylül danışmanlık hizmeti",
+          remainingAmount: "400.0000",
+          settledAmount: "200.0000",
+          sourceLabel: "Acme · Danışmanlık",
+          status: "partial",
+          totalAmount: "600.0000",
+        },
+        {
+          direction: "outflow",
+          dueOn: "2026-09-25",
+          id: "card_payment:30000000-0000-4000-8000-000000000002:2026-09-25",
+          kind: "card_payment",
+          label: "Şirket kartı kart borcu",
+          remainingAmount: "600.0000",
+          settledAmount: "300.0000",
+          sourceLabel: "Örnek Banka",
+          status: "partial",
+          totalAmount: "900.0000",
+        },
+        {
+          direction: "outflow",
+          dueOn: "2026-09-22",
+          id: "other_expense:rent:2026-09-22",
+          kind: "other_expense",
+          label: "Kira · 1 kayıt",
+          remainingAmount: "250.0000",
+          settledAmount: "0.0000",
+          sourceLabel: null,
+          status: "scheduled",
+          totalAmount: "250.0000",
+        },
+        {
+          direction: "inflow",
+          dueOn: "2026-08-31",
+          id: "partner_contribution:30000000-0000-4000-8000-000000000003",
+          kind: "partner_contribution",
+          label: "Ortak katkısı",
+          remainingAmount: "800.0000",
+          settledAmount: "200.0000",
+          sourceLabel: "Gayrimenkul projesi",
+          status: "overdue",
+          totalAmount: "1000.0000",
+        },
+        {
+          direction: "outflow",
+          dueOn: "2026-09-10",
+          id: "tax_payment:30000000-0000-4000-8000-000000000004",
+          kind: "tax_payment",
+          label: "KDV",
+          remainingAmount: "0.0000",
+          settledAmount: "120.0000",
+          sourceLabel: "2026-08",
+          status: "settled",
+          totalAmount: "120.0000",
+        },
+        {
+          direction: "outflow",
+          dueOn: "2026-09-27",
+          id: "tax_payment:30000000-0000-4000-8000-000000000005",
+          kind: "tax_payment",
+          label: "Gelir vergisi",
+          remainingAmount: "80.0000",
+          settledAmount: "0.0000",
+          sourceLabel: "2026-08",
+          status: "planned",
+          totalAmount: "80.0000",
+        },
+      ],
       forecast: [
         {
           amount: "600.0000",
@@ -146,37 +272,13 @@ describe("cash flow repository", () => {
           eventOn: null,
           kind: "commission_receivable",
         },
-      ],
-      movements: [
         {
-          amount: "75.0000",
+          amount: "80.0000",
+          bucket: "scheduled",
           direction: "outflow",
-          eventOn: "2026-09-07",
-          id: "finance_transaction:30000000-0000-4000-8000-000000000001",
-          kind: "finance_transaction",
-          label: "Ofis gideri",
-          sourceLabel: "Ana banka hesabı",
-          status: "actual",
-        },
-        {
-          amount: "600.0000",
-          direction: "inflow",
-          eventOn: "2026-09-20",
-          id: "customer_receivable:30000000-0000-4000-8000-000000000002",
-          kind: "customer_receivable",
-          label: "Eylül danışmanlık hizmeti",
-          sourceLabel: "Acme · Danışmanlık",
-          status: "scheduled",
-        },
-        {
-          amount: "125.0000",
-          direction: "inflow",
-          eventOn: "2026-09-21",
-          id: "paid_partnership_commission:30000000-0000-4000-8000-000000000003",
-          kind: "commission_receivable",
-          label: "Kiralama komisyonu",
-          sourceLabel: "Gayrimenkul projesi",
-          status: "actual",
+          entryCount: 1,
+          eventOn: "2026-09-27",
+          kind: "tax_payment",
         },
       ],
       unclassifiedExpenseAmount: "50.0000",
@@ -207,7 +309,11 @@ describe("cash flow repository", () => {
       "2026-09-15",
       "2026-09-30",
       "2026-09-15",
+      "2026-09-15",
+      "2026-09-15",
     ]);
+    expect(balanceSql).toContain("AS current_asset_amount");
+    expect(balanceSql.match(/\?/gu)).toHaveLength(12);
 
     const accountOpeningSql = String(execute.mock.calls[3]?.[0]);
     expect(accountOpeningSql).toMatch(
@@ -245,7 +351,24 @@ describe("cash flow repository", () => {
     expect(forecastSql).toMatch(
       /cci\.due_on < \? OR \(cci\.due_on >= \? AND cci\.due_on <= \?\)/u,
     );
+    const taxForecastSql = forecastSql.slice(
+      forecastSql.indexOf("SELECT tax_forecast.due_on"),
+      forecastSql.indexOf("UNION ALL", forecastSql.indexOf("SELECT tax_forecast.due_on")),
+    );
+    expect(taxForecastSql).toContain("'tax_payment', 'outflow'");
+    expect(taxForecastSql).toContain(
+      "BINARY tax_forecast.status = BINARY 'planned'",
+    );
+    expect(taxForecastSql).toContain("tax_forecast.payable_amount > 0");
+    expect(taxForecastSql).toMatch(
+      /tax_forecast\.due_on < \?[\s\S]*tax_forecast\.due_on >= \?[\s\S]*tax_forecast\.due_on <= \?/u,
+    );
+    expect(forecastSql.match(/\?/gu)).toHaveLength(19);
     expect(execute.mock.calls[5]?.[1]).toEqual([
+      "2026-09-15",
+      "2026-09-15",
+      "2026-09-01",
+      "2026-09-30",
       "2026-09-15",
       "2026-09-15",
       "2026-09-01",
@@ -263,58 +386,74 @@ describe("cash flow repository", () => {
       "2026-09-15",
     ]);
 
-    const movementSql = String(execute.mock.calls[6]?.[0]);
-    expect(movementSql).toMatch(/FROM finance_transaction t/u);
-    expect(movementSql).toMatch(/JOIN customer customer/u);
-    expect(movementSql).toMatch(/JOIN project project/u);
-    expect(movementSql).toMatch(/JOIN credit_card card/u);
-    expect(movementSql).toContain("expense.vendor_name");
-    expect(movementSql).toContain("target_account.display_name");
-    expect(movementSql).toContain("source_account.display_name");
-    expect(movementSql).toContain("FROM receivable_collection collection");
-    expect(movementSql).toContain("FROM partnership_contribution_receipt receipt");
-    expect(movementSql).toContain("installment.status = 'paid'");
-    expect(movementSql).toContain("commission.status = 'paid'");
-    expect(movementSql).toContain("'actual', 'inflow'");
-    expect(movementSql).toContain("'actual_direct_expense:'");
-    expect(movementSql).toMatch(
-      /collection\.entry_type = BINARY 'reversal'[\s\S]*THEN 'outflow'/u,
+    const dueItemSql = String(execute.mock.calls[6]?.[0]);
+    expect(dueItemSql).toContain("receivable.total_amount");
+    expect(dueItemSql).toContain("collection.collected_amount");
+    expect(dueItemSql).toContain("contribution.expected_amount");
+    expect(dueItemSql).toContain("contribution.received_amount");
+    expect(dueItemSql).toMatch(
+      /GROUP BY card\.id, card\.display_name, card\.bank_name,[\s\S]*installment\.due_on/u,
     );
-    expect(movementSql).toMatch(
-      /receipt\.entry_type = BINARY 'reversal'[\s\S]*THEN 'outflow'/u,
+    expect(dueItemSql).toContain("SUM(installment.amount) AS total_amount");
+    expect(dueItemSql).toContain("'card_payment'");
+    expect(dueItemSql).toMatch(
+      /GROUP BY expense\.category, category\.display_name, expense\.incurred_on/u,
     );
-    expect(movementSql).toMatch(
-      /transaction_type IN \(BINARY 'income', BINARY 'expense'\)/u,
+    expect(dueItemSql).toContain("'other_expense'");
+    expect(dueItemSql).toContain(
+      "payment_method IN ('cash', 'bank_transfer', 'other')",
     );
-    expect(movementSql).not.toContain("agency_collected");
+    expect(dueItemSql).toContain("expense.incurred_on > ?");
+    expect(dueItemSql).not.toContain("expense.description");
+    expect(dueItemSql).not.toContain("expense.vendor_name");
+    expect(dueItemSql).not.toContain("FROM finance_transaction");
+    expect(dueItemSql).not.toContain("partnership_commission");
+    const taxDueSql = dueItemSql.slice(
+      dueItemSql.indexOf("SELECT CONCAT('tax_payment:'"),
+      dueItemSql.indexOf("UNION ALL", dueItemSql.indexOf("SELECT CONCAT('tax_payment:'")),
+    );
+    expect(taxDueSql).toMatch(
+      /CASE BINARY tax_due\.tax_type[\s\S]*'KDV'[\s\S]*'Gelir vergisi'[\s\S]*'Geçici vergi'/u,
+    );
+    expect(taxDueSql).toContain("DATE_FORMAT(tax_due.period_month, '%Y-%m')");
+    expect(taxDueSql).toContain(
+      "WHEN BINARY tax_due.status = BINARY 'paid' THEN 'settled'",
+    );
+    expect(taxDueSql).toContain(
+      "BINARY tax_due.status <> BINARY 'voided'",
+    );
+    expect(taxDueSql).toContain("tax_due.payable_amount > 0");
+    expect(taxDueSql).not.toContain("paid_on");
+    expect(dueItemSql.match(/\?/gu)).toHaveLength(26);
     expect(execute.mock.calls[6]?.[1]).toEqual([
-      "2026-09-01",
-      "2026-09-30",
-      "2026-09-15",
-      "2026-09-01",
-      "2026-09-30",
-      "2026-09-15",
-      "2026-09-01",
-      "2026-09-30",
-      "2026-09-15",
-      "2026-09-01",
-      "2026-09-30",
-      "2026-09-15",
-      "2026-09-01",
-      "2026-09-30",
-      "2026-09-15",
-      "2026-09-01",
-      "2026-09-30",
+      // Customer receivable.
       "2026-09-15",
       "2026-09-15",
       "2026-09-01",
       "2026-09-30",
+      "2026-09-01",
+      "2026-09-15",
+      // Partner contribution.
       "2026-09-15",
       "2026-09-01",
       "2026-09-30",
+      "2026-09-01",
+      "2026-09-15",
+      // Card payment.
+      "2026-09-15",
       "2026-09-15",
       "2026-09-01",
       "2026-09-30",
+      "2026-09-01",
+      "2026-09-15",
+      "2026-09-01",
+      // Tax obligation.
+      "2026-09-15",
+      "2026-09-01",
+      "2026-09-30",
+      "2026-09-01",
+      "2026-09-15",
+      // Other expense.
       "2026-09-01",
       "2026-09-30",
       "2026-09-15",

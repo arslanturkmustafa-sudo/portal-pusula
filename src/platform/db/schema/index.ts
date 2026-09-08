@@ -123,3 +123,8 @@ export {
   type NewFinanceLedgerEntryRecord,
   type NewFinanceTransactionRecord,
 } from "./finance-account";
+export {
+  taxObligation,
+  type NewTaxObligationRecord,
+  type TaxObligationRecord,
+} from "./tax-obligation";
