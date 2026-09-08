@@ -69,6 +69,58 @@ const weeklyReport = {
   },
   generatedOn: "2026-09-20",
   granularity: "weekly",
+  movements: [
+    {
+      amount: "300.0000",
+      direction: "inflow",
+      eventOn: "2026-09-08",
+      id: "actual-1",
+      kind: "finance_transaction",
+      label: "Müşteri tahsilatı",
+      sourceLabel: "Ana banka",
+      status: "actual",
+    },
+    {
+      amount: "45.0000",
+      direction: "outflow",
+      eventOn: "2026-09-09",
+      id: "module-actual-1",
+      kind: "direct_expense",
+      label: "Ödenen ofis gideri",
+      sourceLabel: "Giderler",
+      status: "actual",
+    },
+    {
+      amount: "35.0000",
+      direction: "outflow",
+      eventOn: "2026-09-15",
+      id: "overdue-1",
+      kind: "card_installment",
+      label: "Kredi kartı taksiti",
+      sourceLabel: "Şirket kartı",
+      status: "overdue",
+    },
+    {
+      amount: "80.0000",
+      direction: "outflow",
+      eventOn: "2026-09-18",
+      id: "scheduled-1",
+      kind: "card_installment",
+      label: "Kredi kartı taksiti",
+      sourceLabel: "Şirket kartı",
+      status: "scheduled",
+    },
+    {
+      amount: "90.0000",
+      direction: "outflow",
+      eventOn: "2026-09-21",
+      id: "outside-range",
+      kind: "direct_expense",
+      label: "Aralık dışı gider",
+      sourceLabel: null,
+      status: "scheduled",
+    },
+  ],
   periods: [
     {
       accountOpeningAmount: "0.0000",
@@ -150,53 +202,124 @@ describe("CashFlowWorkspace", () => {
     const accountOpening = screen
       .getByText("Yeni hesap açılışı", { selector: "dt" })
       .closest("div");
+    const ledgerInflow = screen
+      .getByText("Hesaba işlenen gelir", { selector: "dt" })
+      .closest("div");
+    const ledgerOutflow = screen
+      .getByText("Hesaptan çıkan gider", { selector: "dt" })
+      .closest("div");
     const closing = screen.getByText("Kapanış bakiyesi").closest("div");
     expect(opening).not.toBeNull();
     expect(accountOpening).not.toBeNull();
+    expect(ledgerInflow).not.toBeNull();
+    expect(ledgerOutflow).not.toBeNull();
     expect(closing).not.toBeNull();
     expect(within(opening!).getByText("₺1.000")).toBeVisible();
     expect(within(accountOpening!).getByText("₺250")).toBeVisible();
+    expect(within(ledgerInflow!).getByText("₺400")).toBeVisible();
+    expect(within(ledgerOutflow!).getByText("₺150")).toBeVisible();
     expect(within(closing!).getByText("₺1.500")).toBeVisible();
 
     const detail = screen.getByRole("region", {
-      name: "Nakit akışı dönem detayları",
+      name: "Nakit hareketleri tablosu",
     });
     expect(detail).toHaveAttribute("tabindex", "0");
-    expect(within(detail).getByRole("row", { name: /7 Eyl – 13 Eyl 2026/u })).toBeVisible();
+    expect(
+      within(detail).getByRole("columnheader", { name: "Tarih" }),
+    ).toBeVisible();
+    expect(
+      within(detail).getByRole("columnheader", { name: "Hareket" }),
+    ).toBeVisible();
     expect(
       screen.getByRole("img", { name: "7 Eyl – 13 Eyl 2026 gelir ₺300" }),
     ).toBeVisible();
     expect(screen.getByText("Gelir ₺300")).toBeInTheDocument();
     expect(screen.getByText("Gider ₺50")).toBeInTheDocument();
     expect(
-      screen.getByText("Tablonun tüm sütunlarını görmek için yatay kaydırın."),
-    ).toBeInTheDocument();
-    expect(
-      within(
-        screen.getByRole("complementary", { name: "Nakit akışı rapor kapsamı" }),
-      ).getByText(/kendi modüllerinden otomatik olarak bu toplama yansımaz/iu),
+      screen.getByText(/kaynak kaydıyla hesap hareketi eşleştirilemediğinde/iu),
     ).toBeVisible();
-    const trend = screen.getByRole("region", { name: "Dönemsel giriş / çıkış" });
+    expect(screen.getByText(/bu tablodan toplam hesaplanmaz/iu)).toBeVisible();
+    const scope = screen.getByRole("complementary", {
+      name: "Nakit akışı rapor kapsamı",
+    });
+    expect(within(scope).getByText("Birleşik tablo kapsamı")).toBeVisible();
+    expect(
+      within(scope).getByText(/hesap defterine işlenen hareketler/iu),
+    ).toBeVisible();
+    expect(
+      within(scope).getByText(/kendi modülünde ödendi veya tahsil edildi/iu),
+    ).toBeVisible();
+    expect(
+      within(scope).getByText(/açık planlanan ya da gecikmiş kalemler/iu),
+    ).toBeVisible();
+    expect(
+      within(scope).getByText(/aynı işlem iki ayrı satırda görünebilir/iu),
+    ).toBeVisible();
+    expect(within(scope).getByText(/birleşik toplam gösterilmez/iu)).toBeVisible();
+    const trend = screen.getByRole("region", {
+      name: "Dönemsel hesap giriş / çıkışı",
+    });
+    expect(within(trend).getByText("Hesap defteri hareketleri")).toBeVisible();
     const zeroPeriod = within(trend).getByText("14 Eyl – 20 Eyl 2026").closest("li");
     expect(zeroPeriod).not.toBeNull();
     expect(within(zeroPeriod!).getByText("₺0 net").className).toMatch(/neutral/u);
     expect(screen.getByText("4 hesap hareketi")).toBeVisible();
   });
 
-  it("shows only open card installments with their due date, status and amount", async () => {
+  it("shows all in-range movements in date order with explicit status and direction", async () => {
     render(<CashFlowWorkspace />);
 
-    const duePlan = await screen.findByRole("region", {
-      name: "Kredi kartı vade planı",
+    const movementRegion = await screen.findByRole("region", {
+      name: "Nakit hareketleri tablosu",
     });
-    expect(within(duePlan).getByText("3 açık taksit")).toBeVisible();
-    expect(within(duePlan).getByText("15 Eyl 2026")).toBeVisible();
-    expect(within(duePlan).getByText("Gecikmiş · 1 taksit")).toBeVisible();
-    expect(within(duePlan).getByText("₺35")).toBeVisible();
-    expect(within(duePlan).getByText("18 Eyl 2026")).toBeVisible();
-    expect(within(duePlan).getByText("Planlandı · 2 taksit")).toBeVisible();
-    expect(within(duePlan).getByText("₺80")).toBeVisible();
-    expect(within(duePlan).queryByText("10 Eyl 2026")).not.toBeInTheDocument();
+    const rows = within(movementRegion).getAllByRole("row");
+    expect(rows).toHaveLength(5);
+
+    expect(within(rows[1]!).getByText("8 Eyl 2026")).toBeVisible();
+    expect(within(rows[1]!).getByText("Müşteri tahsilatı")).toBeVisible();
+    expect(within(rows[1]!).getByText("Ana banka")).toBeVisible();
+    expect(within(rows[1]!).getByText("Gerçekleşti")).toBeVisible();
+    expect(within(rows[1]!).getByText("Giriş")).toBeVisible();
+    expect(within(rows[1]!).getByText("+₺300")).toBeVisible();
+
+    expect(within(rows[2]!).getByText("9 Eyl 2026")).toBeVisible();
+    expect(within(rows[2]!).getByText("Ödenen ofis gideri")).toBeVisible();
+    expect(within(rows[2]!).getByText("Giderler")).toBeVisible();
+    expect(within(rows[2]!).getByText("Gerçekleşti")).toBeVisible();
+    expect(within(rows[2]!).getByText("Çıkış")).toBeVisible();
+    expect(within(rows[2]!).getByText("−₺45")).toBeVisible();
+
+    expect(within(rows[3]!).getByText("15 Eyl 2026")).toBeVisible();
+    expect(within(rows[3]!).getByText("Gecikmiş")).toBeVisible();
+    expect(within(rows[3]!).getByText("−₺35")).toBeVisible();
+
+    expect(within(rows[4]!).getByText("18 Eyl 2026")).toBeVisible();
+    expect(within(rows[4]!).getByText("Planlandı")).toBeVisible();
+    expect(within(rows[4]!).getByText("−₺80")).toBeVisible();
+    expect(
+      within(movementRegion).queryByText("Aralık dışı gider"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("region", { name: "Kredi kartı vade planı" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows an honest empty state when the range has no movements", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      jsonResponse({ ...weeklyReport, movements: [] }),
+    );
+
+    render(<CashFlowWorkspace />);
+
+    const movementRegion = await screen.findByRole("region", {
+      name: "Nakit hareketleri tablosu",
+    });
+    expect(
+      within(movementRegion).getByText(
+        "Seçilen tarih aralığında gerçekleşen, planlanan veya gecikmiş nakit hareketi yok.",
+      ),
+    ).toBeVisible();
+    expect(within(movementRegion).getAllByRole("row")).toHaveLength(2);
   });
 
   it("requests the exact inclusive range and selected monthly granularity", async () => {

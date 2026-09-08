@@ -65,6 +65,41 @@ describe("cash flow repository", () => {
         ],
         [],
       ])
+      .mockResolvedValueOnce([
+        [
+          {
+            amount: "75.0000",
+            direction: "outflow",
+            event_on: "2026-09-07",
+            id: "finance_transaction:30000000-0000-4000-8000-000000000001",
+            kind: "finance_transaction",
+            label: "Ofis gideri",
+            source_label: "Ana banka hesabı",
+            status: "actual",
+          },
+          {
+            amount: "600.0000",
+            direction: "inflow",
+            event_on: "2026-09-20",
+            id: "customer_receivable:30000000-0000-4000-8000-000000000002",
+            kind: "customer_receivable",
+            label: "Eylül danışmanlık hizmeti",
+            source_label: "Acme · Danışmanlık",
+            status: "scheduled",
+          },
+          {
+            amount: "125.0000",
+            direction: "inflow",
+            event_on: "2026-09-21",
+            id: "paid_partnership_commission:30000000-0000-4000-8000-000000000003",
+            kind: "commission_receivable",
+            label: "Kiralama komisyonu",
+            source_label: "Gayrimenkul projesi",
+            status: "actual",
+          },
+        ],
+        [],
+      ])
       .mockResolvedValueOnce([[{ amount: "50.0000", entry_count: 1 }], []]);
 
     await expect(
@@ -112,11 +147,43 @@ describe("cash flow repository", () => {
           kind: "commission_receivable",
         },
       ],
+      movements: [
+        {
+          amount: "75.0000",
+          direction: "outflow",
+          eventOn: "2026-09-07",
+          id: "finance_transaction:30000000-0000-4000-8000-000000000001",
+          kind: "finance_transaction",
+          label: "Ofis gideri",
+          sourceLabel: "Ana banka hesabı",
+          status: "actual",
+        },
+        {
+          amount: "600.0000",
+          direction: "inflow",
+          eventOn: "2026-09-20",
+          id: "customer_receivable:30000000-0000-4000-8000-000000000002",
+          kind: "customer_receivable",
+          label: "Eylül danışmanlık hizmeti",
+          sourceLabel: "Acme · Danışmanlık",
+          status: "scheduled",
+        },
+        {
+          amount: "125.0000",
+          direction: "inflow",
+          eventOn: "2026-09-21",
+          id: "paid_partnership_commission:30000000-0000-4000-8000-000000000003",
+          kind: "commission_receivable",
+          label: "Kiralama komisyonu",
+          sourceLabel: "Gayrimenkul projesi",
+          status: "actual",
+        },
+      ],
       unclassifiedExpenseAmount: "50.0000",
       unclassifiedExpenseCount: 1,
     });
 
-    expect(execute).toHaveBeenCalledTimes(7);
+    expect(execute).toHaveBeenCalledTimes(8);
     expect(String(execute.mock.calls[0]?.[0])).toContain("finance_transaction");
 
     const balanceSql = String(execute.mock.calls[2]?.[0]);
@@ -188,6 +255,63 @@ describe("cash flow repository", () => {
       "2026-09-01",
       "2026-09-30",
       "2026-09-15",
+      "2026-09-15",
+      "2026-09-01",
+      "2026-09-30",
+      "2026-09-01",
+      "2026-09-30",
+      "2026-09-15",
+    ]);
+
+    const movementSql = String(execute.mock.calls[6]?.[0]);
+    expect(movementSql).toMatch(/FROM finance_transaction t/u);
+    expect(movementSql).toMatch(/JOIN customer customer/u);
+    expect(movementSql).toMatch(/JOIN project project/u);
+    expect(movementSql).toMatch(/JOIN credit_card card/u);
+    expect(movementSql).toContain("expense.vendor_name");
+    expect(movementSql).toContain("target_account.display_name");
+    expect(movementSql).toContain("source_account.display_name");
+    expect(movementSql).toContain("FROM receivable_collection collection");
+    expect(movementSql).toContain("FROM partnership_contribution_receipt receipt");
+    expect(movementSql).toContain("installment.status = 'paid'");
+    expect(movementSql).toContain("commission.status = 'paid'");
+    expect(movementSql).toContain("'actual', 'inflow'");
+    expect(movementSql).toContain("'actual_direct_expense:'");
+    expect(movementSql).toMatch(
+      /collection\.entry_type = BINARY 'reversal'[\s\S]*THEN 'outflow'/u,
+    );
+    expect(movementSql).toMatch(
+      /receipt\.entry_type = BINARY 'reversal'[\s\S]*THEN 'outflow'/u,
+    );
+    expect(movementSql).toMatch(
+      /transaction_type IN \(BINARY 'income', BINARY 'expense'\)/u,
+    );
+    expect(movementSql).not.toContain("agency_collected");
+    expect(execute.mock.calls[6]?.[1]).toEqual([
+      "2026-09-01",
+      "2026-09-30",
+      "2026-09-15",
+      "2026-09-01",
+      "2026-09-30",
+      "2026-09-15",
+      "2026-09-01",
+      "2026-09-30",
+      "2026-09-15",
+      "2026-09-01",
+      "2026-09-30",
+      "2026-09-15",
+      "2026-09-01",
+      "2026-09-30",
+      "2026-09-15",
+      "2026-09-01",
+      "2026-09-30",
+      "2026-09-15",
+      "2026-09-15",
+      "2026-09-01",
+      "2026-09-30",
+      "2026-09-15",
+      "2026-09-01",
+      "2026-09-30",
       "2026-09-15",
       "2026-09-01",
       "2026-09-30",

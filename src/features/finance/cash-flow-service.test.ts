@@ -84,6 +84,38 @@ const snapshot: CashFlowLedgerSnapshot = {
       kind: "commission_receivable",
     },
   ],
+  movements: [
+    {
+      amount: "200.0000",
+      direction: "inflow",
+      eventOn: "2026-09-10",
+      id: "customer_receivable:30000000-0000-4000-8000-000000000002",
+      kind: "customer_receivable",
+      label: "Eylül danışmanlık hizmeti",
+      sourceLabel: "Acme · Danışmanlık",
+      status: "scheduled",
+    },
+    {
+      amount: "50.0000",
+      direction: "outflow",
+      eventOn: "2026-09-07",
+      id: "finance_transaction:30000000-0000-4000-8000-000000000001",
+      kind: "finance_transaction",
+      label: "Ofis gideri",
+      sourceLabel: "Ana banka hesabı",
+      status: "actual",
+    },
+    {
+      amount: "10.0000",
+      direction: "inflow",
+      eventOn: "2026-08-31",
+      id: "customer_receivable:30000000-0000-4000-8000-000000000003",
+      kind: "customer_receivable",
+      label: "Eski alacak",
+      sourceLabel: "Acme",
+      status: "overdue",
+    },
+  ],
   unclassifiedExpenseAmount: "5.0000",
   unclassifiedExpenseCount: 1,
 };
@@ -143,6 +175,18 @@ describe("cash flow report composition", () => {
     expect(report.periods[0]?.forecast.overdue.netAmount).toBe("0.0000");
     expect(report.periods[1]?.forecast.overdue.netAmount).toBe("-35.0000");
     expect(report.forecast.undatedInflowAmount).toBe("12.0000");
+    expect(report.movements).toEqual([
+      expect.objectContaining({
+        eventOn: "2026-09-07",
+        id: "finance_transaction:30000000-0000-4000-8000-000000000001",
+        status: "actual",
+      }),
+      expect.objectContaining({
+        eventOn: "2026-09-10",
+        id: "customer_receivable:30000000-0000-4000-8000-000000000002",
+        status: "scheduled",
+      }),
+    ]);
   });
 
   it("clips monthly buckets to the selected inclusive range", () => {
@@ -173,6 +217,7 @@ describe("cash flow report composition", () => {
           openingBalanceAmount: "500.0000",
         },
         forecast: [],
+        movements: [],
         unclassifiedExpenseAmount: "0.0000",
         unclassifiedExpenseCount: 0,
       },
