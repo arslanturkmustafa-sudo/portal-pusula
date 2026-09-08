@@ -243,6 +243,31 @@ describe("monthly visit validation", () => {
     ]);
   });
 
+  it("accepts identified append-only work items and rejects repeated identities", () => {
+    const workItemId = "50000000-0000-4000-8000-000000000001";
+    const base = {
+      deliveredOn: "2026-09-03",
+      resolutionNote: null,
+      resolutionStatus: "completed" as const,
+    };
+
+    expect(
+      updateVisitWithWorkItemsInputSchema.parse({
+        ...base,
+        workItems: [{ id: workItemId, title: "  Yeni uygulama  " }],
+      }).workItems,
+    ).toEqual([{ id: workItemId, title: "Yeni uygulama" }]);
+    expect(
+      updateVisitWithWorkItemsInputSchema.safeParse({
+        ...base,
+        workItems: [
+          { id: workItemId, title: "İlk başlık" },
+          { id: workItemId, title: "İkinci başlık" },
+        ],
+      }).success,
+    ).toBe(false);
+  });
+
   it("only accepts bounded work items for a completed visit", () => {
     const base = {
       deliveredOn: "2026-09-03",

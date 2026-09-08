@@ -31,6 +31,7 @@ export default async function CustomersPage() {
           canLifecycleCustomers: can("customers.lifecycle"),
           canWriteCustomers:
             can("customers.write") && can("customers.contact.read"),
+          canWriteTasks: can("tasks.write"),
           canWriteVisits: can("visits.write"),
         }}
         live

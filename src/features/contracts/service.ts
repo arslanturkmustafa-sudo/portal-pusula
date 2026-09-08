@@ -39,9 +39,15 @@ import {
   updateVisitWithWorkItemsInputSchema,
 } from "@/features/contracts/validation";
 import { LifecycleArchivedRecordError } from "@/features/lifecycle";
-import type { WorkTask } from "@/features/tasks/repository";
+import {
+  findTaskStateForUpdate,
+  type WorkTask,
+} from "@/features/tasks/repository";
 import { createTaskInTransaction } from "@/features/tasks/service";
-import { insertTaskVisitRecord } from "@/features/tasks/visit-repository";
+import {
+  insertTaskVisitRecord,
+  listVisitWorkItemReferences,
+} from "@/features/tasks/visit-repository";
 import { appendAuditEvent } from "@/platform/audit/repository";
 import { withUtcTransaction } from "@/platform/jobs/mysql-transaction";
 import { toUtcDateTime6 } from "@/platform/jobs/time";
@@ -121,6 +127,13 @@ export class VisitLockedError extends Error {
   constructor() {
     super("The visit is already resolved.");
     this.name = "VisitLockedError";
+  }
+}
+
+export class VisitWorkItemIdentityConflictError extends Error {
+  constructor() {
+    super("The visit work item identity is already in use.");
+    this.name = "VisitWorkItemIdentityConflictError";
   }
 }
 
@@ -763,7 +776,7 @@ export async function updateMonthlyVisitWithWorkItems(
       input,
       context,
       now,
-      input.workItems.length === 0,
+      true,
     );
     const tasks: WorkTask[] = [];
 
@@ -771,21 +784,57 @@ export async function updateMonthlyVisitWithWorkItems(
       if (input.deliveredOn === null) {
         throw new Error("Visit work items require a delivery date.");
       }
-      for (const title of input.workItems) {
-        const task = await createTaskInTransaction(
-          connection,
-          {
+      const existingWorkItems = await listVisitWorkItemReferences(
+        connection,
+        visitId,
+      );
+      const linkedTaskIds = new Set(
+        existingWorkItems.map((item) => item.taskId),
+      );
+
+      for (const workItem of input.workItems) {
+        const taskId = typeof workItem === "string" ? null : workItem.id;
+        const title = typeof workItem === "string" ? workItem : workItem.title;
+        if (taskId !== null && linkedTaskIds.has(taskId)) continue;
+        if (
+          taskId !== null &&
+          (await findTaskStateForUpdate(connection, taskId)) !== null
+        ) {
+          throw new VisitWorkItemIdentityConflictError();
+        }
+
+        let task: WorkTask;
+        try {
+          const taskInput = {
             customerId,
             description: null,
             dueOn: input.deliveredOn,
-            priority: "normal",
+            priority: "normal" as const,
             projectId: contract.projectId,
-            status: "done",
+            status: "done" as const,
             title,
-          },
-          { ...context, now: operationDate },
-        );
-        await insertTaskVisitRecord(connection, task.id, visitId, now);
+          };
+          task =
+            taskId === null
+              ? await createTaskInTransaction(
+                  connection,
+                  taskInput,
+                  { ...context, now: operationDate },
+                )
+              : await createTaskInTransaction(
+                  connection,
+                  taskInput,
+                  { ...context, now: operationDate },
+                  taskId,
+                );
+          await insertTaskVisitRecord(connection, task.id, visitId, now);
+        } catch (error) {
+          if (taskId !== null && isDuplicateEntry(error)) {
+            throw new VisitWorkItemIdentityConflictError();
+          }
+          throw error;
+        }
+        linkedTaskIds.add(task.id);
         await appendAuditEvent(connection, {
           action: "work_task.visit_linked",
           actorId: context.actorId,

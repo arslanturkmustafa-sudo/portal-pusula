@@ -10,6 +10,8 @@ import {
 
 import { RecordLifecycleControls } from "@/components/portal/record-lifecycle-controls";
 
+import { VisitWorkItemsEditor } from "./visit-work-items-editor";
+
 type VatMode = "exempt" | "exclusive" | "inclusive";
 type ProjectStatus =
   | "planned"
@@ -59,6 +61,11 @@ type VisitDto = Readonly<{
   resolutionStatus: VisitStatus;
 }>;
 
+type NewVisitWorkItem = Readonly<{
+  id: string;
+  title: string;
+}>;
+
 type VisitDraft = {
   committedOn: string;
   deliveredOn: string | null;
@@ -66,6 +73,7 @@ type VisitDraft = {
   internalDurationMinutes: string;
   internalStartTime: string;
   locationLabel: string;
+  newWorkItems: NewVisitWorkItem[];
   persistedResolutionStatus: VisitStatus | null;
   resolutionNote: string;
   resolutionStatus: VisitStatus;
@@ -125,6 +133,7 @@ type CustomerWorkspaceProps = Readonly<{
     canLifecycleContracts: boolean;
     canLifecycleCustomers: boolean;
     canReadAudit: boolean;
+    canWriteTasks?: boolean;
     canWriteVisits?: boolean;
   }>;
   customer: EditableCustomer;
@@ -138,6 +147,7 @@ const fullLifecycleCapabilities: NonNullable<CustomerWorkspaceProps["capabilitie
   canLifecycleContracts: true,
   canLifecycleCustomers: true,
   canReadAudit: true,
+  canWriteTasks: true,
   canWriteVisits: true,
 };
 
@@ -337,6 +347,10 @@ function localTimeFromUtc(value: string | null): string {
   }).format(new Date(canonical));
 }
 
+function newVisitWorkItem(): NewVisitWorkItem {
+  return { id: crypto.randomUUID(), title: "" };
+}
+
 function visitDraft(visit?: VisitDto): VisitDraft {
   return {
     committedOn: visit?.committedOn ?? "",
@@ -349,6 +363,7 @@ function visitDraft(visit?: VisitDto): VisitDraft {
         : String(visit.internalDurationMinutes),
     internalStartTime: localTimeFromUtc(visit?.internalPlannedAtUtc ?? null),
     locationLabel: visit?.locationLabel ?? "",
+    newWorkItems: [newVisitWorkItem()],
     persistedResolutionStatus: visit?.resolutionStatus ?? null,
     resolutionNote: visit?.resolutionNote ?? "",
     resolutionStatus: visit?.resolutionStatus ?? "planned",
@@ -668,6 +683,7 @@ function CustomerWorkspaceSession({
   }, [draft.monthlyFeeAmount, draft.vatMode, draft.vatRate]);
 
   const canWriteVisits = capabilities.canWriteVisits ?? false;
+  const canWriteTasks = capabilities.canWriteTasks ?? false;
   const hasLockedVisits = visits.some(
     (visit) => !isEditableVisitStatus(visit.resolutionStatus),
   );
@@ -1027,6 +1043,12 @@ function CustomerWorkspaceSession({
                 : null,
             resolutionNote: visit.resolutionNote,
             resolutionStatus: visit.resolutionStatus,
+            workItems:
+              visit.resolutionStatus === "completed"
+                ? visit.newWorkItems
+                    .map((item) => ({ ...item, title: item.title.trim() }))
+                    .filter((item) => item.title.length > 0)
+                : [],
           }),
           credentials: "same-origin",
           headers: { "Content-Type": "application/json" },
@@ -1034,7 +1056,10 @@ function CustomerWorkspaceSession({
         },
       );
       if (!response.ok) throw new Error("Visit could not be updated.");
-      const payload = (await response.json()) as { visit: VisitDto };
+      const payload = (await response.json()) as {
+        createdTaskCount?: number;
+        visit: VisitDto;
+      };
       updateVisit(index, visitDraft(payload.visit));
       setVisitSaveId(null);
       setPlanError(null);
@@ -1835,6 +1860,58 @@ function CustomerWorkspaceSession({
                                 />
                               </label>
                             ) : null}
+                            {visit.resolutionStatus === "completed" &&
+                            canWriteVisits ? (
+                              <div className="visit-work-items">
+                                {canWriteTasks ? (
+                                  <VisitWorkItemsEditor
+                                    addLabel="+ Yeni uygulama ekle"
+                                    disabled={planMutationPending}
+                                    hint="Daha önce kaydedilen uygulamalar görevlerde korunur. Buraya yalnız sonradan eklemek istediğiniz yeni maddeleri yazın."
+                                    itemLabel="Yeni uygulama"
+                                    itemKeys={visit.newWorkItems.map((item) => item.id)}
+                                    items={visit.newWorkItems.map((item) => item.title)}
+                                    legend="Yeni yapılan uygulamalar"
+                                    placeholder="Örn. Yeni kontrol listesi hazırlandı"
+                                    removeItemLabel="yeni uygulama maddesini"
+                                    onAdd={() =>
+                                      updateVisit(index, {
+                                        newWorkItems: [
+                                          ...visit.newWorkItems,
+                                          newVisitWorkItem(),
+                                        ],
+                                      })
+                                    }
+                                    onRemove={(itemIndex) => {
+                                      const newWorkItems = visit.newWorkItems.filter(
+                                        (_, currentIndex) => currentIndex !== itemIndex,
+                                      );
+                                      updateVisit(index, {
+                                        newWorkItems:
+                                          newWorkItems.length === 0
+                                            ? [newVisitWorkItem()]
+                                            : newWorkItems,
+                                      });
+                                    }}
+                                    onUpdate={(itemIndex, title) =>
+                                      updateVisit(index, {
+                                        newWorkItems: visit.newWorkItems.map(
+                                          (item, currentIndex) =>
+                                            currentIndex === itemIndex
+                                              ? { ...item, title }
+                                              : item,
+                                        ),
+                                      })
+                                    }
+                                  />
+                                ) : (
+                                  <p className="visit-work-items-permission">
+                                    Yeni uygulama eklemek için görev düzenleme
+                                    yetkisi gerekir.
+                                  </p>
+                                )}
+                              </div>
+                            ) : null}
                             <button
                               className="text-action visit-resolution-save"
                               disabled={!canWriteVisits || planMutationPending}
@@ -1844,7 +1921,7 @@ function CustomerWorkspaceSession({
                               {visitSaveId === visit.id
                                 ? "Kaydediliyor…"
                                 : visit.persistedResolutionStatus === "completed"
-                                  ? "Açıklamayı kaydet"
+                                  ? "Ziyaret içeriğini kaydet"
                                   : visitStatusLabel(visit.resolutionStatus)}
                             </button>
                           </>
