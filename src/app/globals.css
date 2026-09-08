@@ -771,7 +771,8 @@ button, a { color: inherit; }
 .contract-form textarea,
 .month-toolbar input,
 .visit-row input,
-.visit-row select {
+.visit-row select,
+.visit-row textarea {
   width: 100%;
   min-height: 38px;
   padding: 0.45rem 0.55rem;
@@ -783,11 +784,16 @@ button, a { color: inherit; }
   font-size: 0.7rem;
 }
 .contract-form textarea { resize: vertical; }
+.visit-row textarea {
+  min-height: 74px;
+  resize: vertical;
+}
 .contract-form input:disabled,
 .contract-form select:disabled,
 .contract-form textarea:disabled,
 .visit-row input:disabled,
-.visit-row select:disabled {
+.visit-row select:disabled,
+.visit-row textarea:disabled {
   background: var(--sheet-soft);
   color: var(--ink-soft);
   opacity: 1;
@@ -1555,7 +1561,7 @@ button, a { color: inherit; }
   background: transparent;
   cursor: pointer;
   color: var(--ink-soft);
-  font-size: 0.63rem;
+  font-size: 0.75rem;
   font-weight: 750;
 }
 .daily-plan-view-switch button:hover { color: var(--ink); }
@@ -1576,7 +1582,7 @@ button, a { color: inherit; }
   background: transparent;
   cursor: pointer;
   color: var(--ink);
-  font-size: 0.68rem;
+  font-size: 0.78rem;
   font-weight: 700;
   white-space: nowrap;
 }
@@ -1597,7 +1603,7 @@ button, a { color: inherit; }
 .daily-plan-date-field > span {
   color: var(--ink-soft);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 0.54rem;
+  font-size: 0.7rem;
   letter-spacing: 0.05em;
   text-transform: uppercase;
 }
@@ -1607,7 +1613,7 @@ button, a { color: inherit; }
   border: 0;
   background: transparent;
   color: var(--ink);
-  font-size: 0.7rem;
+  font-size: 0.82rem;
   font-weight: 700;
 }
 .daily-plan-filter-bar {
@@ -1635,7 +1641,7 @@ button, a { color: inherit; }
 .daily-plan-filters label > span,
 .daily-plan-export-actions > span {
   color: var(--ink-soft);
-  font-size: 0.57rem;
+  font-size: 0.7rem;
   font-weight: 700;
 }
 .daily-plan-filters select {
@@ -1645,7 +1651,7 @@ button, a { color: inherit; }
   background: var(--sheet);
   color: var(--ink);
   font: inherit;
-  font-size: 0.67rem;
+  font-size: 0.78rem;
 }
 .daily-plan-filters select:disabled {
   cursor: not-allowed;
@@ -1659,7 +1665,7 @@ button, a { color: inherit; }
   border: 1px solid var(--line-strong);
   background: var(--sheet);
   color: var(--ink);
-  font-size: 0.62rem;
+  font-size: 0.74rem;
   font-weight: 750;
   text-decoration: none;
 }
@@ -1698,7 +1704,7 @@ button, a { color: inherit; }
   border-radius: 9px;
   background: #f3f8f4;
   color: #315f4d;
-  font-size: 0.7rem;
+  font-size: 0.8rem;
   font-weight: 700;
 }
 .daily-plan-completion-notice > span {
@@ -1762,7 +1768,7 @@ button, a { color: inherit; }
   padding: 0.85rem 1.15rem;
   border-right: 1px solid var(--line);
   color: var(--ink-soft);
-  font-size: 0.62rem;
+  font-size: 0.74rem;
 }
 .daily-plan-summary > span:first-child { padding-left: 0; }
 .daily-plan-summary strong {
@@ -1794,7 +1800,7 @@ button, a { color: inherit; }
 .daily-plan-date-heading > span {
   color: var(--ink-soft);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 0.58rem;
+  font-size: 0.72rem;
   text-transform: uppercase;
 }
 .daily-plan-group { margin-top: 1.7rem; }
@@ -1817,7 +1823,7 @@ button, a { color: inherit; }
 .daily-plan-group-heading > span {
   color: var(--ink-soft);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 0.58rem;
+  font-size: 0.72rem;
   text-transform: uppercase;
 }
 .daily-plan-timeline,
@@ -1836,7 +1842,7 @@ button, a { color: inherit; }
   align-self: start;
   padding-top: 1rem;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 0.64rem;
+  font-size: 0.78rem;
   font-weight: 750;
   white-space: nowrap;
 }
@@ -1889,12 +1895,12 @@ button, a { color: inherit; }
 }
 .daily-plan-entry-heading strong,
 .daily-plan-customer-code { display: block; }
-.daily-plan-entry-heading strong { font-size: 0.8rem; }
+.daily-plan-entry-heading strong { font-size: 0.92rem; }
 .daily-plan-customer-code {
   margin-top: 0.22rem;
   color: var(--ink-soft);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 0.58rem;
+  font-size: 0.72rem;
   letter-spacing: 0.04em;
 }
 .daily-plan-entry-meta {
@@ -1903,7 +1909,7 @@ button, a { color: inherit; }
   gap: 0.45rem 0.9rem;
   margin: 0.65rem 0 0;
   color: var(--ink-soft);
-  font-size: 0.63rem;
+  font-size: 0.78rem;
 }
 .daily-plan-entry-meta span + span::before {
   margin-right: 0.9rem;
@@ -1925,7 +1931,7 @@ button, a { color: inherit; }
   gap: 0.35rem;
   flex: 0 0 auto;
   color: var(--ink-soft);
-  font-size: 0.62rem;
+  font-size: 0.74rem;
   font-weight: 750;
   white-space: nowrap;
 }
@@ -1953,7 +1959,7 @@ button, a { color: inherit; }
   padding-top: 1rem;
   color: var(--ink-soft);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 0.6rem;
+  font-size: 0.72rem;
 }
 
 @media (max-width: 900px) {

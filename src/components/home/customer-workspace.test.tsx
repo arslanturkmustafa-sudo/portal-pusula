@@ -1215,6 +1215,71 @@ describe("CustomerWorkspace reliable date writes", () => {
     ]);
   });
 
+  it("updates a completed visit note while keeping its date and status fixed", async () => {
+    const completedVisit = {
+      committedOn: "2026-09-10",
+      deliveredOn: "2026-09-10",
+      id: "30000000-0000-4000-8000-000000000010",
+      internalDurationMinutes: 90,
+      internalPlannedAtUtc: "2026-09-10 06:00:00.000000",
+      locationLabel: "Fabrika",
+      resolutionNote: "İlk ziyaret özeti",
+      resolutionStatus: "completed" as const,
+    };
+    const updatedVisit = {
+      ...completedVisit,
+      resolutionNote: "Güncellenen ziyaret özeti",
+    };
+    const patchBodies: unknown[] = [];
+    const onVisitsSaved = vi.fn();
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const method = init?.method ?? "GET";
+        if (method === "GET" && url.endsWith("/contracts")) {
+          return jsonResponse({ contracts: [contract] });
+        }
+        if (method === "GET" && url.includes("/month-plans/")) {
+          return jsonResponse({ monthPlan: { visits: [completedVisit] } });
+        }
+        if (method === "PATCH" && url.endsWith(`/visits/${completedVisit.id}`)) {
+          patchBodies.push(JSON.parse(String(init?.body)));
+          return jsonResponse({ visit: updatedVisit });
+        }
+        throw new Error(`Unexpected request: ${method} ${url}`);
+      },
+    );
+    const user = userEvent.setup();
+    vi.stubGlobal("fetch", fetchMock);
+    render(
+      <CustomerWorkspace
+        customer={customer}
+        live
+        onContractSaved={vi.fn()}
+        onVisitsSaved={onVisitsSaved}
+      />,
+    );
+
+    const note = await screen.findByLabelText("Açıklama");
+    expect(screen.getByLabelText("Gerçekleşen gün")).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "Açıklamayı kaydet" }),
+    ).toBeEnabled();
+    await user.clear(note);
+    await user.type(note, "Güncellenen ziyaret özeti");
+    await user.click(
+      screen.getByRole("button", { name: "Açıklamayı kaydet" }),
+    );
+
+    await waitFor(() => expect(patchBodies).toHaveLength(1));
+    expect(patchBodies[0]).toEqual({
+      deliveredOn: completedVisit.deliveredOn,
+      resolutionNote: "Güncellenen ziyaret özeti",
+      resolutionStatus: "completed",
+    });
+    expect(onVisitsSaved).toHaveBeenCalledWith([updatedVisit]);
+  });
+
   it("keeps editing available but hides lifecycle and audit controls without exact capabilities", async () => {
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);

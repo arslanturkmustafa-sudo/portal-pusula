@@ -638,6 +638,7 @@ async function updateMonthlyVisitInTransaction(
   input: UpdateVisitResolutionInput,
   context: ContractWriteContext,
   now: string,
+  allowCompletedNoteEdit: boolean,
 ): Promise<
   Readonly<{
     contract: ConsultingContract;
@@ -654,9 +655,14 @@ async function updateMonthlyVisitInTransaction(
 
   const before = await findOwnedVisitForUpdate(connection, contractId, visitId);
   if (!before) throw new ContractResourceNotFoundError();
+  if (before.resolutionStatus === "cancelled_by_agreement") {
+    throw new VisitLockedError();
+  }
   if (
-    before.resolutionStatus === "completed" ||
-    before.resolutionStatus === "cancelled_by_agreement"
+    before.resolutionStatus === "completed" &&
+    (!allowCompletedNoteEdit ||
+      input.resolutionStatus !== "completed" ||
+      input.deliveredOn !== before.deliveredOn)
   ) {
     throw new VisitLockedError();
   }
@@ -729,6 +735,7 @@ export async function updateMonthlyVisit(
         input,
         context,
         now,
+        true,
       )
     ).visit,
   );
@@ -756,6 +763,7 @@ export async function updateMonthlyVisitWithWorkItems(
       input,
       context,
       now,
+      input.workItems.length === 0,
     );
     const tasks: WorkTask[] = [];
 
