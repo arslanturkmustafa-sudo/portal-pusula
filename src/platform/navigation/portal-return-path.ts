@@ -6,6 +6,7 @@ const PORTAL_ROUTE_ROOTS = [
   "/gorevler",
   "/finans",
   "/projeler",
+  "/ayarlar",
   "/hesabim",
   "/kullanicilar",
 ] as const;
