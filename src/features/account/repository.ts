@@ -27,6 +27,12 @@ export type UserAccount = Readonly<{
   updatedAtUtc: string;
 }>;
 
+export type OwnerEmailRecipient = Readonly<{
+  displayName: string;
+  email: string;
+  id: string;
+}>;
+
 type UserAccountRow = RowDataPacket & {
   created_at_utc: string | Date;
   credential_version: number;
@@ -46,6 +52,12 @@ type UserPermissionRow = RowDataPacket & {
 
 type UserPermissionWithAccountRow = UserPermissionRow & {
   user_account_id: string;
+};
+
+type OwnerEmailRecipientRow = RowDataPacket & {
+  display_name: string;
+  email: string;
+  id: string;
 };
 
 type CountRow = RowDataPacket & { row_count: number | string };
@@ -131,6 +143,45 @@ export async function listUserAccounts(
                display_name ASC, id ASC`,
   );
   return rows.map(mapUserAccount);
+}
+
+function mapOwnerEmailRecipient(
+  row: OwnerEmailRecipientRow,
+): OwnerEmailRecipient {
+  return {
+    displayName: row.display_name,
+    email: row.email,
+    id: row.id,
+  };
+}
+
+export async function listActiveOwnerEmailRecipients(
+  connection: PoolConnection,
+): Promise<readonly OwnerEmailRecipient[]> {
+  const [rows] = await connection.execute<OwnerEmailRecipientRow[]>(
+    `SELECT id, email, display_name
+       FROM user_account
+      WHERE BINARY role = BINARY 'owner'
+        AND BINARY status = BINARY 'active'
+      ORDER BY id ASC`,
+  );
+  return rows.map(mapOwnerEmailRecipient);
+}
+
+export async function findActiveOwnerEmailRecipientById(
+  connection: PoolConnection,
+  id: string,
+): Promise<OwnerEmailRecipient | null> {
+  const [rows] = await connection.execute<OwnerEmailRecipientRow[]>(
+    `SELECT id, email, display_name
+       FROM user_account
+      WHERE id = ?
+        AND BINARY role = BINARY 'owner'
+        AND BINARY status = BINARY 'active'
+      LIMIT 1`,
+    [id],
+  );
+  return rows[0] ? mapOwnerEmailRecipient(rows[0]) : null;
 }
 
 export async function listAllUserPermissions(

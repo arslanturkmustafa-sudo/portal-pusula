@@ -23,6 +23,9 @@ export {
   type ManagedUser,
 } from "./service";
 export {
+  findActiveOwnerEmailRecipientById,
+  listActiveOwnerEmailRecipients,
+  type OwnerEmailRecipient,
   type UserAccount,
   type UserAccountStatus,
 } from "./repository";

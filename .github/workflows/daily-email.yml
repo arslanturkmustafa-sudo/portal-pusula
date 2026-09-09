@@ -1,0 +1,40 @@
+name: Portal Pusula Daily Email
+
+on:
+  schedule:
+    - cron: "0 9 * * *"
+      timezone: Europe/Istanbul
+    - cron: "10 * * * *"
+      timezone: Europe/Istanbul
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: portal-pusula-daily-email
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    env:
+      CRON_BEARER_TOKEN: ${{ secrets.PORTAL_PUSULA_CRON_BEARER_TOKEN }}
+    steps:
+      - name: Dispatch today's notification work
+        shell: bash
+        run: |
+          status="$(
+            printf 'header = "Authorization: Bearer %s"\n' "${CRON_BEARER_TOKEN}" |
+              curl --config - \
+                --silent --show-error \
+                --output /dev/null \
+                --write-out '%{http_code}' \
+                --request POST \
+                'https://portal.muhendiskafasi.com.tr/api/internal/cron/dispatch'
+          )"
+          if [[ "${status}" != "202" ]]; then
+            echo "Notification dispatch returned HTTP ${status}."
+            exit 1
+          fi

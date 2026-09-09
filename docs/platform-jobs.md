@@ -1,6 +1,6 @@
-# Platform job/outbox/audit ve cron runbook'u — Komut 3C
+# Platform job/outbox/audit ve e-posta cron runbook'u
 
-Bu runbook yalnız Portal Pusula'nın platform iş yürütme temelini tanımlar. Gerçek müşteri, finans, görev, kullanıcı/auth, workspace/organization veya RBAC akışı içermez. Komut 3C, Komut 3B temeline yalnız DB'de kalıcı cross-process cron frekans kapısı ve bağlayıcı iç endpoint yanıt politikasını ekler. Bu turda canlı Hostinger environment değişikliği, migration, deploy, cron kurulumu, backup ya da restore çalıştırılmamıştır.
+Bu runbook Portal Pusula'nın platform iş yürütme temelini ve onun üzerinde çalışan sınırlı e-posta bildirimini tanımlar. Yeni gider olayı ve günlük plan özeti mevcut dayanıklı outbox altyapısını kullanır; domain tablolarında yeni migration yoktur. Canlı environment/deploy kanıtı kod ve doküman değişikliğinden ayrı değerlendirilir.
 
 ## Kalıcılık sınırları
 
@@ -8,7 +8,7 @@ Bu runbook yalnız Portal Pusula'nın platform iş yürütme temelini tanımlar.
 | --- | --- | --- |
 | `scheduled_job` | Sürümlü JSON payload'a sahip işleri, uygunluk zamanını, deneme sayısını, durumunu ve lease/fencing alanlarını tutar. `(job_type, idempotency_key)` DB seviyesinde unique'tir. | Domain kaydı veya gerçek müşteri/finans verisinin kaynak tablosu değildir. Payload SQL/identifier seçemez. |
 | `job_run` | Her iş denemesinin correlation ID, lease, başlangıç/bitiş, güvenli sonuç ve hata kodunu saklar. `(job_id, attempt_no)` unique'tir ve iş silme/güncelleme FK'de `RESTRICT`tir. | Operasyon geçmişidir; audit kaydının veya logun yerine geçmez. Uygulama sözleşmesinde geçmiş denemeler değiştirilmez. |
-| `outbox_event` | Transaction ile oluşan, sürümlü payload taşıyan ve idempotent adapter tarafından teslim edilecek dayanıklı olayları tutar. `idempotency_key` DB seviyesinde unique'tir. | Message broker veya exactly-once teslim garantisi değildir. Bu dilimde production adapter yoktur. |
+| `outbox_event` | Transaction ile oluşan, sürümlü payload taşıyan ve idempotent adapter tarafından teslim edilecek dayanıklı olayları tutar. `idempotency_key` DB seviyesinde unique'tir. | Message broker veya exactly-once teslim garantisi değildir. E-posta için Resend adapter'ı kayıtlıdır; diğer event türleri fail-closed kalır. |
 | `audit_event` | Aktör, eylem, varlık, kontrollü önce/sonra özeti, correlation ID ve UTC zamanı olan platform audit olaylarını ekler. | Compliance ledger değildir; append-only kuralı şimdilik uygulama katmanı sözleşmesidir. |
 | `cron_dispatch_gate` | Sabit bir gate key için son izin verilen UTC dispatch zamanını DB transaction'ında tutar; process ve restart'lar arasında minimum aralığı zorlar. | Scheduler değildir, iş sonucu tutmaz ve job/outbox lease/fencing'in yerine geçmez. |
 
@@ -71,11 +71,11 @@ Outbox at-least-once çalışır. Adapter bir olayı lease/fencing ile claim ede
 2. worker, `delivered` DB commit'inden önce durur;
 3. lease süresi dolar ve olay yeniden teslim edilir.
 
-Bu yüzden her production adapter, outbox `id`/`idempotency_key` değerini hedefe taşımalı ve hedef tarafında tekrar teslimi etkisiz hale getirmelidir. Lease veya retry exactly-once sağlamaz. Bu dilimde gerçek dış sistem adapter'ı, bağlantısı veya credential'ı yoktur.
+Bu yüzden her production adapter, outbox `id`/`idempotency_key` değerini hedefe taşımalı ve hedef tarafında tekrar teslimi etkisiz hale getirmelidir. Lease veya retry exactly-once sağlamaz. Resend e-posta adapter'ı outbox `idempotency_key` değerini `Idempotency-Key` header'ında taşır; API anahtarı ve alıcı adresi loglanmaz.
 
-## Varsayılan kapalı cron adayı
+## Varsayılan kapalı cron sınırı
 
-Yerel aday sınır `/api/internal/cron/dispatch` sözleşmesini kullanır; canlı route/Hostinger cron kurulumu olarak kabul edilmez.
+Sınır `/api/internal/cron/dispatch` sözleşmesini kullanır ve environment tanımlanana kadar kapalıdır. Günlük tetikleyici GitHub Actions'ta `Europe/Istanbul` 09.00 olarak tanımlıdır; bekleyen e-postalar her saatin 10. dakikasında tekrar denenir. Her çağrı en fazla iki e-posta teslim eder ve tek sağlayıcı isteği 1 saniyede kesilir; dış endpoint'in 4 saniyelik toplam bütçesi korunur.
 
 - Yalnız exact `POST /api/internal/cron/dispatch` kabul edilir; query/hash, body ve cookie bulunamaz. Taşınan payload/metadata reddedilir.
 - Yetki yalnız exact `Authorization: Bearer <CRON_BEARER_TOKEN>` header'ıdır; query, path, cookie veya body içindeki değer kabul edilmez.
@@ -97,14 +97,14 @@ Process-içi/in-memory rate limiter kullanılmaz. `cron_dispatch_gate` satırı 
 
 Yetkili bir suppression ve izin verilen dispatch dışarıdan aynı `202 {"status":"accepted"}` olarak görünür. Yanıt gate zamanı, lock durumu, iş sayısı veya suppression nedenini açıklamaz. `202`, işlerin tamamlandığı garantisi değildir. Permit sonrasında lock/dispatch arızası oluşabilir; gerçek hata generic 503 olur ve otomatik tekrar kararı dış scheduler'ın canlıda ayrıca kanıtlanacak davranışına bağlıdır.
 
-Canlı cron etkinleştirmeden önce aşağıdakilerin her biri blocker'dır ve ayrıca kanıtlanmalıdır:
+Canlı e-posta etkinleştirmeden önce aşağıdakiler tamamlanır:
 
-- yerelde tasarlanan dayanıklı DB frekans kapısının Hostinger MariaDB üzerinde migration, transaction, saat ve yük davranışının kanıtlanması;
-- Hostinger cron'un exact `POST`, custom `Authorization` header'ı ve secret saklama yeteneklerinin gerçek panelde doğrulanması;
-- Portal Pusula için güvenli çağrı sıklığının belirlenmesi; bu aralığın batch/deadline, bounded catch-up ve DB kapasitesiyle birlikte yük testinde doğrulanması;
-- cron token üretme, devreye alma, rotasyon, iptal ve hata halinde geri dönüş prosedürünün değer açığa çıkarmadan prova edilmesi.
+- Resend gönderici domain/adres doğrulaması ve API anahtarının yalnız Hostinger environment'a girilmesi;
+- Hostinger `CRON_BEARER_TOKEN` ile GitHub `PORTAL_PUSULA_CRON_BEARER_TOKEN` secret'ının aynı gizli değeri taşıması;
+- manuel workflow çağrısının generic 202 dönmesi ve kontrollü tek e-postanın ulaşması;
+- e-posta başarısızlığında finans kaydının korunup outbox olayının retry durumunda kaldığının doğrulanması.
 
-Bu blocker'lar kapanmadan endpoint canlıda etkinleştirilmez, cron tanımlanmaz ve token değeri hiçbir doküman, CLI argümanı, log veya sohbete yazılmaz. UI, auth, GET fallback, tokenlı URL veya public tetikleme eklenmez; canlı Hostinger environment/deploy değişikliği yapılmaz.
+Token veya API anahtarı hiçbir doküman, CLI argümanı, log veya sohbete yazılmaz. UI, auth, GET fallback, tokenlı URL veya public tetikleme eklenmez.
 
 ## Yerel doğrulama ve production kapısı
 
@@ -114,8 +114,6 @@ Disposable gerçek MariaDB doğrulaması canlı bilgi istemeden çalışır:
 npm run test:mariadb
 ```
 
-Unit/policy kapıları ayrıca `npm test`, `npm run lint` ve `npm run typecheck` ile çalıştırılır. Bu testler; claim yarışını, stale token fencing'i, expired reclaim'i, retry/dead-letter'ı, bounded batch'i, aynı transaction başarı/rollback'ini, audit append-only API yüzeyini, outbox crash-window/idempotency sözleşmesini, cron fail-closed sınırını ve aynı generic 202 ile suppression davranışını kanıtlamalıdır. Gerçek MariaDB kapısı `0003` şeması ile permit/suppression/concurrency/time-regression/rollback davranışını da kapsamalıdır. Test-only handler ve yerel test credential'ları production registry/runtime'a taşınmaz.
+Bu değişiklikte yerel doğrulama riskle orantılı tutulur: e-posta environment, adapter, günlük saat penceresi, gider enqueue ve route odak testleri; ardından typecheck ve production build çalıştırılır. Repository CI'sindeki zorunlu kapılar birleştirme öncesi korunur. Test-only handler ve credential'lar production registry/runtime'a taşınmaz.
 
-Production'a geçmeden önce [migration runbook'undaki](./migrations.md) ve [backup/restore runbook'undaki](./backup-restore.md) tüm kapılar uygulanır. Özellikle doğrulanmış backup + ayrı hedefte restore kanıtı, migration/hash incelemesi ve geri dönüş penceresi zorunludur. Mimari ve tehdit sınırı [architecture.md](./architecture.md) ile [security.md](./security.md) içinde kayıtlıdır. Manuel rollback/requeue prosedürü, gerçek adapter davranışı ve Hostinger cron yetenekleri hâlâ açıktır; bunlar PASS sayılmaz.
-
-Komut 4 / auth için henüz HAZIR DEĞİL; Dilim 0 GO değildir.
+Bu e-posta dilimi domain şemasını değiştirmez; migration veya veri temizliği yapmaz. Mimari ve tehdit sınırı [architecture.md](./architecture.md) ile [security.md](./security.md) içinde kayıtlıdır. Canlı teslimat ancak sağlayıcı/domain ve secret kurulumu ile smoke kanıtından sonra PASS sayılır.

@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 
 import type { Pool } from "mysql2/promise";
 
+import { enqueueDailyDigestEmailsIfDue } from "@/features/notifications/daily-digest";
 import {
   dispatchOutboxBatch,
   productionOutboxAdapterRegistry,
@@ -21,6 +22,7 @@ import { systemClock, type Clock } from "./time";
 import type { JobRegistry } from "./types";
 
 const DEFAULT_LEASE_DURATION_MS = 30_000;
+const MAX_OUTBOX_DELIVERIES_PER_DISPATCH = 2;
 
 export type PlatformWorkDispatchSummary = Readonly<{
   jobs: JobDispatchSummary;
@@ -28,9 +30,8 @@ export type PlatformWorkDispatchSummary = Readonly<{
 }>;
 
 /**
- * Single bounded entry point for the candidate cron boundary. Production
- * registries are intentionally empty in Komut 3B, so no domain work or real
- * external delivery can occur without a later explicit wiring decision.
+ * Single bounded entry point for the cron boundary. Daily notification
+ * messages are seeded idempotently before the regular job and outbox batches.
  */
 export async function dispatchPlatformWork(
   pool: Pool,
@@ -46,6 +47,7 @@ export async function dispatchPlatformWork(
     jobRegistry?: JobRegistry;
     leaseDurationMs?: number;
     leaseOwner?: string;
+    prepareDailyDigest?: (pool: Pool, now: Date) => Promise<unknown>;
   }> = {},
 ): Promise<PlatformWorkDispatchSummary> {
   const clock = dependencies.clock ?? systemClock;
@@ -73,6 +75,11 @@ export async function dispatchPlatformWork(
     };
   }
 
+  await (dependencies.prepareDailyDigest ?? enqueueDailyDigestEmailsIfDue)(
+    pool,
+    clock.now(),
+  );
+
   const jobs = await dispatchJobBatch(pool, {
     backoffPolicy,
     batchSize: request.batchLimit,
@@ -94,7 +101,10 @@ export async function dispatchPlatformWork(
     : await dispatchOutboxBatch(pool, {
         adapters: dependencies.adapters ?? productionOutboxAdapterRegistry,
         backoffPolicy,
-        batchSize: request.batchLimit,
+        batchSize: Math.min(
+          request.batchLimit,
+          MAX_OUTBOX_DELIVERIES_PER_DISPATCH,
+        ),
         clock,
         leaseDurationMs,
         leaseOwner,

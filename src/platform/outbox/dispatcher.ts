@@ -4,6 +4,8 @@ import type { Pool } from "mysql2/promise";
 
 import type { BackoffPolicy } from "@/platform/jobs/backoff";
 import type { Clock } from "@/platform/jobs/time";
+import { EMAIL_OUTBOX_EVENT_TYPE } from "@/platform/email/outbox-email";
+import { createResendEmailOutboxAdapter } from "@/platform/email/resend-adapter";
 
 import {
   claimOutboxEvents,
@@ -20,13 +22,17 @@ export type OutboxDelivery = Readonly<{
 }>;
 
 export type OutboxAdapter = Readonly<{
-  deliver: (delivery: OutboxDelivery) => Promise<void>;
+  deliver: (
+    delivery: OutboxDelivery,
+    signal?: AbortSignal,
+  ) => Promise<void>;
 }>;
 
 export type OutboxAdapterRegistry = ReadonlyMap<string, OutboxAdapter>;
 
-/** Komut 3B deliberately configures no real external delivery adapter. */
-export const productionOutboxAdapterRegistry: OutboxAdapterRegistry = new Map();
+export const productionOutboxAdapterRegistry: OutboxAdapterRegistry = new Map([
+  [EMAIL_OUTBOX_EVENT_TYPE, createResendEmailOutboxAdapter()],
+]);
 
 export type OutboxDispatchSummary = Readonly<{
   claimed: number;
@@ -43,6 +49,7 @@ async function deliverClaimedEvent(
     adapters: OutboxAdapterRegistry;
     backoffPolicy: BackoffPolicy;
     clock: Clock;
+    signal?: AbortSignal;
   }>,
 ): Promise<"dead_letter" | "delivered" | "retry" | "stale"> {
   const adapter = input.adapters.get(event.eventType);
@@ -55,12 +62,15 @@ async function deliverClaimedEvent(
   }
 
   try {
-    await adapter.deliver({
-      eventType: event.eventType,
-      idempotencyKey: event.idempotencyKey,
-      payload: event.payload,
-      schemaVersion: event.schemaVersion,
-    });
+    await adapter.deliver(
+      {
+        eventType: event.eventType,
+        idempotencyKey: event.idempotencyKey,
+        payload: event.payload,
+        schemaVersion: event.schemaVersion,
+      },
+      input.signal,
+    );
   } catch {
     // Adapters receive the stable idempotency key and must deduplicate an
     // effect that completed before the adapter threw or the worker crashed.

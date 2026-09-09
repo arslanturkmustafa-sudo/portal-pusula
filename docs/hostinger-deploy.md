@@ -46,7 +46,7 @@ Arşiv kökünde doğrudan `package.json`, `package-lock.json`, `.nvmrc`, `next.
 4. [0018 incremental runbook'u](./phpmyadmin-planning-expense-categories-incremental.md) ile canlı DB/server digest'lerine bağlı `0018_planning_expense_categories` paketi üretilir, manifest ve SQL SHA-256 doğrulanır ve phpMyAdmin'de yalnız bir kez uygulanır. Exact başarı satırı, final 19 journal kaydı, journal dışında 29 uygulama tablosu, dokuz sistem kategorisi, kategori referans/FK bütünlüğü ve ziyaret konum alanı postflight'ı PASS olmadan uygulama deploy edilmez. Exact başarı yoksa aynı SQL tekrar çalıştırılmaz; hedef salt okunur incelenir ve gerekirse yeni forward-fix hazırlanır.
 5. DB adımı PASS olduktan sonra yalnız bu paketle aynı final committen üretilmiş canonical uygulama artefaktı kullanılır. Hostinger Git bağlantısı otomatik dağıtıyorsa commit `main`e ancak bu noktada birleştirilir. Manuel ZIP akışında yalnız `dist/portal-pusula-hostinger.zip` kullanıcı tarafından kendi gizli hPanel oturumunda yüklenir; secret değerlerini maskesiz gösterebilen ayarlar ekranı Codex veya başka model-visible otomasyonla açılmaz.
 6. Node 24.x, npm 12, kök `./`, çıktı `.next`, `next.config.mjs`, `npm run build` → `next build --webpack` ve platformun `next start`/port yönetimi korunur. Sabit production portu tanımlanmaz; install/build/start komutlarına migration eklenmez.
-7. Bu sürüm yeni secret adı istemez. Mevcut secret/env değerleri değiştirilmez; canlı auth exact `database` modunda kalır, cron değişkenleri eklenmez veya etkinleştirilmez.
+7. Canlı auth exact `database` modunda kalır. E-posta bildirimi açılacaksa aşağıdaki e-posta ve cron değişkenleri kullanıcı tarafından gizli hPanel/GitHub alanlarına girilir; değerler repoya, ZIP'e, komut satırına veya sohbete taşınmaz.
 8. Dağıtım `Akım` olduktan sonra liveness/readiness, giriş/kullanıcı yetkileri, alan redaksiyonu, yaşam döngüsü, void/ters kayıt, audit geçmişi, kart bazlı borçlar, manuel gider kategorileri, kasa/banka hesapları, firma görev raporu, haftalık/aylık nakit akışı ve müşteri/konum filtreli günlük plan doğrulanır; yalnız sonra yazma dondurması kaldırılır.
 9. Runtime loglarında yalnız genel sonuç/correlation ID aranır; raw DB hatası, parola, e-posta/PII, token, Authorization değeri veya throttle bucket digest'i bulunmamalıdır.
 
@@ -67,14 +67,21 @@ Hostinger environment alanında gereken adlar:
 - `SESSION_SECRET`
 - `PORTAL_PUSULA_AUTH_STORAGE_MODE` — isteğe bağlı; varsayılan ve canlı kullanım `database`
 - `LOG_LEVEL` — isteğe bağlı, boşsa `info`
+- `EMAIL_NOTIFICATIONS_ENABLED` — yalnız exact `true` bildirimi açar
+- `RESEND_API_KEY`
+- `EMAIL_FROM_ADDRESS` — Resend üzerinde doğrulanmış gönderen adresi
+- `EMAIL_FROM_NAME` — isteğe bağlı; boşsa `Portal Pusula`
+- `CRON_ENDPOINT_ENABLED` — günlük özet için exact `true`
+- `CRON_BEARER_TOKEN` — readiness token'dan farklı, tam 43 base64url karakter
+- `CRON_MIN_INTERVAL_SECONDS` — önerilen `60`; canonical `60..86400`
 
 Gerçek değerleri Codex okumaz, yazmaz veya sohbet/belgeye istemez. Hostinger manuel yeniden dağıtım ayarları mevcut environment değerlerini maskesiz gösterebildiği için bu ekran model-visible otomasyonda açılmaz. Böyle bir görünürlük olayı gerçekleşirse değerler tekrar edilmez; `DB_PASSWORD`, `READINESS_BEARER_TOKEN`, `SESSION_SECRET` ve yönetici kimlik bilgileri kullanıcı tarafından rotasyonla geçersiz kılınır. `DB_NAME`, `DB_USER`, `DB_PASSWORD` ve tam 16 karakterlik, yalnız ASCII `A-Z`/`a-z`/`0-9` içeren rastgele readiness token eksik veya biçim dışıysa sınır fail-closed çalışır. 15/17 karakter, boşluk, Türkçe/özel karakter ve semboller kabul edilmez.
 
 Hostinger'ın global `sql_mode` değeri paylaşımlı sağlayıcı ayarıdır. Portal Pusula bu değeri değiştirmez, `SET GLOBAL` yetkisi istemez ve global strict moda güvenmez. Uygulama havuzdan aldığı her bağlantıda, DB işi başlamadan önce exact canonical strict session modunu, UTC/InnoDB/integrity-check/`utf8mb4` sözleşmesini kurup geri okuyarak doğrular. Kurulum veya doğrulama başarısızsa bağlantı havuza dönmez; imha edilir ve ilgili endpoint genel fail-closed yanıt verir.
 
-Kaynakta ayrıca `CRON_ENDPOINT_ENABLED` ve `CRON_BEARER_TOKEN` adları tanımlıdır; bunlar varsayılan kapalı aday içindir. Bu sürümde hPanel'e eklenmez. Aday ancak `CRON_ENDPOINT_ENABLED` exact `true`, cron token exact 43 base64url karakter ve readiness token'dan farklı olduğunda açılabilir. Hostinger cron'un exact `POST`, custom Authorization header ve güvenli secret saklama yeteneği canlı olarak kanıtlanmadan bu route etkinleştirilmez.
+GitHub Actions her gün 09.00'da ve bekleyen e-posta kuyruğunu güvenli biçimde boşaltmak için her saatin 10. dakikasında `Europe/Istanbul` zaman diliminde exact `POST /api/internal/cron/dispatch` çağrısı yapar. GitHub repository secret adı `PORTAL_PUSULA_CRON_BEARER_TOKEN` olup değeri Hostinger'daki `CRON_BEARER_TOKEN` ile aynıdır. Token curl komut argümanına değil stdin config'ine verilir ve yalnız `Authorization` header'ında taşınır. DB idempotency aynı güne ait özeti bir kez oluşturur; Resend idempotency anahtarı tekrar teslimi etkisizleştirir. Tek çağrı en fazla iki outbox teslimi dener ve her sağlayıcı isteği 1 saniyede kesilir; böylece 4 saniyelik endpoint bütçesi korunur. Cron environment'ı eksik veya biçim dışıysa endpoint fail-closed kalır.
 
-Yalnız etkin cron adayında `CRON_MIN_INTERVAL_SECONDS` da zorunludur; canonical `60..86400` saniye aralığı dışı fail-closed'dur. Bu sürümde üç cron değişkeni hPanel'e eklenmez.
+Yeni gider e-postası yalnız başarıyla oluşturulan ilk kayıt için hazırlanır; idempotent tekrar kayıtları yeni bildirim üretmez. Gönderim hatası gider yazımını geri almaz; olay outbox içinde güvenli tekrar için kalır. Günlük e-posta yalnız planlı/telafi bekleyen ziyaret veya tamamlanmamış günlük iş varsa aktif owner hesaplarına gider.
 
 ## Readiness davranışı
 
@@ -166,7 +173,8 @@ Görev raporu `public/brand/muhendis-kafasi-logo.png` dosyasını yerel paket as
 - [ ] Müşteri takvim dışa aktarımı yalnız seçilen müşterinin planlı/telafi ziyaretlerini içeriyor; tamamlanmış/iptal ziyaretleri, görevleri ve iç saat/süre bilgisini sızdırmıyor.
 - [ ] 360/390/430 px mobil navigasyon, kartlaşan tablolar, modal/menü dokunma hedefleri ve PWA başlangıç davranışı doğrulandı.
 - [ ] Uygulama smoke kontrollerinden sonra yazma dondurması kaldırıldı.
-- [ ] Cron environment değişkenleri eklenmedi; `/api/internal/cron/dispatch` varsayılan kapalı kaldı.
+- [ ] E-posta ve cron environment adları gizli alanlarda tanımlandı; gerçek değerler log/repo/ZIP/sohbete girmedi.
+- [ ] Manuel GitHub workflow tetiklemesi generic 202 döndürdü; ardından tek test e-postası ulaştı ve günlük tekrar kaydı oluşmadı.
 - [ ] Secret-safe önceki uygulama sürümüne dönüş yolu tatbik edildi.
 - [ ] Rollback adayı initializer içermeyen eski artefakt değil; aynı session sözleşmesiyle yeniden üretilmiş ve şema uyumluluğu kanıtlanmış sürüm.
 

@@ -62,6 +62,71 @@ describe("structured logging", () => {
     expect(output).not.toContain("confirmation-sentinel");
   });
 
+  it("censors Resend credentials, recipient identity and email content", async () => {
+    const sentinels = [
+      "resend-environment-key-sentinel",
+      "resend-api-key-sentinel",
+      "recipient-email-sentinel@example.com",
+      "message-subject-sentinel",
+      "message-text-sentinel",
+      "message-html-sentinel",
+      "serialized-request-body-sentinel",
+      "outbox-payload-sentinel",
+      "nested-api-key-sentinel",
+      "nested-recipient-email-sentinel@example.com",
+      "deep-message-content-sentinel",
+    ] as const;
+
+    const { output, record } = await capturePinoRecord({
+      event: "email.redaction.checked",
+      safeField: "safe-root-value",
+      RESEND_API_KEY: sentinels[0],
+      apiKey: sentinels[1],
+      recipientEmail: sentinels[2],
+      subject: sentinels[3],
+      text: sentinels[4],
+      html: sentinels[5],
+      body: sentinels[6],
+      payload: sentinels[7],
+      nested: {
+        apiKey: sentinels[8],
+        recipient: { email: sentinels[9] },
+        safeField: "safe-nested-value",
+      },
+      context: {
+        emailMessage: {
+          content: sentinels[10],
+        },
+      },
+    });
+
+    for (const sentinel of sentinels) {
+      expect(output).not.toContain(sentinel);
+    }
+
+    expect(output).toContain("[REDACTED]");
+    expect(record).toMatchObject({
+      event: "email.redaction.checked",
+      safeField: "safe-root-value",
+      RESEND_API_KEY: "[REDACTED]",
+      apiKey: "[REDACTED]",
+      recipientEmail: "[REDACTED]",
+      subject: "[REDACTED]",
+      text: "[REDACTED]",
+      html: "[REDACTED]",
+      body: "[REDACTED]",
+      payload: "[REDACTED]",
+      nested: {
+        apiKey: "[REDACTED]",
+        recipient: "[REDACTED]",
+        safeField: "safe-nested-value",
+      },
+      context: {
+        emailMessage: "[REDACTED]",
+      },
+    });
+  });
+
   it("censors cron bearer tokens and authorization header variants", async () => {
     const sentinels = [
       "cron-environment-token-sentinel",
