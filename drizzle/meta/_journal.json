@@ -141,6 +141,13 @@
       "when": 1788832085941,
       "tag": "0019_tax_obligations",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "5",
+      "when": 1788938626518,
+      "tag": "0020_expense_account_ledger",
+      "breakpoints": true
     }
   ]
 }

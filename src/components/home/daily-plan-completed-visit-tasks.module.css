@@ -1,0 +1,139 @@
+.root {
+  display: grid;
+  gap: 0.7rem;
+  margin-top: 0.85rem;
+  padding: 0.8rem;
+  border: 1px solid color-mix(in srgb, var(--forest) 18%, var(--line));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--forest) 4%, var(--sheet));
+}
+
+.heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.heading h4 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 0.8rem;
+  font-weight: 760;
+}
+
+.heading span {
+  flex: 0 0 auto;
+  color: var(--ink-soft);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+}
+
+.tasks {
+  display: grid;
+  gap: 0.42rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tasks li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 0.48rem;
+  color: var(--ink);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.tasks li span {
+  color: var(--forest);
+  font-weight: 800;
+}
+
+.tasks li strong {
+  font-weight: 620;
+}
+
+.empty {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 0.75rem;
+}
+
+.open,
+.actions button {
+  min-height: 40px;
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  background: var(--sheet);
+  color: var(--ink);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.74rem;
+  font-weight: 720;
+}
+
+.open {
+  justify-self: start;
+  padding: 0 0.78rem;
+  color: var(--forest);
+}
+
+.form {
+  display: grid;
+  gap: 0.75rem;
+  padding-top: 0.15rem;
+}
+
+.error {
+  margin: 0;
+  padding: 0.62rem 0.72rem;
+  border: 1px solid color-mix(in srgb, var(--terracotta) 38%, var(--line));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--terracotta) 5%, var(--sheet));
+  color: var(--terracotta);
+  font-size: 0.72rem;
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.55rem;
+}
+
+.actions button {
+  padding: 0 0.8rem;
+}
+
+.actions .save {
+  border-color: var(--forest);
+  background: var(--forest);
+  color: #fff;
+}
+
+.open:disabled,
+.actions button:disabled {
+  cursor: wait;
+  opacity: 0.58;
+}
+
+.open:focus-visible,
+.actions button:focus-visible {
+  outline: 3px solid rgb(79 107 255 / 22%);
+  outline-offset: 2px;
+}
+
+@media (max-width: 520px), (pointer: coarse) {
+  .open,
+  .actions button {
+    min-height: 44px;
+  }
+
+  .actions {
+    display: grid;
+    grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+  }
+}

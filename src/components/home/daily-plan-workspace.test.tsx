@@ -505,14 +505,28 @@ describe("DailyPlanWorkspace", () => {
       customerCode: "ATLAS",
       customerId: "customer-1",
       customerName: "Atlas Makina",
+      deliveredOn: null,
       internalDurationMinutes: 45,
       internalPlannedAtUtc: `${today} 06:30:00.000000`,
+      locationLabel: null,
+      resolutionNote: null,
       resolutionStatus: "planned",
       visitId: "visit-1",
     } as const;
     let completed = false;
+    let appended = false;
     const fetchMock = vi.fn<typeof fetch>(async (_input, init) => {
       if (init?.method === "PATCH") {
+        const requestBody = JSON.parse(String(init.body)) as {
+          workItems: readonly unknown[];
+        };
+        if (requestBody.workItems.length > 0) {
+          appended = true;
+          return jsonResponse({
+            createdTaskCount: 1,
+            visit: { id: visit.visitId, resolutionStatus: "completed" },
+          });
+        }
         completed = true;
         return jsonResponse({
           tasks: [],
@@ -522,8 +536,49 @@ describe("DailyPlanWorkspace", () => {
       return jsonResponse({
         date: today,
         items: [
-          completed ? { ...visit, resolutionStatus: "completed" } : visit,
+          completed
+            ? {
+                ...visit,
+                deliveredOn: today,
+                resolutionNote: "Saha notu",
+                resolutionStatus: "completed",
+              }
+            : visit,
         ],
+        tasks: completed
+          ? [
+              {
+                calendarOn: today,
+                calendarSource: "visit",
+                customerId: visit.customerId,
+                customerName: visit.customerName,
+                dueOn: today,
+                id: "existing-task",
+                linkedVisitId: visit.visitId,
+                locationLabel: null,
+                projectName: null,
+                status: "done",
+                title: "Mevcut tamamlanan görev",
+              },
+              ...(appended
+                ? [
+                    {
+                      calendarOn: today,
+                      calendarSource: "visit",
+                      customerId: visit.customerId,
+                      customerName: visit.customerName,
+                      dueOn: today,
+                      id: "appended-task",
+                      linkedVisitId: visit.visitId,
+                      locationLabel: null,
+                      projectName: null,
+                      status: "done",
+                      title: "Sonradan tamamlanan görev",
+                    },
+                  ]
+                : []),
+            ]
+          : [],
       });
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -538,6 +593,7 @@ describe("DailyPlanWorkspace", () => {
     expect(
       screen.getByRole("group", { name: "Tamamlanan çalışmalar" }),
     ).toBeInTheDocument();
+    await user.type(screen.getByLabelText(/Not/u), "Saha notu");
     await user.click(screen.getByRole("button", { name: "Tamamla ve kaydet" }));
 
     expect(
@@ -548,7 +604,7 @@ describe("DailyPlanWorkspace", () => {
       expect.objectContaining({
         body: JSON.stringify({
           deliveredOn: today,
-          resolutionNote: null,
+          resolutionNote: "Saha notu",
           resolutionStatus: "completed",
           workItems: [],
         }),
@@ -569,6 +625,54 @@ describe("DailyPlanWorkspace", () => {
     await waitFor(() => {
       expect(screen.getByText("ATLAS").closest("article")).toHaveFocus();
     });
+
+    const completedTasks = screen.getByRole("region", {
+      name: "Ziyarete bağlı tamamlanan görevler",
+    });
+    expect(completedTasks).toHaveTextContent("Mevcut tamamlanan görev");
+    expect(screen.queryByRole("region", { name: "Görevler" })).not.toBeInTheDocument();
+
+    await user.click(
+      within(completedTasks).getByRole("button", {
+        name: "+ Tamamlanan görev ekle",
+      }),
+    );
+    await user.type(
+      within(completedTasks).getByLabelText("Tamamlanan görev 1"),
+      "Sonradan tamamlanan görev",
+    );
+    await user.click(
+      within(completedTasks).getByRole("button", { name: "Görevleri kaydet" }),
+    );
+
+    expect(
+      await screen.findByText("Ziyarete bağlı tamamlanan görevler kaydedildi."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("region", {
+        name: "Ziyarete bağlı tamamlanan görevler",
+      }),
+    ).toHaveTextContent("Sonradan tamamlanan görev");
+
+    const patchCalls = fetchMock.mock.calls.filter(
+      ([, options]) => options?.method === "PATCH",
+    );
+    expect(patchCalls).toHaveLength(2);
+    const appendBody = JSON.parse(String(patchCalls[1]?.[1]?.body)) as {
+      deliveredOn: string;
+      resolutionNote: string;
+      resolutionStatus: string;
+      workItems: readonly { id: string; title: string }[];
+    };
+    expect(appendBody).toMatchObject({
+      deliveredOn: today,
+      resolutionNote: "Saha notu",
+      resolutionStatus: "completed",
+      workItems: [{ title: "Sonradan tamamlanan görev" }],
+    });
+    expect(appendBody.workItems[0]?.id).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u,
+    );
   });
 
   it("shows loading, reports failures and retries the selected date", async () => {

@@ -14,9 +14,11 @@ export type DailyAgendaItem = Readonly<{
   customerCode: string;
   customerId: string;
   customerName: string;
+  deliveredOn: string | null;
   internalDurationMinutes: number | null;
   internalPlannedAtUtc: string | null;
   locationLabel: string | null;
+  resolutionNote: string | null;
   resolutionStatus: DailyAgendaResolutionStatus;
   visitId: string;
 }>;
@@ -56,9 +58,11 @@ type DailyAgendaRow = RowDataPacket & {
   customer_code: string;
   customer_id: string;
   customer_name: string;
+  delivered_on: string | Date | null;
   internal_duration_minutes: number | null;
   internal_planned_at_utc: string | Date | null;
   location_label: string | null;
+  resolution_note: string | null;
   resolution_status: string;
   visit_id: string;
 };
@@ -111,12 +115,15 @@ function mapDailyAgendaItem(row: DailyAgendaRow): DailyAgendaItem {
     customerCode: row.customer_code,
     customerId: row.customer_id,
     customerName: row.customer_name,
+    deliveredOn:
+      row.delivered_on === null ? null : canonicalDate(row.delivered_on),
     internalDurationMinutes: row.internal_duration_minutes,
     internalPlannedAtUtc:
       row.internal_planned_at_utc === null
         ? null
         : canonicalDateTime(row.internal_planned_at_utc),
     locationLabel: row.location_label,
+    resolutionNote: row.resolution_note,
     resolutionStatus: row.resolution_status,
     visitId: row.visit_id,
   };
@@ -201,9 +208,11 @@ export async function listDailyAgendaItems(
             customer.short_code AS customer_code,
             contract.id AS contract_id,
             visit.committed_on,
+            visit.delivered_on,
             visit.internal_planned_at_utc,
             visit.internal_duration_minutes,
             visit.location_label,
+            visit.resolution_note,
             visit.resolution_status
        FROM monthly_visit_commitment AS visit
        INNER JOIN consulting_contract AS contract

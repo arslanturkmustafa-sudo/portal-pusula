@@ -1201,7 +1201,7 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
       ]);
     });
 
-    it("records the immutable 0000 through 0019 migration hash chain", async () => {
+    it("records the immutable 0000 through 0020 migration hash chain", async () => {
       const [rows] = await pool.query<MigrationRow[]>(
         `SELECT id, hash, created_at FROM \`${migrationTable}\` ORDER BY id`,
       );
@@ -1305,6 +1305,11 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
           created_at: 1788832085941,
           hash: "9c200e015a6565f6cdc681fab1dfebefc5015759fa75ef1f9862d7e7a1a01abe",
           id: 20,
+        },
+        {
+          created_at: 1788938626518,
+          hash: "a95bed1c3e8f65d71a5063423ceefbfc676678c03699e2d89d098f1b31811226",
+          id: 21,
         },
       ]);
     });

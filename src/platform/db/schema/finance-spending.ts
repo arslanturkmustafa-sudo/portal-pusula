@@ -16,6 +16,7 @@ import {
 } from "drizzle-orm/mysql-core";
 
 import { project } from "./project";
+import { financeAccount, financeTransaction } from "./finance-account";
 
 export const creditCard = mysqlTable(
   "credit_card",
@@ -166,6 +167,8 @@ export const expense = mysqlTable(
     clientOperationKey: char("client_operation_key", { length: 36 }).notNull(),
     projectId: char("project_id", { length: 36 }),
     creditCardId: char("credit_card_id", { length: 36 }),
+    sourceAccountId: char("source_account_id", { length: 36 }),
+    financeTransactionId: char("finance_transaction_id", { length: 36 }),
     incurredOn: date("incurred_on", { mode: "string" }).notNull(),
     category: varchar("category", { length: 32 }).notNull(),
     description: varchar("description", { length: 191 }).notNull(),
@@ -215,6 +218,14 @@ export const expense = mysqlTable(
         AND (${table.creditCardId} IS NULL OR (
           OCTET_LENGTH(${table.creditCardId}) = 36
           AND BINARY ${table.creditCardId} REGEXP '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+        ))
+        AND (${table.sourceAccountId} IS NULL OR (
+          OCTET_LENGTH(${table.sourceAccountId}) = 36
+          AND BINARY ${table.sourceAccountId} REGEXP '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+        ))
+        AND (${table.financeTransactionId} IS NULL OR (
+          OCTET_LENGTH(${table.financeTransactionId}) = 36
+          AND BINARY ${table.financeTransactionId} REGEXP '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
         ))`,
     ),
     check(
@@ -258,6 +269,19 @@ export const expense = mysqlTable(
           )
           AND ${table.creditCardId} IS NULL
           AND ${table.installmentCount} = 1
+        )`,
+    ),
+    check(
+      "chk_expense_account_movement_shape",
+      sql`(
+          ${table.sourceAccountId} IS NULL
+          AND ${table.financeTransactionId} IS NULL
+        ) OR (
+          BINARY ${table.paymentMethod} IN (
+            BINARY 'cash', BINARY 'bank_transfer'
+          )
+          AND ${table.sourceAccountId} IS NOT NULL
+          AND ${table.financeTransactionId} IS NOT NULL
         )`,
     ),
     check(
@@ -318,7 +342,24 @@ export const expense = mysqlTable(
     })
       .onDelete("restrict")
       .onUpdate("restrict"),
+    foreignKey({
+      name: "fk_expense_source_account",
+      columns: [table.sourceAccountId],
+      foreignColumns: [financeAccount.id],
+    })
+      .onDelete("restrict")
+      .onUpdate("restrict"),
+    foreignKey({
+      name: "fk_expense_finance_transaction",
+      columns: [table.financeTransactionId],
+      foreignColumns: [financeTransaction.id],
+    })
+      .onDelete("restrict")
+      .onUpdate("restrict"),
     uniqueIndex("uq_expense_client_operation").on(table.clientOperationKey),
+    uniqueIndex("uq_expense_finance_transaction").on(
+      table.financeTransactionId,
+    ),
     index("idx_expense_project_date").on(
       table.projectId,
       table.incurredOn,

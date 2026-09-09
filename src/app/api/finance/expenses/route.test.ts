@@ -16,7 +16,13 @@ vi.mock("@/features/finance", () => ({
   createExpense: mocks.create,
   createExpenseInputSchema: { parse: mocks.parseCreate },
   CreditCardInactiveError: class extends Error {},
+  ExpenseAccountPermissionError: class extends Error {},
+  ExpenseSourceAccountTypeError: class extends Error {},
   expenseListFilterSchema: { parse: mocks.parseFilters },
+  FinanceAccountInactiveError: class extends Error {},
+  FinanceAccountNotFoundError: class extends Error {},
+  FinanceTransactionBeforeAccountOpeningError: class extends Error {},
+  FinanceTransactionFutureDateError: class extends Error {},
   listExpenses: mocks.list,
   SpendingIdempotencyConflictError: class extends Error {},
   SpendingResourceNotFoundError: class extends Error {},
@@ -31,8 +37,11 @@ import { GET, POST } from "@/app/api/finance/expenses/route";
 describe("expense collection API", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.authenticate.mockResolvedValue({ accountId: "10000000-0000-4000-8000-000000000001", kind: "account" });
-    mocks.parseCreate.mockImplementation((value: unknown) => value);
+    mocks.authenticate.mockResolvedValue({ accountId: "10000000-0000-4000-8000-000000000001", kind: "account", role: "owner" });
+    mocks.parseCreate.mockImplementation((value: unknown) => ({
+      ...(value as object),
+      sourceAccountId: null,
+    }));
     mocks.parseFilters.mockImplementation((value: unknown) => value);
     mocks.list.mockResolvedValue({ expenses: [], summary: {} });
     mocks.create.mockResolvedValue({ created: true, expense: { id: "expense-1" } });
@@ -66,7 +75,7 @@ describe("expense collection API", () => {
     expect(response.status).toBe(201);
     expect(mocks.create).toHaveBeenCalledWith(
       {},
-      { description: "Kira" },
+      { description: "Kira", sourceAccountId: null },
       expect.objectContaining({ actorId: "10000000-0000-4000-8000-000000000001" }),
     );
   });

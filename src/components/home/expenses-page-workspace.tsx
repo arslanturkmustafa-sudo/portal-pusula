@@ -5,7 +5,9 @@ import { PortalPageHeader } from "@/components/portal/portal-page-header";
 type ExpensesPageWorkspaceProps = Readonly<{
   capabilities: Readonly<{
     canReadAudit: boolean;
+    canReadAccounts: boolean;
     canReverseExpenses: boolean;
+    canWriteAccounts: boolean;
     canWriteExpenses: boolean;
   }>;
 }>;

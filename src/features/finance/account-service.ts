@@ -3,7 +3,7 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 
 import Decimal from "decimal.js";
-import type { Pool } from "mysql2/promise";
+import type { Pool, PoolConnection } from "mysql2/promise";
 
 import {
   type CreateFinanceAccountInput,
@@ -19,6 +19,7 @@ import {
   findFinanceAccountBalanceRecord,
   findFinanceAccountByOperationKeyForUpdate,
   findFinanceAccountForUpdate,
+  findExpenseByFinanceTransactionForUpdate,
   findFinanceTransactionByOperationKeyForUpdate,
   findFinanceTransactionForUpdate,
   findFinanceTransactionReversalForUpdate,
@@ -112,6 +113,13 @@ export class FinanceTransactionBeforeAccountOpeningError extends Error {
   constructor() {
     super("A finance transaction cannot predate an affected account.");
     this.name = "FinanceTransactionBeforeAccountOpeningError";
+  }
+}
+
+export class FinanceTransactionManagedByExpenseError extends Error {
+  constructor() {
+    super("An expense-managed transaction must be corrected from the expense record.");
+    this.name = "FinanceTransactionManagedByExpenseError";
   }
 }
 
@@ -521,8 +529,8 @@ export async function updateFinanceAccount(
   });
 }
 
-export async function createFinanceTransaction(
-  pool: Pool,
+export async function createFinanceTransactionInConnection(
+  connection: PoolConnection,
   rawInput: CreateFinanceTransactionInput,
   context: FinanceAccountWriteContext,
 ): Promise<Readonly<{ created: boolean; transaction: FinanceTransactionView }>> {
@@ -533,51 +541,142 @@ export async function createFinanceTransaction(
     throw new FinanceTransactionFutureDateError();
   }
   const now = toUtcDateTime6(nowDate);
-  return withUtcTransaction(pool, async (connection) => {
-    const replay = await findFinanceTransactionByOperationKeyForUpdate(
-      connection,
-      input.clientOperationKey,
-    );
-    if (replay && !transactionMatches(replay, input)) {
+  const replay = await findFinanceTransactionByOperationKeyForUpdate(
+    connection,
+    input.clientOperationKey,
+  );
+  if (replay && !transactionMatches(replay, input)) {
+    throw new FinanceTransactionIdempotencyConflictError();
+  }
+  if (replay) {
+    const accounts = await transactionAccounts(connection, replay, false);
+    return { created: false, transaction: transactionView(replay, accounts) };
+  }
+  const pending: FinanceTransactionRecord = {
+    ...input,
+    createdAtUtc: now,
+    currency: "TRY",
+    id: randomUUID(),
+    reversalOfId: null,
+    reversalReason: null,
+  };
+  const accounts = await transactionAccounts(connection, pending, true);
+  assertTransactionOnOrAfterAccountOpening(pending, accounts);
+  const persisted = await insertFinanceTransactionRecordIdempotently(
+    connection,
+    pending,
+  );
+  if (!transactionMatches(persisted, input)) {
+    throw new FinanceTransactionIdempotencyConflictError();
+  }
+  const created = persisted.id === pending.id;
+  if (created) {
+    await insertFinanceLedgerEntries(connection, ledgerEntries(persisted, now));
+    await appendAuditEvent(connection, {
+      action: "finance_transaction.created",
+      actorId: context.actorId,
+      actorType: "user",
+      afterSummary: transactionAuditSummary(persisted),
+      correlationId: context.correlationId,
+      entityId: persisted.id,
+      entityType: "finance_transaction",
+      occurredAtUtc: now,
+    });
+  }
+  return { created, transaction: transactionView(persisted, accounts) };
+}
+
+export async function createFinanceTransaction(
+  pool: Pool,
+  rawInput: CreateFinanceTransactionInput,
+  context: FinanceAccountWriteContext,
+): Promise<Readonly<{ created: boolean; transaction: FinanceTransactionView }>> {
+  return withUtcTransaction(pool, (connection) =>
+    createFinanceTransactionInConnection(connection, rawInput, context),
+  );
+}
+
+export async function reverseFinanceTransactionInConnection(
+  connection: PoolConnection,
+  id: string,
+  rawInput: ReverseFinanceTransactionInput,
+  context: FinanceAccountWriteContext,
+  options: Readonly<{
+    allowExpenseManaged?: boolean;
+    preserveOriginalDate?: boolean;
+  }> = {},
+): Promise<Readonly<{ created: boolean; transaction: FinanceTransactionView }>> {
+  assertCanonicalUuid(id);
+  const input = reverseFinanceTransactionInputSchema.parse(rawInput);
+  if (context.actorId !== undefined) assertCanonicalUuid(context.actorId);
+  const nowDate = context.now ?? new Date();
+  const now = toUtcDateTime6(nowDate);
+  if (
+    options.allowExpenseManaged !== true &&
+    (await findExpenseByFinanceTransactionForUpdate(connection, id)) !== null
+  ) {
+    throw new FinanceTransactionManagedByExpenseError();
+  }
+  const replay = await findFinanceTransactionByOperationKeyForUpdate(
+    connection,
+    input.clientOperationKey,
+  );
+  if (replay) {
+    if (replay.reversalOfId !== id || replay.reversalReason !== input.reason) {
       throw new FinanceTransactionIdempotencyConflictError();
     }
-    if (replay) {
-      const accounts = await transactionAccounts(connection, replay, false);
-      return { created: false, transaction: transactionView(replay, accounts) };
-    }
-    const pending: FinanceTransactionRecord = {
-      ...input,
-      createdAtUtc: now,
-      currency: "TRY",
-      id: randomUUID(),
-      reversalOfId: null,
-      reversalReason: null,
-    };
-    const accounts = await transactionAccounts(connection, pending, true);
-    assertTransactionOnOrAfterAccountOpening(pending, accounts);
-    const persisted = await insertFinanceTransactionRecordIdempotently(
-      connection,
-      pending,
-    );
-    if (!transactionMatches(persisted, input)) {
-      throw new FinanceTransactionIdempotencyConflictError();
-    }
-    const created = persisted.id === pending.id;
-    if (created) {
-      await insertFinanceLedgerEntries(connection, ledgerEntries(persisted, now));
-      await appendAuditEvent(connection, {
-        action: "finance_transaction.created",
-        actorId: context.actorId,
-        actorType: "user",
-        afterSummary: transactionAuditSummary(persisted),
-        correlationId: context.correlationId,
-        entityId: persisted.id,
-        entityType: "finance_transaction",
-        occurredAtUtc: now,
-      });
-    }
-    return { created, transaction: transactionView(persisted, accounts) };
-  });
+    const accounts = await transactionAccounts(connection, replay, false);
+    return { created: false, transaction: transactionView(replay, accounts) };
+  }
+  const original = await findFinanceTransactionForUpdate(connection, id);
+  if (!original) throw new FinanceTransactionNotFoundError();
+  if (original.reversalOfId !== null) {
+    throw new FinanceTransactionReversalNotAllowedError();
+  }
+  if (await findFinanceTransactionReversalForUpdate(connection, original.id)) {
+    throw new FinanceTransactionAlreadyReversedError();
+  }
+  const pending = oppositeTransaction(
+    original,
+    input,
+    now,
+    options.preserveOriginalDate === true
+      ? original.occurredOn
+      : istanbulDate(nowDate),
+  );
+  const accounts = await transactionAccounts(connection, pending, false);
+  const persisted = await insertFinanceTransactionRecordIdempotently(
+    connection,
+    pending,
+  );
+  if (persisted.reversalOfId !== original.id) {
+    throw new FinanceTransactionIdempotencyConflictError();
+  }
+  if (persisted.clientOperationKey !== input.clientOperationKey) {
+    throw new FinanceTransactionAlreadyReversedError();
+  }
+  if (persisted.reversalReason !== input.reason) {
+    throw new FinanceTransactionIdempotencyConflictError();
+  }
+  const created = persisted.id === pending.id;
+  if (created) {
+    await insertFinanceLedgerEntries(connection, ledgerEntries(persisted, now));
+    await appendAuditEvent(connection, {
+      action: "finance_transaction.reversed",
+      actorId: context.actorId,
+      actorType: "user",
+      afterSummary: {
+        ...transactionAuditSummary(original),
+        reversalId: persisted.id,
+        reversalReason: input.reason,
+      },
+      correlationId: context.correlationId,
+      entityId: original.id,
+      entityType: "finance_transaction",
+      occurredAtUtc: now,
+    });
+  }
+  return { created, transaction: transactionView(persisted, accounts) };
 }
 
 export async function reverseFinanceTransaction(
@@ -586,69 +685,7 @@ export async function reverseFinanceTransaction(
   rawInput: ReverseFinanceTransactionInput,
   context: FinanceAccountWriteContext,
 ): Promise<Readonly<{ created: boolean; transaction: FinanceTransactionView }>> {
-  assertCanonicalUuid(id);
-  const input = reverseFinanceTransactionInputSchema.parse(rawInput);
-  if (context.actorId !== undefined) assertCanonicalUuid(context.actorId);
-  const nowDate = context.now ?? new Date();
-  const now = toUtcDateTime6(nowDate);
-  return withUtcTransaction(pool, async (connection) => {
-    const replay = await findFinanceTransactionByOperationKeyForUpdate(
-      connection,
-      input.clientOperationKey,
-    );
-    if (replay) {
-      if (replay.reversalOfId !== id || replay.reversalReason !== input.reason) {
-        throw new FinanceTransactionIdempotencyConflictError();
-      }
-      const accounts = await transactionAccounts(connection, replay, false);
-      return { created: false, transaction: transactionView(replay, accounts) };
-    }
-    const original = await findFinanceTransactionForUpdate(connection, id);
-    if (!original) throw new FinanceTransactionNotFoundError();
-    if (original.reversalOfId !== null) {
-      throw new FinanceTransactionReversalNotAllowedError();
-    }
-    if (await findFinanceTransactionReversalForUpdate(connection, original.id)) {
-      throw new FinanceTransactionAlreadyReversedError();
-    }
-    const pending = oppositeTransaction(
-      original,
-      input,
-      now,
-      istanbulDate(nowDate),
-    );
-    const accounts = await transactionAccounts(connection, pending, false);
-    const persisted = await insertFinanceTransactionRecordIdempotently(
-      connection,
-      pending,
-    );
-    if (persisted.reversalOfId !== original.id) {
-      throw new FinanceTransactionIdempotencyConflictError();
-    }
-    if (persisted.clientOperationKey !== input.clientOperationKey) {
-      throw new FinanceTransactionAlreadyReversedError();
-    }
-    if (persisted.reversalReason !== input.reason) {
-      throw new FinanceTransactionIdempotencyConflictError();
-    }
-    const created = persisted.id === pending.id;
-    if (created) {
-      await insertFinanceLedgerEntries(connection, ledgerEntries(persisted, now));
-      await appendAuditEvent(connection, {
-        action: "finance_transaction.reversed",
-        actorId: context.actorId,
-        actorType: "user",
-        afterSummary: {
-          ...transactionAuditSummary(original),
-          reversalId: persisted.id,
-          reversalReason: input.reason,
-        },
-        correlationId: context.correlationId,
-        entityId: original.id,
-        entityType: "finance_transaction",
-        occurredAtUtc: now,
-      });
-    }
-    return { created, transaction: transactionView(persisted, accounts) };
-  });
+  return withUtcTransaction(pool, (connection) =>
+    reverseFinanceTransactionInConnection(connection, id, rawInput, context),
+  );
 }

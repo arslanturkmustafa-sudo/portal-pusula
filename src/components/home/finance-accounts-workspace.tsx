@@ -480,6 +480,8 @@ export function FinanceAccountsWorkspace({
         setFormError(
           payload.status === "already_reversed"
             ? "Bu hareket daha önce ters kayıtla kapatıldı."
+            : payload.status === "expense_managed_transaction"
+              ? "Bu hareketi Giderler kaydından düzeltin veya geçersiz kılın."
             : "Ters kayıt oluşturulamadı. Listeyi yenileyip tekrar deneyin.",
         );
         setSaving(false);

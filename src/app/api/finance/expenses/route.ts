@@ -5,7 +5,13 @@ import {
   createExpense,
   createExpenseInputSchema,
   CreditCardInactiveError,
+  ExpenseAccountPermissionError,
+  ExpenseSourceAccountTypeError,
   expenseListFilterSchema,
+  FinanceAccountInactiveError,
+  FinanceAccountNotFoundError,
+  FinanceTransactionBeforeAccountOpeningError,
+  FinanceTransactionFutureDateError,
   listExpenses,
   SpendingIdempotencyConflictError,
   SpendingResourceNotFoundError,
@@ -20,6 +26,7 @@ import {
   uniqueQuery,
 } from "@/features/finance/spending-route-support";
 import { authenticateAdminRequest } from "@/platform/auth/server-auth";
+import { hasPermission } from "@/platform/auth/permissions";
 import { correlationIdFromHeaders } from "@/platform/http/correlation-id";
 import { requestLogger } from "@/platform/logging/logger";
 import { safeMySqlErrorCode } from "@/platform/logging/mysql-error-code";
@@ -30,12 +37,26 @@ export const runtime = "nodejs";
 const FILTERS = new Set(["category", "month", "paymentMethod", "projectId"]);
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  if (!(await authenticateAdminRequest(request, "finance.expenses.read"))) {
+  const principal = await authenticateAdminRequest(request, "finance.expenses.read");
+  if (!principal) {
     return spendingJson({ status: "unauthorized" }, 401);
   }
   try {
     const filters = expenseListFilterSchema.parse(uniqueQuery(request, FILTERS));
-    return spendingJson(await listExpenses(spendingDatabasePool(), filters));
+    const collection = await listExpenses(spendingDatabasePool(), filters);
+    if (hasPermission(principal, "finance.accounts.read")) {
+      return spendingJson(collection);
+    }
+    return spendingJson({
+      ...collection,
+      expenses: collection.expenses.map((expense) => ({
+        ...expense,
+        financeTransactionId: null,
+        sourceAccountId: null,
+        sourceAccountName: null,
+        sourceAccountType: null,
+      })),
+    });
   } catch (error) {
     if (error instanceof z.ZodError) {
       return spendingJson({ status: "validation_error" }, 400);
@@ -54,8 +75,15 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const correlationId = correlationIdFromHeaders(request.headers);
   try {
     const input = createExpenseInputSchema.parse(await readSpendingBody(request));
+    const canMutateAccountLedger =
+      hasPermission(principal, "finance.accounts.read") &&
+      hasPermission(principal, "finance.accounts.write");
+    if (input.sourceAccountId !== null && !canMutateAccountLedger) {
+      return spendingJson({ status: "forbidden" }, 403);
+    }
     const result = await createExpense(spendingDatabasePool(), input, {
       actorId: spendingActorId(principal),
+      canMutateAccountLedger,
       correlationId,
     });
     return spendingJson(result, result.created ? 201 : 200);
@@ -72,6 +100,24 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
     if (error instanceof CreditCardInactiveError) {
       return spendingJson({ status: "credit_card_inactive" }, 409);
+    }
+    if (error instanceof ExpenseAccountPermissionError) {
+      return spendingJson({ status: "forbidden" }, 403);
+    }
+    if (error instanceof FinanceAccountNotFoundError) {
+      return spendingJson({ status: "finance_account_not_found" }, 404);
+    }
+    if (error instanceof FinanceAccountInactiveError) {
+      return spendingJson({ status: "finance_account_inactive" }, 409);
+    }
+    if (error instanceof ExpenseSourceAccountTypeError) {
+      return spendingJson({ status: "finance_account_type_mismatch" }, 409);
+    }
+    if (error instanceof FinanceTransactionFutureDateError) {
+      return spendingJson({ status: "finance_transaction_future_date" }, 409);
+    }
+    if (error instanceof FinanceTransactionBeforeAccountOpeningError) {
+      return spendingJson({ status: "finance_transaction_before_account_opening" }, 409);
     }
     if (error instanceof SpendingIdempotencyConflictError) {
       return spendingJson({ status: "idempotency_conflict" }, 409);

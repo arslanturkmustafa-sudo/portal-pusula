@@ -105,6 +105,7 @@ type TransactionOverviewRow = TransactionRow & {
 };
 
 type LedgerMismatchRow = RowDataPacket & { transaction_id: string };
+type ExpenseMovementRow = RowDataPacket & { expense_id: string };
 
 function canonicalDate(value: string | Date): string {
   return value instanceof Date ? value.toISOString().slice(0, 10) : value.slice(0, 10);
@@ -487,6 +488,20 @@ export async function findFinanceTransactionForUpdate(
     [id],
   );
   return rows[0] ? mapTransaction(rows[0]) : null;
+}
+
+export async function findExpenseByFinanceTransactionForUpdate(
+  connection: PoolConnection,
+  financeTransactionId: string,
+): Promise<string | null> {
+  const [rows] = await connection.execute<ExpenseMovementRow[]>(
+    `SELECT id AS expense_id
+       FROM expense
+      WHERE finance_transaction_id = ?
+      FOR UPDATE`,
+    [financeTransactionId],
+  );
+  return rows[0]?.expense_id ?? null;
 }
 
 export async function findFinanceTransactionByOperationKeyForUpdate(

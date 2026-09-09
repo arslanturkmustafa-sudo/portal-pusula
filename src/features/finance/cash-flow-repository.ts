@@ -392,6 +392,7 @@ export async function readCashFlowLedger(
            FROM expense e
           WHERE e.status = 'active'
             AND e.payment_method IN ('cash', 'bank_transfer', 'other')
+            AND e.finance_transaction_id IS NULL
             AND e.incurred_on >= ? AND e.incurred_on <= ?
             AND e.incurred_on > ?
          UNION ALL
@@ -609,6 +610,7 @@ export async function readCashFlowLedger(
            LEFT JOIN expense_category category ON category.code = expense.category
           WHERE expense.status = 'active'
             AND expense.payment_method IN ('cash', 'bank_transfer', 'other')
+            AND expense.finance_transaction_id IS NULL
             AND expense.incurred_on >= ? AND expense.incurred_on <= ?
             AND expense.incurred_on > ?
           GROUP BY expense.category, category.display_name, expense.incurred_on

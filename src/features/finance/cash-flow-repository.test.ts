@@ -342,6 +342,7 @@ describe("cash flow repository", () => {
     expect(forecastSql).toContain("r.record_state = 'active'");
     expect(forecastSql).toMatch(/cci\.status = 'planned'/iu);
     expect(forecastSql).toMatch(/pc\.status = 'agency_collected'/iu);
+    expect(forecastSql).toContain("e.finance_transaction_id IS NULL");
     expect(forecastSql).toMatch(
       /r\.due_on < \? OR \(r\.due_on >= \? AND r\.due_on <= \?\)/u,
     );
@@ -403,6 +404,7 @@ describe("cash flow repository", () => {
     expect(dueItemSql).toContain(
       "payment_method IN ('cash', 'bank_transfer', 'other')",
     );
+    expect(dueItemSql).toContain("expense.finance_transaction_id IS NULL");
     expect(dueItemSql).toContain("expense.incurred_on > ?");
     expect(dueItemSql).not.toContain("expense.description");
     expect(dueItemSql).not.toContain("expense.vendor_name");

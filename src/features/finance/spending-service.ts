@@ -7,6 +7,16 @@ import type { Pool } from "mysql2/promise";
 
 import { findProjectForUpdate } from "@/features/projects/repository";
 import { buildCardInstallmentPlan } from "@/features/finance/card-plan";
+import {
+  createFinanceTransactionInConnection,
+  FinanceAccountInactiveError,
+  FinanceAccountNotFoundError,
+  reverseFinanceTransactionInConnection,
+} from "@/features/finance/account-service";
+import {
+  findFinanceAccountForUpdate,
+  type FinanceAccountRecord,
+} from "@/features/finance/account-repository";
 import { findActiveExpenseCategoryByCodeForUpdate } from "@/features/finance/expense-category-repository";
 import { addMoney } from "@/features/finance/money";
 import { istanbulDate, monthBounds } from "@/features/finance/period";
@@ -45,9 +55,11 @@ import {
   type UpdateCardInstallmentInput,
   type UpdateCreditCardInput,
   type UpdateExpenseInput,
+  type VoidExpenseInput,
   updateCardInstallmentInputSchema,
   updateCreditCardInputSchema,
   updateExpenseInputSchema,
+  voidExpenseInputSchema,
 } from "@/features/finance/spending-validation";
 import { appendAuditEvent } from "@/platform/audit/repository";
 import { withUtcTransaction } from "@/platform/jobs/mysql-transaction";
@@ -96,6 +108,20 @@ export class ExpenseAlreadyVoidedError extends Error {
   }
 }
 
+export class ExpenseSourceAccountTypeError extends Error {
+  constructor() {
+    super("The selected account type does not match the expense payment method.");
+    this.name = "ExpenseSourceAccountTypeError";
+  }
+}
+
+export class ExpenseAccountPermissionError extends Error {
+  constructor() {
+    super("Finance account permissions are required for this expense movement.");
+    this.name = "ExpenseAccountPermissionError";
+  }
+}
+
 export class InstallmentPaymentDateInFutureError extends Error {
   constructor() {
     super("The installment payment date cannot be in the future.");
@@ -112,6 +138,7 @@ export class CardInstallmentBulkConflictError extends Error {
 
 export type SpendingWriteContext = Readonly<{
   actorId?: string;
+  canMutateAccountLedger?: boolean;
   correlationId: string;
   now?: Date;
 }>;
@@ -193,6 +220,7 @@ function expenseMatches(expense: Expense, input: CreateExpenseInput): boolean {
     expense.note === input.note &&
     expense.paymentMethod === input.paymentMethod &&
     expense.projectId === input.projectId &&
+    expense.sourceAccountId === input.sourceAccountId &&
     expense.status === "active" &&
     expense.totalAmount === moneyTotal(input.netAmount, input.vatAmount) &&
     expense.vatAmount === input.vatAmount &&
@@ -207,6 +235,7 @@ function expensePlanChanged(before: Expense, input: UpdateExpenseInput): boolean
     before.installmentCount !== input.installmentCount ||
     before.netAmount !== input.netAmount ||
     before.paymentMethod !== input.paymentMethod ||
+    before.sourceAccountId !== input.sourceAccountId ||
     before.vatAmount !== input.vatAmount
   );
 }
@@ -233,6 +262,8 @@ function expenseAuditSummary(expense: Expense) {
     netAmount: expense.netAmount,
     paymentMethod: expense.paymentMethod,
     projectId: expense.projectId,
+    sourceAccountId: expense.sourceAccountId,
+    financeTransactionId: expense.financeTransactionId,
     status: expense.status,
     totalAmount: expense.totalAmount,
     vatAmount: expense.vatAmount,
@@ -334,6 +365,82 @@ async function selectedCard(
   if (!card) throw new SpendingResourceNotFoundError();
   if (card.status !== "active") throw new CreditCardInactiveError();
   return card;
+}
+
+function isDirectAccountPayment(
+  paymentMethod: Expense["paymentMethod"],
+): paymentMethod is "bank_transfer" | "cash" {
+  return paymentMethod === "bank_transfer" || paymentMethod === "cash";
+}
+
+async function selectedSourceAccount(
+  connection: Parameters<typeof findFinanceAccountForUpdate>[0],
+  sourceAccountId: string | null,
+  paymentMethod: Expense["paymentMethod"],
+): Promise<FinanceAccountRecord | null> {
+  if (!isDirectAccountPayment(paymentMethod)) return null;
+  if (sourceAccountId === null) throw new FinanceAccountNotFoundError();
+  const account = await findFinanceAccountForUpdate(connection, sourceAccountId);
+  if (!account) throw new FinanceAccountNotFoundError();
+  if (account.status !== "active") throw new FinanceAccountInactiveError();
+  const expectedType = paymentMethod === "cash" ? "cash" : "bank";
+  if (account.accountType !== expectedType) {
+    throw new ExpenseSourceAccountTypeError();
+  }
+  return account;
+}
+
+function requireAccountLedgerPermission(context: SpendingWriteContext): void {
+  if (context.canMutateAccountLedger !== true) {
+    throw new ExpenseAccountPermissionError();
+  }
+}
+
+function ledgerDescription(description: string): string {
+  return Array.from(`Gider: ${description}`).slice(0, 191).join("");
+}
+
+async function createExpenseMovement(
+  connection: Parameters<typeof findFinanceAccountForUpdate>[0],
+  input: Readonly<{
+    amount: string;
+    description: string;
+    occurredOn: string;
+    operationKey: string;
+    sourceAccountId: string;
+  }>,
+  context: SpendingWriteContext,
+): Promise<string> {
+  const result = await createFinanceTransactionInConnection(
+    connection,
+    {
+      amount: input.amount,
+      clientOperationKey: input.operationKey,
+      description: ledgerDescription(input.description),
+      occurredOn: input.occurredOn,
+      sourceAccountId: input.sourceAccountId,
+      targetAccountId: null,
+      transactionType: "expense",
+    },
+    context,
+  );
+  return result.transaction.id;
+}
+
+async function reverseExpenseMovement(
+  connection: Parameters<typeof findFinanceAccountForUpdate>[0],
+  transactionId: string,
+  reason: string,
+  context: SpendingWriteContext,
+  preserveOriginalDate = false,
+): Promise<void> {
+  await reverseFinanceTransactionInConnection(
+    connection,
+    transactionId,
+    { clientOperationKey: randomUUID(), reason },
+    context,
+    { allowExpenseManaged: true, preserveOriginalDate },
+  );
 }
 
 function generatedInstallments(
@@ -495,16 +602,42 @@ export async function createExpense(
     }
     await requireProject(connection, input.projectId);
     const card = await selectedCard(connection, input.creditCardId);
+    if (isDirectAccountPayment(input.paymentMethod)) {
+      requireAccountLedgerPermission(context);
+    }
+    const sourceAccount = await selectedSourceAccount(
+      connection,
+      input.sourceAccountId,
+      input.paymentMethod,
+    );
+    const totalAmount = moneyTotal(input.netAmount, input.vatAmount);
+    const financeTransactionId =
+      sourceAccount === null
+        ? null
+        : await createExpenseMovement(
+            connection,
+            {
+              amount: totalAmount,
+              description: input.description,
+              occurredOn: input.incurredOn,
+              operationKey: input.clientOperationKey,
+              sourceAccountId: sourceAccount.id,
+            },
+            context,
+          );
     const pending: Expense = {
       ...input,
       createdAtUtc: now,
       creditCardName: card?.displayName ?? null,
       currency: "TRY",
+      financeTransactionId,
       id: randomUUID(),
       projectName: null,
       projectShortCode: null,
+      sourceAccountName: sourceAccount?.displayName ?? null,
+      sourceAccountType: sourceAccount?.accountType ?? null,
       status: "active",
-      totalAmount: moneyTotal(input.netAmount, input.vatAmount),
+      totalAmount,
       updatedAtUtc: now,
       version: 1,
       voidedAtUtc: null,
@@ -582,11 +715,88 @@ export async function updateExpense(
       throw new ExpensePlanLockedError();
     }
 
+    const totalAmount = moneyTotal(input.netAmount, input.vatAmount);
+    const directPayment = isDirectAccountPayment(input.paymentMethod);
+    const movementChanged =
+      before.description !== input.description ||
+      before.financeTransactionId === null ||
+      before.incurredOn !== input.incurredOn ||
+      before.paymentMethod !== input.paymentMethod ||
+      before.sourceAccountId !== input.sourceAccountId ||
+      before.totalAmount !== totalAmount;
+    const mustReverseMovement =
+      before.financeTransactionId !== null &&
+      (input.status === "voided" || movementChanged || !directPayment);
+    const mustCreateMovement =
+      input.status === "active" && directPayment && movementChanged;
+    if (directPayment || mustReverseMovement || mustCreateMovement) {
+      requireAccountLedgerPermission(context);
+    }
+    const sourceAccount =
+      mustCreateMovement
+        ? await selectedSourceAccount(
+            connection,
+            input.sourceAccountId,
+            input.paymentMethod,
+          )
+        : null;
+    if (mustReverseMovement && before.financeTransactionId !== null) {
+      const reason =
+        input.status === "voided"
+          ? Array.from(`Gider iptali: ${input.voidReason ?? "Gider iptal edildi."}`)
+              .slice(0, 2000)
+              .join("")
+          : "Gider ödeme hareketi güncellendi.";
+      await reverseExpenseMovement(
+        connection,
+        before.financeTransactionId,
+        reason,
+        context,
+        input.status !== "voided",
+      );
+    }
+    const financeTransactionId =
+      mustCreateMovement && sourceAccount !== null
+        ? await createExpenseMovement(
+            connection,
+            {
+              amount: totalAmount,
+              description: input.description,
+              occurredOn: input.incurredOn,
+              operationKey: randomUUID(),
+              sourceAccountId: sourceAccount.id,
+            },
+            context,
+          )
+        : input.status === "active" && directPayment
+          ? before.financeTransactionId
+          : input.status === "voided"
+            ? before.financeTransactionId
+            : null;
     const { version: expectedVersion, ...changes } = input;
     const afterCandidate: Expense = {
       ...before,
       ...changes,
-      totalAmount: moneyTotal(input.netAmount, input.vatAmount),
+      financeTransactionId,
+      sourceAccountId:
+        input.status === "voided"
+          ? before.sourceAccountId
+          : directPayment
+            ? sourceAccount?.id ?? before.sourceAccountId
+            : null,
+      sourceAccountName:
+        input.status === "voided"
+          ? before.sourceAccountName
+          : directPayment
+            ? sourceAccount?.displayName ?? before.sourceAccountName
+            : null,
+      sourceAccountType:
+        input.status === "voided"
+          ? before.sourceAccountType
+          : directPayment
+            ? sourceAccount?.accountType ?? before.sourceAccountType
+            : null,
+      totalAmount,
       updatedAtUtc: now,
       version: before.version + 1,
       voidedAtUtc: input.status === "voided" ? now : null,
@@ -607,6 +817,64 @@ export async function updateExpense(
     if (!after) throw new SpendingResourceNotFoundError();
     await appendAuditEvent(connection, {
       action: input.status === "voided" ? "expense.voided" : "expense.updated",
+      actorId: context.actorId,
+      actorType: "user",
+      afterSummary: expenseAuditSummary(after),
+      beforeSummary: expenseAuditSummary(before),
+      correlationId: context.correlationId,
+      entityId: after.id,
+      entityType: "expense",
+      occurredAtUtc: now,
+    });
+    return after;
+  });
+}
+
+export async function voidExpense(
+  pool: Pool,
+  id: string,
+  rawInput: VoidExpenseInput,
+  context: SpendingWriteContext,
+): Promise<Expense> {
+  assertCanonicalUuid(id);
+  const input = voidExpenseInputSchema.parse(rawInput);
+  if (context.actorId !== undefined) assertCanonicalUuid(context.actorId);
+  const now = toUtcDateTime6(context.now ?? new Date());
+  return withUtcTransaction(pool, async (connection) => {
+    const before = await findExpenseForUpdate(connection, id);
+    if (!before) throw new SpendingResourceNotFoundError();
+    if (before.version !== input.version) throw new SpendingVersionConflictError();
+    if (before.status === "voided") throw new ExpenseAlreadyVoidedError();
+    const installments = await listExpenseInstallmentsForUpdate(connection, id);
+    if (installments.some((item) => item.status === "paid")) {
+      throw new ExpensePlanLockedError();
+    }
+    if (before.financeTransactionId !== null) {
+      requireAccountLedgerPermission(context);
+      await reverseExpenseMovement(
+        connection,
+        before.financeTransactionId,
+        Array.from(`Gider iptali: ${input.voidReason}`).slice(0, 2000).join(""),
+        context,
+        false,
+      );
+    }
+    await deletePlannedExpenseInstallments(connection, id);
+    const afterCandidate: Expense = {
+      ...before,
+      status: "voided",
+      updatedAtUtc: now,
+      version: before.version + 1,
+      voidedAtUtc: now,
+      voidReason: input.voidReason,
+    };
+    if (!(await updateExpenseRecord(connection, afterCandidate, input.version))) {
+      throw new SpendingVersionConflictError();
+    }
+    const after = await findExpenseForUpdate(connection, id);
+    if (!after) throw new SpendingResourceNotFoundError();
+    await appendAuditEvent(connection, {
+      action: "expense.voided",
       actorId: context.actorId,
       actorType: "user",
       afterSummary: expenseAuditSummary(after),

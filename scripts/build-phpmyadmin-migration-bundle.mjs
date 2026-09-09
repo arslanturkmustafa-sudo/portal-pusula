@@ -43,6 +43,21 @@ const FINANCE_ACCOUNTS_LEDGER_MIGRATION_TAG =
 const PLANNING_EXPENSE_CATEGORIES_MIGRATION_TAG =
   "0018_planning_expense_categories";
 const TAX_OBLIGATIONS_MIGRATION_TAG = "0019_tax_obligations";
+const EXPENSE_ACCOUNT_LEDGER_MIGRATION_TAG =
+  "0020_expense_account_ledger";
+
+// 0020 alters an existing financial table, so keep every accepted statement
+// byte-independent but semantically exact after whitespace normalization.
+const EXPENSE_ACCOUNT_LEDGER_STATEMENT_HASHES = new Set([
+  "3567f70345227c78dc1b17f00dc571c1d54c8292112d2ec30eeca1f991ead9eb",
+  "9937d0b9d5bbcf8f0cfee9a8f64ef9e00c48f0867d0dd51859a6f2bccb791f71",
+  "0ad779ce7620d7eaebd269a8e8e22602c74574aa94c3cbd4193ada5638d22c96",
+  "db60bac77ea3aeda8f8b745f6750867959cdca061342bf562ef243d256fb5706",
+  "1800680c540562f4f95fff7b59e80da5a7fef0f33f481816d8dacc5efd415c3e",
+  "038e132fa99c272b8522ef096c19b66aa53b8d20214991c3f9ef0ba92fda0fe2",
+  "6048483fa6e2b3e168726262a1857f60e813326e9c7a5c93662e37629197d7fb",
+  "a17b7171308d190ef67e81f9efb11f85082c7430f88d9e441152bad7d50de848",
+]);
 
 const EXPENSE_CATEGORY_SEED_ROWS = Object.freeze([
   ["81000000-0000-4000-8000-000000000001", "rent", "82000000-0000-4000-8000-000000000001", "Kira"],
@@ -106,6 +121,13 @@ const managedForwardColumns = new Map([
     `${PLANNING_EXPENSE_CATEGORIES_MIGRATION_TAG}:${tableName}:${columnName}`,
     { columnName, definition, tableName },
   ]),
+  ...[
+    ["expense", "source_account_id", "char(36) CHARACTER SET ascii COLLATE ascii_bin"],
+    ["expense", "finance_transaction_id", "char(36) CHARACTER SET ascii COLLATE ascii_bin"],
+  ].map(([tableName, columnName, definition]) => [
+    `${EXPENSE_ACCOUNT_LEDGER_MIGRATION_TAG}:${tableName}:${columnName}`,
+    { columnName, definition, tableName },
+  ]),
 ]);
 
 const managedDroppedChecks = new Set([
@@ -122,6 +144,7 @@ const managedDroppedChecks = new Set([
   `${PLANNING_EXPENSE_CATEGORIES_MIGRATION_TAG}:expense:chk_expense_category`,
   `${PLANNING_EXPENSE_CATEGORIES_MIGRATION_TAG}:monthly_visit_commitment:chk_monthly_visit_optional_fields`,
   `${TAX_OBLIGATIONS_MIGRATION_TAG}:user_permission:chk_user_permission_code`,
+  `${EXPENSE_ACCOUNT_LEDGER_MIGRATION_TAG}:expense:chk_expense_identity`,
 ]);
 
 const managedDroppedIndexes = new Map([
@@ -146,6 +169,7 @@ const managedDroppedIndexes = new Map([
 const managedUniqueConstraints = new Set([
   `${FINANCIAL_REVERSALS_MIGRATION_TAG}:partnership_contribution_receipt:uq_partnership_contribution_receipt_reversal:reversal_of_id`,
   `${FINANCIAL_REVERSALS_MIGRATION_TAG}:receivable_collection:uq_receivable_collection_reversal:reversal_of_id`,
+  `${EXPENSE_ACCOUNT_LEDGER_MIGRATION_TAG}:expense:uq_expense_finance_transaction:finance_transaction_id`,
 ]);
 const CUSTOMER_PROJECT_BACKFILL_SQL = `INSERT INTO \`customer_project\` (\`customer_id\`, \`project_id\`, \`status\`, \`version\`, \`created_at_utc\`, \`updated_at_utc\`) SELECT \`seed\`.\`customer_id\`, \`seed\`.\`project_id\`, 'active', 1, CURRENT_TIMESTAMP(6), CURRENT_TIMESTAMP(6) FROM (SELECT \`customer\`.\`id\` AS \`customer_id\`, \`project\`.\`id\` AS \`project_id\` FROM \`customer\` CROSS JOIN \`project\` WHERE BINARY \`project\`.\`short_code\` = BINARY 'MUHENDIS_KAFASI' UNION DISTINCT SELECT \`work_task\`.\`customer_id\` AS \`customer_id\`, \`work_task_project\`.\`project_id\` AS \`project_id\` FROM \`work_task\` JOIN \`work_task_project\` ON \`work_task_project\`.\`task_id\` = \`work_task\`.\`id\` WHERE \`work_task\`.\`customer_id\` IS NOT NULL) AS \`seed\``;
 const CONSULTING_CONTRACT_BACKFILL_SQL = `UPDATE \`consulting_contract\` JOIN \`project\` ON BINARY \`project\`.\`short_code\` = BINARY 'MUHENDIS_KAFASI' SET \`consulting_contract\`.\`project_id\` = \`project\`.\`id\` WHERE \`consulting_contract\`.\`project_id\` IS NULL`;
@@ -165,6 +189,15 @@ export class PhpMyAdminBundleError extends Error {
 
 function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
+}
+
+function assertExactManagedMigrationStatement(statement, migrationTag) {
+  if (migrationTag !== EXPENSE_ACCOUNT_LEDGER_MIGRATION_TAG) return;
+
+  const normalized = statement.replaceAll(/\s+/gu, " ").trim();
+  if (!EXPENSE_ACCOUNT_LEDGER_STATEMENT_HASHES.has(sha256(normalized))) {
+    throw new PhpMyAdminBundleError();
+  }
 }
 
 function sqlHex(value) {
@@ -588,7 +621,8 @@ function parseManagedForwardStatement(statement, migrationTag) {
     migrationTag !== FINANCIAL_REVERSALS_MIGRATION_TAG &&
     migrationTag !== FINANCE_ACCOUNTS_LEDGER_MIGRATION_TAG &&
     migrationTag !== PLANNING_EXPENSE_CATEGORIES_MIGRATION_TAG &&
-    migrationTag !== TAX_OBLIGATIONS_MIGRATION_TAG
+    migrationTag !== TAX_OBLIGATIONS_MIGRATION_TAG &&
+    migrationTag !== EXPENSE_ACCOUNT_LEDGER_MIGRATION_TAG
   ) {
     return null;
   }
@@ -695,6 +729,8 @@ export function analyzeMigrationStatement(statement, migrationTag) {
   ) {
     throw new PhpMyAdminBundleError();
   }
+
+  assertExactManagedMigrationStatement(statement, migrationTag);
 
   const customerProjectsPartnershipAnalysis =
     migrationTag === CUSTOMER_PROJECTS_PARTNERSHIP_MIGRATION_TAG

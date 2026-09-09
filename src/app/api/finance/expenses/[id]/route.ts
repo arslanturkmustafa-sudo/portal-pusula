@@ -3,12 +3,21 @@ import { z } from "zod";
 
 import {
   CreditCardInactiveError,
+  ExpenseAccountPermissionError,
   ExpenseAlreadyVoidedError,
   ExpensePlanLockedError,
+  ExpenseSourceAccountTypeError,
+  FinanceAccountInactiveError,
+  FinanceAccountNotFoundError,
+  FinanceTransactionAlreadyReversedError,
+  FinanceTransactionBeforeAccountOpeningError,
+  FinanceTransactionFutureDateError,
   SpendingResourceNotFoundError,
   SpendingVersionConflictError,
   updateExpense,
   updateExpenseInputSchema,
+  voidExpense,
+  voidExpenseInputSchema,
 } from "@/features/finance";
 import {
   isJsonRequest,
@@ -43,17 +52,40 @@ export async function PATCH(
   const correlationId = correlationIdFromHeaders(request.headers);
   try {
     const { id } = await context.params;
-    const input = updateExpenseInputSchema.parse(await readSpendingBody(request));
+    const body = await readSpendingBody(request);
+    const voidInput = voidExpenseInputSchema.safeParse(body);
+    const updateInput = voidInput.success
+      ? null
+      : updateExpenseInputSchema.parse(body);
     if (
-      input.status === "voided" &&
+      (voidInput.success || updateInput?.status === "voided") &&
       !hasPermission(principal, "finance.expenses.reverse")
     ) {
       return spendingJson({ status: "forbidden" }, 403);
     }
-    const expense = await updateExpense(spendingDatabasePool(), id, input, {
+    const canMutateAccountLedger =
+      hasPermission(principal, "finance.accounts.read") &&
+      hasPermission(principal, "finance.accounts.write");
+    if (
+      updateInput?.sourceAccountId !== undefined &&
+      updateInput.sourceAccountId !== null &&
+      !canMutateAccountLedger
+    ) {
+      return spendingJson({ status: "forbidden" }, 403);
+    }
+    const writeContext = {
       actorId: spendingActorId(principal),
+      canMutateAccountLedger,
       correlationId,
-    });
+    };
+    const expense = voidInput.success
+      ? await voidExpense(spendingDatabasePool(), id, voidInput.data, writeContext)
+      : await updateExpense(
+          spendingDatabasePool(),
+          id,
+          updateInput ?? updateExpenseInputSchema.parse(body),
+          writeContext,
+        );
     return spendingJson({ expense });
   } catch (error) {
     if (
@@ -69,6 +101,27 @@ export async function PATCH(
     }
     if (error instanceof CreditCardInactiveError) {
       return spendingJson({ status: "credit_card_inactive" }, 409);
+    }
+    if (error instanceof ExpenseAccountPermissionError) {
+      return spendingJson({ status: "forbidden" }, 403);
+    }
+    if (error instanceof FinanceAccountNotFoundError) {
+      return spendingJson({ status: "finance_account_not_found" }, 404);
+    }
+    if (error instanceof FinanceAccountInactiveError) {
+      return spendingJson({ status: "finance_account_inactive" }, 409);
+    }
+    if (error instanceof ExpenseSourceAccountTypeError) {
+      return spendingJson({ status: "finance_account_type_mismatch" }, 409);
+    }
+    if (error instanceof FinanceTransactionFutureDateError) {
+      return spendingJson({ status: "finance_transaction_future_date" }, 409);
+    }
+    if (error instanceof FinanceTransactionBeforeAccountOpeningError) {
+      return spendingJson({ status: "finance_transaction_before_account_opening" }, 409);
+    }
+    if (error instanceof FinanceTransactionAlreadyReversedError) {
+      return spendingJson({ status: "finance_transaction_already_reversed" }, 409);
     }
     if (error instanceof ExpensePlanLockedError) {
       return spendingJson({ status: "expense_plan_locked" }, 409);

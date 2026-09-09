@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   findAccountBalance: vi.fn(),
   findAccountByOperation: vi.fn(),
   findAccountForUpdate: vi.fn(),
+  findExpenseByTransaction: vi.fn(),
   findReversal: vi.fn(),
   findTransaction: vi.fn(),
   findTransactionByOperation: vi.fn(),
@@ -26,6 +27,7 @@ vi.mock("@/features/finance/account-repository", () => ({
   findFinanceAccountBalanceRecord: mocks.findAccountBalance,
   findFinanceAccountByOperationKeyForUpdate: mocks.findAccountByOperation,
   findFinanceAccountForUpdate: mocks.findAccountForUpdate,
+  findExpenseByFinanceTransactionForUpdate: mocks.findExpenseByTransaction,
   findFinanceTransactionByOperationKeyForUpdate: mocks.findTransactionByOperation,
   findFinanceTransactionForUpdate: mocks.findTransaction,
   findFinanceTransactionReversalForUpdate: mocks.findReversal,
@@ -53,6 +55,7 @@ import {
   createFinanceTransaction,
   FinanceAccountInactiveError,
   FinanceTransactionBeforeAccountOpeningError,
+  FinanceTransactionManagedByExpenseError,
   listFinanceAccountsOverview,
   reverseFinanceTransaction,
 } from "@/features/finance/account-service";
@@ -89,6 +92,7 @@ describe("finance account service", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.findTransactionByOperation.mockResolvedValue(null);
+    mocks.findExpenseByTransaction.mockResolvedValue(null);
     mocks.findReversal.mockResolvedValue(null);
     mocks.lockAccounts.mockImplementation(async (_connection, ids: string[]) =>
       ids.map((id) => (id === bankId ? bank : cash)),
@@ -279,5 +283,20 @@ describe("finance account service", () => {
     expect(mocks.insertLedger.mock.calls[0]?.[1]).toEqual([
       expect.objectContaining({ accountId: bankId, entrySide: "outflow" }),
     ]);
+  });
+
+  it("blocks a generic reversal for an expense-managed movement", async () => {
+    mocks.findExpenseByTransaction.mockResolvedValue(
+      "50000000-0000-4000-8000-000000000001",
+    );
+    await expect(
+      reverseFinanceTransaction(
+        {} as Pool,
+        transactionId,
+        { clientOperationKey: operationKey, reason: "Yanlış kayıt" },
+        context,
+      ),
+    ).rejects.toBeInstanceOf(FinanceTransactionManagedByExpenseError);
+    expect(mocks.findTransaction).not.toHaveBeenCalled();
   });
 });

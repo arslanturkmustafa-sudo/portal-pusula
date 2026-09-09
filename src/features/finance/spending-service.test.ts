@@ -7,12 +7,14 @@ vi.mock("server-only", () => ({}));
 
 const mocks = vi.hoisted(() => ({
   appendAuditEvent: vi.fn(),
+  createFinanceTransactionInConnection: vi.fn(),
   deletePlannedExpenseInstallments: vi.fn(),
   findCardInstallmentForUpdate: vi.fn(),
   findCreditCardForUpdate: vi.fn(),
   findActiveExpenseCategoryByCodeForUpdate: vi.fn(),
   findExpenseByOperationKeyForUpdate: vi.fn(),
   findExpenseForUpdate: vi.fn(),
+  findFinanceAccountForUpdate: vi.fn(),
   findProjectForUpdate: vi.fn(),
   insertCardInstallmentRecords: vi.fn(),
   insertCreditCardRecordIdempotently: vi.fn(),
@@ -22,9 +24,22 @@ const mocks = vi.hoisted(() => ({
   listCreditCardRecords: vi.fn(),
   listExpenseInstallmentsForUpdate: vi.fn(),
   listExpenseRecords: vi.fn(),
+  reverseFinanceTransactionInConnection: vi.fn(),
   updateCardInstallmentRecord: vi.fn(),
   updateCreditCardRecord: vi.fn(),
   updateExpenseRecord: vi.fn(),
+}));
+
+vi.mock("@/features/finance/account-service", () => ({
+  createFinanceTransactionInConnection:
+    mocks.createFinanceTransactionInConnection,
+  FinanceAccountInactiveError: class FinanceAccountInactiveError extends Error {},
+  FinanceAccountNotFoundError: class FinanceAccountNotFoundError extends Error {},
+  reverseFinanceTransactionInConnection:
+    mocks.reverseFinanceTransactionInConnection,
+}));
+vi.mock("@/features/finance/account-repository", () => ({
+  findFinanceAccountForUpdate: mocks.findFinanceAccountForUpdate,
 }));
 
 vi.mock("@/features/projects/repository", () => ({
@@ -69,17 +84,22 @@ import {
   createCreditCard,
   createExpense,
   ExpensePlanLockedError,
+  ExpenseSourceAccountTypeError,
   listCardInstallments,
   listExpenses,
   SpendingResourceNotFoundError,
   updateCardInstallment,
   updateExpense,
+  voidExpense,
 } from "@/features/finance/spending-service";
+import { FinanceAccountInactiveError } from "@/features/finance/account-service";
 
 const cardId = "20000000-0000-4000-8000-000000000001";
 const expenseId = "30000000-0000-4000-8000-000000000001";
 const projectId = "40000000-0000-4000-8000-000000000001";
 const operationKey = "50000000-0000-4000-8000-000000000001";
+const cashAccountId = "70000000-0000-4000-8000-000000000001";
+const financeTransactionId = "80000000-0000-4000-8000-000000000001";
 const now = new Date("2026-09-03T08:00:00.000Z");
 const nowSql = "2026-09-03 08:00:00.000000";
 const context = { correlationId: "spending-service-test", now };
@@ -113,12 +133,16 @@ const expense = {
   id: expenseId,
   incurredOn: "2026-09-26",
   installmentCount: 3,
+  financeTransactionId: null,
   netAmount: "100.0000",
   note: null,
   paymentMethod: "credit_card" as const,
   projectId,
   projectName: "ByPusula",
   projectShortCode: "BYPUSULA",
+  sourceAccountId: null,
+  sourceAccountName: null,
+  sourceAccountType: null,
   status: "active" as const,
   totalAmount: "120.0000",
   updatedAtUtc: nowSql,
@@ -147,6 +171,20 @@ const installment = {
   version: 1,
 };
 
+const cashAccount = {
+  accountType: "cash" as const,
+  bankName: null,
+  clientOperationKey: "90000000-0000-4000-8000-000000000001",
+  createdAtUtc: nowSql,
+  currency: "TRY" as const,
+  displayName: "Merkez kasa",
+  id: cashAccountId,
+  openingBalanceAmount: "1000.0000",
+  status: "active" as const,
+  updatedAtUtc: nowSql,
+  version: 1,
+};
+
 describe("spending service", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -156,6 +194,7 @@ describe("spending service", () => {
       status: "active",
     });
     mocks.findExpenseByOperationKeyForUpdate.mockResolvedValue(null);
+    mocks.findFinanceAccountForUpdate.mockResolvedValue(cashAccount);
     mocks.findProjectForUpdate.mockResolvedValue({ id: projectId });
     mocks.insertCreditCardRecordIdempotently.mockImplementation(
       async (_connection, pending) => pending,
@@ -167,6 +206,10 @@ describe("spending service", () => {
         projectShortCode: "BYPUSULA",
       }),
     );
+    mocks.createFinanceTransactionInConnection.mockResolvedValue({
+      created: true,
+      transaction: { id: financeTransactionId },
+    });
     mocks.listExpenseInstallmentsForUpdate.mockResolvedValue([]);
     mocks.listCardInstallmentsForBulkUpdate.mockResolvedValue([]);
     mocks.updateCardInstallmentRecord.mockResolvedValue(true);
@@ -210,6 +253,7 @@ describe("spending service", () => {
         note: null,
         paymentMethod: "credit_card",
         projectId,
+        sourceAccountId: null,
         vatAmount: "20",
         vendorName: expense.vendorName,
       },
@@ -227,6 +271,251 @@ describe("spending service", () => {
       dueOn: "2026-11-05",
       statementMonth: "2026-10",
     });
+  });
+
+  it("records a cash expense against the explicitly selected cash account", async () => {
+    const result = await createExpense(
+      {} as Pool,
+      {
+        category: expense.category,
+        clientOperationKey: operationKey,
+        creditCardId: null,
+        description: "Kırtasiye ödemesi",
+        documentNumber: null,
+        documentType: "none",
+        incurredOn: "2026-09-03",
+        installmentCount: 1,
+        netAmount: "100",
+        note: null,
+        paymentMethod: "cash",
+        projectId: null,
+        sourceAccountId: cashAccountId,
+        vatAmount: "20",
+        vendorName: null,
+      },
+      { ...context, canMutateAccountLedger: true },
+    );
+
+    expect(result.expense).toMatchObject({
+      financeTransactionId,
+      sourceAccountId: cashAccountId,
+      sourceAccountName: "Merkez kasa",
+      totalAmount: "120.0000",
+    });
+    expect(mocks.createFinanceTransactionInConnection).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        amount: "120.0000",
+        sourceAccountId: cashAccountId,
+        transactionType: "expense",
+      }),
+      expect.objectContaining({ canMutateAccountLedger: true }),
+    );
+  });
+
+  it("replays a cash expense without appending a second movement", async () => {
+    const replay = {
+      ...expense,
+      creditCardId: null,
+      creditCardName: null,
+      financeTransactionId,
+      incurredOn: "2026-09-03",
+      installmentCount: 1,
+      paymentMethod: "cash" as const,
+      projectId: null,
+      projectName: null,
+      projectShortCode: null,
+      sourceAccountId: cashAccountId,
+      sourceAccountName: "Merkez kasa",
+      sourceAccountType: "cash" as const,
+    };
+    mocks.findExpenseByOperationKeyForUpdate.mockResolvedValue(replay);
+
+    const result = await createExpense(
+      {} as Pool,
+      {
+        category: replay.category,
+        clientOperationKey: operationKey,
+        creditCardId: null,
+        description: replay.description,
+        documentNumber: replay.documentNumber,
+        documentType: replay.documentType,
+        incurredOn: replay.incurredOn,
+        installmentCount: 1,
+        netAmount: replay.netAmount,
+        note: replay.note,
+        paymentMethod: "cash",
+        projectId: null,
+        sourceAccountId: cashAccountId,
+        vatAmount: replay.vatAmount,
+        vendorName: replay.vendorName,
+      },
+      { ...context, canMutateAccountLedger: true },
+    );
+
+    expect(result.created).toBe(false);
+    expect(mocks.createFinanceTransactionInConnection).not.toHaveBeenCalled();
+  });
+
+  it("rejects a bank account selected for a cash expense", async () => {
+    mocks.findFinanceAccountForUpdate.mockResolvedValue({
+      ...cashAccount,
+      accountType: "bank",
+    });
+    await expect(
+      createExpense(
+        {} as Pool,
+        {
+          category: expense.category,
+          clientOperationKey: operationKey,
+          creditCardId: null,
+          description: "Kırtasiye ödemesi",
+          documentNumber: null,
+          documentType: "none",
+          incurredOn: "2026-09-03",
+          installmentCount: 1,
+          netAmount: "100",
+          note: null,
+          paymentMethod: "cash",
+          projectId: null,
+          sourceAccountId: cashAccountId,
+          vatAmount: "20",
+          vendorName: null,
+        },
+        { ...context, canMutateAccountLedger: true },
+      ),
+    ).rejects.toBeInstanceOf(ExpenseSourceAccountTypeError);
+    expect(mocks.createFinanceTransactionInConnection).not.toHaveBeenCalled();
+  });
+
+  it("rejects an inactive source account", async () => {
+    mocks.findFinanceAccountForUpdate.mockResolvedValue({
+      ...cashAccount,
+      status: "inactive",
+    });
+    await expect(
+      createExpense(
+        {} as Pool,
+        {
+          category: expense.category,
+          clientOperationKey: operationKey,
+          creditCardId: null,
+          description: "Kırtasiye ödemesi",
+          documentNumber: null,
+          documentType: "none",
+          incurredOn: "2026-09-03",
+          installmentCount: 1,
+          netAmount: "100",
+          note: null,
+          paymentMethod: "cash",
+          projectId: null,
+          sourceAccountId: cashAccountId,
+          vatAmount: "20",
+          vendorName: null,
+        },
+        { ...context, canMutateAccountLedger: true },
+      ),
+    ).rejects.toBeInstanceOf(FinanceAccountInactiveError);
+  });
+
+  it("reverses the linked cash movement when the expense is voided", async () => {
+    const linkedCashExpense = {
+      ...expense,
+      creditCardId: null,
+      creditCardName: null,
+      financeTransactionId,
+      installmentCount: 1,
+      paymentMethod: "cash" as const,
+      sourceAccountId: cashAccountId,
+      sourceAccountName: "Merkez kasa",
+      sourceAccountType: "cash" as const,
+    };
+    mocks.findExpenseForUpdate
+      .mockResolvedValueOnce(linkedCashExpense)
+      .mockResolvedValueOnce({
+        ...linkedCashExpense,
+        status: "voided",
+        version: 2,
+        voidedAtUtc: nowSql,
+        voidReason: "Mükerrer kayıt",
+      });
+
+    await voidExpense(
+      {} as Pool,
+      expenseId,
+      { status: "voided", version: 1, voidReason: "Mükerrer kayıt" },
+      { ...context, canMutateAccountLedger: true },
+    );
+
+    expect(mocks.reverseFinanceTransactionInConnection).toHaveBeenCalledWith(
+      expect.anything(),
+      financeTransactionId,
+      expect.objectContaining({ reason: "Gider iptali: Mükerrer kayıt" }),
+      expect.anything(),
+      { allowExpenseManaged: true, preserveOriginalDate: false },
+    );
+    expect(mocks.updateExpenseRecord).toHaveBeenCalledOnce();
+  });
+
+  it("replaces a corrected cash movement on the original accounting date", async () => {
+    const linkedCashExpense = {
+      ...expense,
+      creditCardId: null,
+      creditCardName: null,
+      financeTransactionId,
+      incurredOn: "2026-09-03",
+      installmentCount: 1,
+      paymentMethod: "cash" as const,
+      sourceAccountId: cashAccountId,
+      sourceAccountName: "Merkez kasa",
+      sourceAccountType: "cash" as const,
+    };
+    mocks.findExpenseForUpdate
+      .mockResolvedValueOnce(linkedCashExpense)
+      .mockResolvedValueOnce({
+        ...linkedCashExpense,
+        netAmount: "110.0000",
+        totalAmount: "130.0000",
+        version: 2,
+      });
+
+    await updateExpense(
+      {} as Pool,
+      expenseId,
+      {
+        category: linkedCashExpense.category,
+        creditCardId: null,
+        description: linkedCashExpense.description,
+        documentNumber: linkedCashExpense.documentNumber,
+        documentType: linkedCashExpense.documentType,
+        incurredOn: linkedCashExpense.incurredOn,
+        installmentCount: 1,
+        netAmount: "110",
+        note: linkedCashExpense.note,
+        paymentMethod: "cash",
+        projectId: linkedCashExpense.projectId,
+        sourceAccountId: cashAccountId,
+        status: "active",
+        vatAmount: "20",
+        vendorName: linkedCashExpense.vendorName,
+        version: 1,
+        voidReason: null,
+      },
+      { ...context, canMutateAccountLedger: true },
+    );
+
+    expect(mocks.reverseFinanceTransactionInConnection).toHaveBeenCalledWith(
+      expect.anything(),
+      financeTransactionId,
+      expect.anything(),
+      expect.anything(),
+      { allowExpenseManaged: true, preserveOriginalDate: true },
+    );
+    expect(mocks.createFinanceTransactionInConnection).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ amount: "130.0000", occurredOn: "2026-09-03" }),
+      expect.anything(),
+    );
   });
 
   it("rejects an unknown or inactive expense category before persistence", async () => {
@@ -247,6 +536,7 @@ describe("spending service", () => {
           note: null,
           paymentMethod: "cash",
           projectId: null,
+          sourceAccountId: "70000000-0000-4000-8000-000000000001",
           vatAmount: "20",
           vendorName: null,
         },
@@ -277,6 +567,7 @@ describe("spending service", () => {
           note: null,
           paymentMethod: "credit_card",
           projectId,
+          sourceAccountId: null,
           status: "voided",
           vatAmount: "20",
           vendorName: expense.vendorName,
