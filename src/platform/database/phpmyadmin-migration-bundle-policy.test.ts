@@ -117,8 +117,8 @@ describe.sequential("clean-only phpMyAdmin migration bundle policy", () => {
     expect(second.summary).toEqual(first.summary);
     expect(second.sql).toBe(first.sql);
     expect(second.manifestText).toBe(first.manifestText);
-    expect(first.summary.migrationCount).toBe(21);
-    expect(first.summary.statementCount).toBe(214);
+    expect(first.summary.migrationCount).toBe(22);
+    expect(first.summary.statementCount).toBe(216);
     expect(first.summary.sqlBytes).toBe(Buffer.byteLength(first.sql));
     expect(first.summary.sqlSha256).toBe(
       createHash("sha256").update(first.sql).digest("hex"),
@@ -192,6 +192,7 @@ describe.sequential("clean-only phpMyAdmin migration bundle policy", () => {
       "scheduled_job",
       "tax_obligation",
       "user_account",
+      "user_notification_setting",
       "user_permission",
       "work_task",
       "work_task_project",
@@ -385,6 +386,10 @@ describe.sequential("clean-only phpMyAdmin migration bundle policy", () => {
       {
         name: "fk_receivable_customer_project",
         tableName: "receivable",
+      },
+      {
+        name: "fk_user_notification_setting_account",
+        tableName: "user_notification_setting",
       },
       {
         name: "fk_user_permission_account",
@@ -595,10 +600,16 @@ describe.sequential("clean-only phpMyAdmin migration bundle policy", () => {
         sqlFileName: "0020_expense_account_ledger.sql",
         statementCount: 8,
       },
+      {
+        createdAt: 1788995986876,
+        hash: "435b28ee71f0ab1a267d012c040569cefe8610935bdaf8586f6ddfb1367c6ef7",
+        sqlFileName: "0021_user_notification_settings.sql",
+        statementCount: 2,
+      },
     ]);
     expect(
       manifest.migrations.flatMap((migration) => migration.statementHashes),
-    ).toHaveLength(214);
+    ).toHaveLength(216);
     expect(
       manifest.migrations
         .flatMap((migration) => migration.statementHashes)

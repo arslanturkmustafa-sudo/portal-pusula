@@ -148,6 +148,13 @@
       "when": 1788938626518,
       "tag": "0020_expense_account_ledger",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "5",
+      "when": 1788995986876,
+      "tag": "0021_user_notification_settings",
+      "breakpoints": true
     }
   ]
 }

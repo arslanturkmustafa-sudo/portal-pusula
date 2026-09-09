@@ -27,6 +27,7 @@ const monthlyVisitCommitmentTable = "monthly_visit_commitment";
 const receivableTable = "receivable";
 const receivableCollectionTable = "receivable_collection";
 const userAccountTable = "user_account";
+const userNotificationSettingTable = "user_notification_setting";
 const userPermissionTable = "user_permission";
 const workTaskTable = "work_task";
 const projectTable = "project";
@@ -61,6 +62,7 @@ const allMigratedPlatformTables = [
   receivableTable,
   receivableCollectionTable,
   userAccountTable,
+  userNotificationSettingTable,
   userPermissionTable,
   workTaskTable,
   projectTable,
@@ -81,7 +83,7 @@ const allMigratedPlatformTables = [
   taxObligationTable,
 ] as const;
 const repositoryRoot = process.cwd();
-const expectedMigrationCount = 21;
+const expectedMigrationCount = 22;
 const migrationLockWaitTimeoutMs = 5_000;
 const migrationLockPollIntervalMs = 25;
 
@@ -376,6 +378,7 @@ async function resetKnownMigrationArtifacts(pool: Pool): Promise<void> {
   await pool.query(`DROP TABLE IF EXISTS \`${projectTable}\``);
   await pool.query("DROP TABLE IF EXISTS `customer`");
   await pool.query(`DROP TABLE IF EXISTS \`${userPermissionTable}\``);
+  await pool.query(`DROP TABLE IF EXISTS \`${userNotificationSettingTable}\``);
   await pool.query(`DROP TABLE IF EXISTS \`${userAccountTable}\``);
   await pool.query("DROP TABLE IF EXISTS `cron_dispatch_gate`");
   await pool.query("DROP TABLE IF EXISTS `job_run`");
@@ -1201,7 +1204,7 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
       ]);
     });
 
-    it("records the immutable 0000 through 0020 migration hash chain", async () => {
+    it("records the immutable 0000 through 0021 migration hash chain", async () => {
       const [rows] = await pool.query<MigrationRow[]>(
         `SELECT id, hash, created_at FROM \`${migrationTable}\` ORDER BY id`,
       );
@@ -1310,6 +1313,11 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
           created_at: 1788938626518,
           hash: "a95bed1c3e8f65d71a5063423ceefbfc676678c03699e2d89d098f1b31811226",
           id: 21,
+        },
+        {
+          created_at: 1788995986876,
+          hash: "435b28ee71f0ab1a267d012c040569cefe8610935bdaf8586f6ddfb1367c6ef7",
+          id: 22,
         },
       ]);
     });

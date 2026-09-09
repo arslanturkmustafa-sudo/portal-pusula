@@ -159,11 +159,15 @@ export async function listActiveOwnerEmailRecipients(
   connection: PoolConnection,
 ): Promise<readonly OwnerEmailRecipient[]> {
   const [rows] = await connection.execute<OwnerEmailRecipientRow[]>(
-    `SELECT id, email, display_name
-       FROM user_account
-      WHERE BINARY role = BINARY 'owner'
-        AND BINARY status = BINARY 'active'
-      ORDER BY id ASC`,
+    `SELECT account.id,
+            COALESCE(setting.recipient_email, account.email) AS email,
+            account.display_name
+       FROM user_account AS account
+       LEFT JOIN user_notification_setting AS setting
+         ON setting.user_account_id = account.id
+      WHERE BINARY account.role = BINARY 'owner'
+        AND BINARY account.status = BINARY 'active'
+      ORDER BY account.id ASC`,
   );
   return rows.map(mapOwnerEmailRecipient);
 }
@@ -173,11 +177,15 @@ export async function findActiveOwnerEmailRecipientById(
   id: string,
 ): Promise<OwnerEmailRecipient | null> {
   const [rows] = await connection.execute<OwnerEmailRecipientRow[]>(
-    `SELECT id, email, display_name
-       FROM user_account
-      WHERE id = ?
-        AND BINARY role = BINARY 'owner'
-        AND BINARY status = BINARY 'active'
+    `SELECT account.id,
+            COALESCE(setting.recipient_email, account.email) AS email,
+            account.display_name
+       FROM user_account AS account
+       LEFT JOIN user_notification_setting AS setting
+         ON setting.user_account_id = account.id
+      WHERE account.id = ?
+        AND BINARY account.role = BINARY 'owner'
+        AND BINARY account.status = BINARY 'active'
       LIMIT 1`,
     [id],
   );

@@ -22,6 +22,7 @@ const repositoryRoot = process.cwd();
 const journalTable = "__drizzle_migrations";
 const knownTablesInDropOrder = [
   "tax_obligation",
+  "user_notification_setting",
   "work_task_visit",
   "finance_ledger_entry",
   "finance_transaction",
@@ -702,12 +703,13 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
           "scheduled_job",
           "tax_obligation",
           "user_account",
+          "user_notification_setting",
           "user_permission",
           "work_task",
           "work_task_project",
           "work_task_visit",
         ],
-        journalCount: 21,
+        journalCount: 22,
       });
 
       await expect(
@@ -721,7 +723,7 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
 
       const bundleSchema = await schemaDefinitionSnapshot(pool);
       await expect(runMigration()).resolves.toBeUndefined();
-      expect(await journalRows(pool)).toHaveLength(21);
+      expect(await journalRows(pool)).toHaveLength(22);
       expect(await schemaDefinitionSnapshot(pool)).toEqual(bundleSchema);
 
       await resetKnownTables(pool);
