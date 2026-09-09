@@ -81,8 +81,12 @@ Gerekli environment adları:
 | `SESSION_SECRET` | `auth:generate` çıktısı; tam 16 ASCII alfanümerik |
 | `PORTAL_PUSULA_AUTH_STORAGE_MODE` | İsteğe bağlı; varsayılan ve canlı değer `database`. `environment` yalnız veritabanısız uyumluluk/E2E koşuları içindir ve parola yönetimini kapatır. |
 | `LOG_LEVEL` | İsteğe bağlı; varsayılan `info` |
+| `CRON_ENDPOINT_ENABLED`, `CRON_BEARER_TOKEN`, `CRON_MIN_INTERVAL_SECONDS` | Günlük e-posta tetikleyicisi; bearer token readiness token'dan farklıdır |
+| `EMAIL_NOTIFICATIONS_ENABLED` | E-posta gönderimini yalnız exact `true` ile açar |
+| `RESEND_API_KEY` | Resend API anahtarı; yalnız server environment içinde tutulur |
+| `EMAIL_FROM_ADDRESS`, `EMAIL_FROM_NAME` | Doğrulanmış gönderen adresi ve isteğe bağlı görünen adı |
 
-Cron değişkenleri kaynakta varsayılan kapalı altyapı adayıdır; gerçek iş ve scheduler hazır olmadan Hostinger'da etkinleştirilmez.
+E-posta bildirimleri varsayılan kapalıdır. Etkin olduğunda yeni gider kaydı aktif owner hesaplarına dayanıklı outbox üzerinden bildirilir; her gün 09.00'da (Europe/Istanbul) planlı ziyaretler ve tamamlanmamış günlük işler için tek özet hazırlanır. Boş gün özeti gönderilmez. GitHub Actions 09.00 günlük tetikleyicisine ek olarak kuyruğu her saatin 10. dakikasında güvenli biçimde boşaltır. Çağrılar yalnız bearer header kullanır; tekrarlar DB ve Resend idempotency anahtarlarıyla etkisizleştirilir.
 
 ## Migration sırası
 

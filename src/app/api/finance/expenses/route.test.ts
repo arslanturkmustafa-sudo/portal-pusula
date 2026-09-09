@@ -8,9 +8,11 @@ const mocks = vi.hoisted(() => ({
   authenticate: vi.fn(),
   create: vi.fn(),
   list: vi.fn(),
+  notificationsEnabled: vi.fn(),
   parseCreate: vi.fn(),
   parseFilters: vi.fn(),
   requestLogger: vi.fn(),
+  scheduleEmailDispatch: vi.fn(),
 }));
 vi.mock("@/features/finance", () => ({
   createExpense: mocks.create,
@@ -28,8 +30,14 @@ vi.mock("@/features/finance", () => ({
   SpendingResourceNotFoundError: class extends Error {},
 }));
 vi.mock("@/platform/auth/server-auth", () => ({ authenticateAdminRequest: mocks.authenticate }));
+vi.mock("@/platform/config/email-env", () => ({
+  emailNotificationsEnabled: mocks.notificationsEnabled,
+}));
 vi.mock("@/platform/config/readiness-env", () => ({ getDatabaseProbeEnvironment: () => ({}) }));
 vi.mock("@/platform/database/mysql-platform", () => ({ getPlatformDatabasePool: () => ({}) }));
+vi.mock("@/platform/email/immediate-dispatch", () => ({
+  scheduleEmailOutboxDispatch: mocks.scheduleEmailDispatch,
+}));
 vi.mock("@/platform/logging/logger", () => ({ requestLogger: mocks.requestLogger }));
 
 import { GET, POST } from "@/app/api/finance/expenses/route";
@@ -45,6 +53,7 @@ describe("expense collection API", () => {
     mocks.parseFilters.mockImplementation((value: unknown) => value);
     mocks.list.mockResolvedValue({ expenses: [], summary: {} });
     mocks.create.mockResolvedValue({ created: true, expense: { id: "expense-1" } });
+    mocks.notificationsEnabled.mockReturnValue(true);
     mocks.requestLogger.mockReturnValue({ error: vi.fn() });
   });
 
@@ -78,5 +87,6 @@ describe("expense collection API", () => {
       { description: "Kira", sourceAccountId: null },
       expect.objectContaining({ actorId: "10000000-0000-4000-8000-000000000001" }),
     );
+    expect(mocks.scheduleEmailDispatch).toHaveBeenCalledOnce();
   });
 });

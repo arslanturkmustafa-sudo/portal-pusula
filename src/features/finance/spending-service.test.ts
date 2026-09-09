@@ -7,6 +7,7 @@ vi.mock("server-only", () => ({}));
 
 const mocks = vi.hoisted(() => ({
   appendAuditEvent: vi.fn(),
+  buildExpenseCreatedEmail: vi.fn(),
   createFinanceTransactionInConnection: vi.fn(),
   deletePlannedExpenseInstallments: vi.fn(),
   findCardInstallmentForUpdate: vi.fn(),
@@ -16,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   findExpenseForUpdate: vi.fn(),
   findFinanceAccountForUpdate: vi.fn(),
   findProjectForUpdate: vi.fn(),
+  enqueueEmailDelivery: vi.fn(),
   insertCardInstallmentRecords: vi.fn(),
   insertCreditCardRecordIdempotently: vi.fn(),
   insertExpenseRecordIdempotently: vi.fn(),
@@ -24,10 +26,15 @@ const mocks = vi.hoisted(() => ({
   listCreditCardRecords: vi.fn(),
   listExpenseInstallmentsForUpdate: vi.fn(),
   listExpenseRecords: vi.fn(),
+  listActiveOwnerEmailRecipients: vi.fn(),
   reverseFinanceTransactionInConnection: vi.fn(),
   updateCardInstallmentRecord: vi.fn(),
   updateCreditCardRecord: vi.fn(),
   updateExpenseRecord: vi.fn(),
+}));
+
+vi.mock("@/features/account/repository", () => ({
+  listActiveOwnerEmailRecipients: mocks.listActiveOwnerEmailRecipients,
 }));
 
 vi.mock("@/features/finance/account-service", () => ({
@@ -48,6 +55,9 @@ vi.mock("@/features/projects/repository", () => ({
 vi.mock("@/features/finance/expense-category-repository", () => ({
   findActiveExpenseCategoryByCodeForUpdate:
     mocks.findActiveExpenseCategoryByCodeForUpdate,
+}));
+vi.mock("@/features/notifications/email-templates", () => ({
+  buildExpenseCreatedEmail: mocks.buildExpenseCreatedEmail,
 }));
 vi.mock("@/features/finance/spending-repository", () => ({
   deletePlannedExpenseInstallments: mocks.deletePlannedExpenseInstallments,
@@ -70,6 +80,9 @@ vi.mock("@/features/finance/spending-repository", () => ({
 }));
 vi.mock("@/platform/audit/repository", () => ({
   appendAuditEvent: mocks.appendAuditEvent,
+}));
+vi.mock("@/platform/email/outbox-email", () => ({
+  enqueueEmailDelivery: mocks.enqueueEmailDelivery,
 }));
 vi.mock("@/platform/jobs/mysql-transaction", () => ({
   withUtcTransaction: vi.fn(
@@ -212,6 +225,12 @@ describe("spending service", () => {
     });
     mocks.listExpenseInstallmentsForUpdate.mockResolvedValue([]);
     mocks.listCardInstallmentsForBulkUpdate.mockResolvedValue([]);
+    mocks.listActiveOwnerEmailRecipients.mockResolvedValue([]);
+    mocks.buildExpenseCreatedEmail.mockReturnValue({
+      html: "<p>Yeni gider kaydı</p>",
+      subject: "Yeni gider kaydı",
+      text: "Yeni gider kaydı",
+    });
     mocks.updateCardInstallmentRecord.mockResolvedValue(true);
     mocks.updateExpenseRecord.mockResolvedValue(true);
   });
@@ -271,6 +290,67 @@ describe("spending service", () => {
       dueOn: "2026-11-05",
       statementMonth: "2026-10",
     });
+    expect(mocks.listActiveOwnerEmailRecipients).not.toHaveBeenCalled();
+  });
+
+  it("enqueues one deterministic email for each active owner on new expense creation", async () => {
+    const firstOwnerId = "10000000-0000-4000-8000-000000000001";
+    const secondOwnerId = "10000000-0000-4000-8000-000000000002";
+    mocks.listActiveOwnerEmailRecipients.mockResolvedValue([
+      { displayName: "Birinci Yönetici", email: "birinci@example.com", id: firstOwnerId },
+      { displayName: "İkinci Yönetici", email: "ikinci@example.com", id: secondOwnerId },
+    ]);
+    const message = {
+      html: "<p>Yeni gider kaydı</p>",
+      subject: "Yeni gider kaydı",
+      text: "Yeni gider kaydı",
+    };
+    mocks.buildExpenseCreatedEmail.mockReturnValue(message);
+
+    const result = await createExpense(
+      {} as Pool,
+      {
+        category: expense.category,
+        clientOperationKey: operationKey,
+        creditCardId: cardId,
+        description: expense.description,
+        documentNumber: expense.documentNumber,
+        documentType: expense.documentType,
+        incurredOn: expense.incurredOn,
+        installmentCount: 3,
+        netAmount: "100",
+        note: null,
+        paymentMethod: "credit_card",
+        projectId,
+        sourceAccountId: null,
+        vatAmount: "20",
+        vendorName: expense.vendorName,
+      },
+      { ...context, emailNotificationsEnabled: true },
+    );
+
+    expect(mocks.buildExpenseCreatedEmail).toHaveBeenCalledWith(result.expense);
+    expect(mocks.enqueueEmailDelivery).toHaveBeenCalledTimes(2);
+    expect(mocks.enqueueEmailDelivery).toHaveBeenNthCalledWith(
+      1,
+      expect.anything(),
+      {
+        availableAtUtc: nowSql,
+        idempotencyKey: `expense-created:${result.expense.id}:${firstOwnerId}`,
+        message,
+        recipientAccountId: firstOwnerId,
+      },
+    );
+    expect(mocks.enqueueEmailDelivery).toHaveBeenNthCalledWith(
+      2,
+      expect.anything(),
+      {
+        availableAtUtc: nowSql,
+        idempotencyKey: `expense-created:${result.expense.id}:${secondOwnerId}`,
+        message,
+        recipientAccountId: secondOwnerId,
+      },
+    );
   });
 
   it("records a cash expense against the explicitly selected cash account", async () => {
@@ -350,11 +430,17 @@ describe("spending service", () => {
         vatAmount: replay.vatAmount,
         vendorName: replay.vendorName,
       },
-      { ...context, canMutateAccountLedger: true },
+      {
+        ...context,
+        canMutateAccountLedger: true,
+        emailNotificationsEnabled: true,
+      },
     );
 
     expect(result.created).toBe(false);
     expect(mocks.createFinanceTransactionInConnection).not.toHaveBeenCalled();
+    expect(mocks.listActiveOwnerEmailRecipients).not.toHaveBeenCalled();
+    expect(mocks.enqueueEmailDelivery).not.toHaveBeenCalled();
   });
 
   it("rejects a bank account selected for a cash expense", async () => {

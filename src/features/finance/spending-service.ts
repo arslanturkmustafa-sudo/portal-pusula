@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 import Decimal from "decimal.js";
 import type { Pool } from "mysql2/promise";
 
+import { listActiveOwnerEmailRecipients } from "@/features/account/repository";
 import { findProjectForUpdate } from "@/features/projects/repository";
 import { buildCardInstallmentPlan } from "@/features/finance/card-plan";
 import {
@@ -61,7 +62,9 @@ import {
   updateExpenseInputSchema,
   voidExpenseInputSchema,
 } from "@/features/finance/spending-validation";
+import { buildExpenseCreatedEmail } from "@/features/notifications/email-templates";
 import { appendAuditEvent } from "@/platform/audit/repository";
+import { enqueueEmailDelivery } from "@/platform/email/outbox-email";
 import { withUtcTransaction } from "@/platform/jobs/mysql-transaction";
 import { toUtcDateTime6 } from "@/platform/jobs/time";
 import { assertCanonicalUuid } from "@/platform/validation/canonical-identifiers";
@@ -140,6 +143,7 @@ export type SpendingWriteContext = Readonly<{
   actorId?: string;
   canMutateAccountLedger?: boolean;
   correlationId: string;
+  emailNotificationsEnabled?: boolean;
   now?: Date;
 }>;
 
@@ -665,6 +669,18 @@ export async function createExpense(
         entityType: "expense",
         occurredAtUtc: now,
       });
+      if (context.emailNotificationsEnabled === true) {
+        const recipients = await listActiveOwnerEmailRecipients(connection);
+        const message = buildExpenseCreatedEmail(persisted);
+        for (const recipient of recipients) {
+          await enqueueEmailDelivery(connection, {
+            availableAtUtc: now,
+            idempotencyKey: `expense-created:${persisted.id}:${recipient.id}`,
+            message,
+            recipientAccountId: recipient.id,
+          });
+        }
+      }
     }
     return { created, expense: persisted };
   });

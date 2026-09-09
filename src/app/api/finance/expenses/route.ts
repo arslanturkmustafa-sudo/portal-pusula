@@ -27,6 +27,8 @@ import {
 } from "@/features/finance/spending-route-support";
 import { authenticateAdminRequest } from "@/platform/auth/server-auth";
 import { hasPermission } from "@/platform/auth/permissions";
+import { emailNotificationsEnabled } from "@/platform/config/email-env";
+import { scheduleEmailOutboxDispatch } from "@/platform/email/immediate-dispatch";
 import { correlationIdFromHeaders } from "@/platform/http/correlation-id";
 import { requestLogger } from "@/platform/logging/logger";
 import { safeMySqlErrorCode } from "@/platform/logging/mysql-error-code";
@@ -81,11 +83,16 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if (input.sourceAccountId !== null && !canMutateAccountLedger) {
       return spendingJson({ status: "forbidden" }, 403);
     }
+    const shouldNotify = emailNotificationsEnabled();
     const result = await createExpense(spendingDatabasePool(), input, {
       actorId: spendingActorId(principal),
       canMutateAccountLedger,
       correlationId,
+      emailNotificationsEnabled: shouldNotify,
     });
+    if (result.created && shouldNotify) {
+      scheduleEmailOutboxDispatch(correlationId);
+    }
     return spendingJson(result, result.created ? 201 : 200);
   } catch (error) {
     if (

@@ -28,11 +28,12 @@ Yalnız aşağıdaki environment **adları** geçerli mevcut sözleşmedir:
 - `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`;
 - `READINESS_BEARER_TOKEN`;
 - `CRON_ENDPOINT_ENABLED`, `CRON_BEARER_TOKEN`, `CRON_MIN_INTERVAL_SECONDS`;
+- `EMAIL_NOTIFICATIONS_ENABLED`, `RESEND_API_KEY`, `EMAIL_FROM_ADDRESS`, `EMAIL_FROM_NAME`;
 - isteğe bağlı `LOG_LEVEL`.
 - `ADMIN_EMAIL`, `ADMIN_PASSWORD_HASH`, `SESSION_SECRET`.
 - isteğe bağlı `PORTAL_PUSULA_AUTH_STORAGE_MODE`; tanımsızsa ve canlıda `database`, yalnız veritabanısız uyumluluk/E2E koşusunda exact `environment`.
 
-Gerçek değerler repoya, ZIP'e, checkpoint'e, belgeye, sohbete, CLI argümanına, URL'ye, loga, audit payload'ına veya hata metnine yazılmaz. Connection string üretilmez. Readiness ve cron token'ları farklı olmak zorundadır; cron minimum aralığı yalnız canonical `60..86400` saniye olabilir. Environment eksik veya biçim dışıysa davranış fail-closed'dur.
+Gerçek değerler repoya, ZIP'e, checkpoint'e, belgeye, sohbete, CLI argümanına, URL'ye, loga, audit payload'ına veya hata metnine yazılmaz. Connection string üretilmez. Readiness ve cron token'ları farklı olmak zorundadır; cron minimum aralığı yalnız canonical `60..86400` saniye olabilir. E-posta anahtarı ve alıcı/gönderici adresleri loglanmaz. E-posta environment'ı eksik veya biçim dışıysa bildirim kapalı kalır; finans kaydının oluşmasını engellemez.
 
 Kimlik depolama modu varsayılan olarak DB tabanlıdır. DB yapılandırması eksik veya erişilemez olduğunda environment kimliğine otomatik geri dönüş yapılmaz. Yalnız açıkça seçilen `environment` modu DB'ye dokunmadan eski v1 oturumunu kullanır; bu modda uygulama içi parola yönetimi kapalıdır ve Hostinger canlı ortamında kullanılmaz.
 
