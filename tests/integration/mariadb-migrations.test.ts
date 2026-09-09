@@ -81,7 +81,7 @@ const allMigratedPlatformTables = [
   taxObligationTable,
 ] as const;
 const repositoryRoot = process.cwd();
-const expectedMigrationCount = 20;
+const expectedMigrationCount = 21;
 const migrationLockWaitTimeoutMs = 5_000;
 const migrationLockPollIntervalMs = 25;
 
@@ -354,6 +354,8 @@ async function resetKnownMigrationArtifacts(pool: Pool): Promise<void> {
   await pool.query(`DROP TABLE IF EXISTS \`${taxObligationTable}\``);
   await pool.query(`DROP TABLE IF EXISTS \`${workTaskVisitTable}\``);
   await pool.query(`DROP TABLE IF EXISTS \`${financeLedgerEntryTable}\``);
+  await pool.query(`DROP TABLE IF EXISTS \`${creditCardInstallmentTable}\``);
+  await pool.query(`DROP TABLE IF EXISTS \`${expenseTable}\``);
   await pool.query(`DROP TABLE IF EXISTS \`${financeTransactionTable}\``);
   await pool.query(`DROP TABLE IF EXISTS \`${financeAccountTable}\``);
   await pool.query(`DROP TABLE IF EXISTS \`${loginAttemptThrottleTable}\``);
@@ -362,8 +364,6 @@ async function resetKnownMigrationArtifacts(pool: Pool): Promise<void> {
   );
   await pool.query(`DROP TABLE IF EXISTS \`${partnershipContributionTable}\``);
   await pool.query(`DROP TABLE IF EXISTS \`${partnershipCommissionTable}\``);
-  await pool.query(`DROP TABLE IF EXISTS \`${creditCardInstallmentTable}\``);
-  await pool.query(`DROP TABLE IF EXISTS \`${expenseTable}\``);
   await pool.query(`DROP TABLE IF EXISTS \`${expenseCategoryTable}\``);
   await pool.query(`DROP TABLE IF EXISTS \`${creditCardTable}\``);
   await pool.query(`DROP TABLE IF EXISTS \`${workTaskProjectTable}\``);
