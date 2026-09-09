@@ -52,12 +52,16 @@ export type Expense = Readonly<{
   id: string;
   incurredOn: string;
   installmentCount: number;
+  financeTransactionId: string | null;
   netAmount: string;
   note: string | null;
   paymentMethod: ExpensePaymentMethod;
   projectId: string | null;
   projectName: string | null;
   projectShortCode: string | null;
+  sourceAccountId: string | null;
+  sourceAccountName: string | null;
+  sourceAccountType: "bank" | "cash" | null;
   status: ExpenseStatus;
   totalAmount: string;
   updatedAtUtc: string;
@@ -125,12 +129,16 @@ type ExpenseRow = RowDataPacket & {
   id: string;
   incurred_on: string | Date;
   installment_count: number;
+  finance_transaction_id: string | null;
   net_amount: string;
   note: string | null;
   payment_method: string;
   project_id: string | null;
   project_name: string | null;
   project_short_code: string | null;
+  source_account_id: string | null;
+  source_account_name: string | null;
+  source_account_type: string | null;
   status: string;
   total_amount: string;
   updated_at_utc: string | Date;
@@ -269,12 +277,23 @@ function mapExpense(row: ExpenseRow): Expense {
     id: row.id,
     incurredOn: canonicalDate(row.incurred_on),
     installmentCount: row.installment_count,
+    financeTransactionId: row.finance_transaction_id,
     netAmount: row.net_amount,
     note: row.note,
     paymentMethod: mapPaymentMethod(row.payment_method),
     projectId: row.project_id,
     projectName: row.project_name,
     projectShortCode: row.project_short_code,
+    sourceAccountId: row.source_account_id,
+    sourceAccountName: row.source_account_name,
+    sourceAccountType:
+      row.source_account_type === null
+        ? null
+        : row.source_account_type === "bank" || row.source_account_type === "cash"
+          ? row.source_account_type
+          : (() => {
+              throw new Error("Expense source account type is invalid.");
+            })(),
     status: mapExpenseStatus(row.status),
     totalAmount: row.total_amount,
     updatedAtUtc: canonicalDateTime(row.updated_at_utc),
@@ -315,6 +334,8 @@ const EXPENSE_COLUMNS = `
   e.id, e.client_operation_key, e.project_id,
   p.display_name AS project_name, p.short_code AS project_short_code,
   e.credit_card_id, cc.display_name AS credit_card_name, e.incurred_on,
+  e.source_account_id, fa.display_name AS source_account_name,
+  fa.account_type AS source_account_type, e.finance_transaction_id,
   e.category, e.description, e.vendor_name, e.document_type,
   e.document_number, e.payment_method, e.net_amount, e.vat_amount,
   e.total_amount, e.currency, e.installment_count, e.status, e.void_reason,
@@ -457,6 +478,7 @@ export async function listExpenseRecords(
        FROM expense e
        LEFT JOIN project p ON p.id = e.project_id
        LEFT JOIN credit_card cc ON cc.id = e.credit_card_id
+       LEFT JOIN finance_account fa ON fa.id = e.source_account_id
        ${where}
       ORDER BY e.incurred_on DESC, e.created_at_utc DESC, e.id ASC`,
     values,
@@ -473,6 +495,7 @@ export async function findExpenseForUpdate(
        FROM expense e
        LEFT JOIN project p ON p.id = e.project_id
        LEFT JOIN credit_card cc ON cc.id = e.credit_card_id
+       LEFT JOIN finance_account fa ON fa.id = e.source_account_id
       WHERE e.id = ?
       FOR UPDATE`,
     [id],
@@ -489,6 +512,7 @@ export async function findExpenseByOperationKeyForUpdate(
        FROM expense e
        LEFT JOIN project p ON p.id = e.project_id
        LEFT JOIN credit_card cc ON cc.id = e.credit_card_id
+       LEFT JOIN finance_account fa ON fa.id = e.source_account_id
       WHERE e.client_operation_key = ?
       FOR UPDATE`,
     [clientOperationKey],
@@ -502,18 +526,21 @@ export async function insertExpenseRecordIdempotently(
 ): Promise<Expense> {
   await connection.execute<ResultSetHeader>(
     `INSERT INTO expense
-       (id, client_operation_key, project_id, credit_card_id, incurred_on,
+       (id, client_operation_key, project_id, credit_card_id, source_account_id,
+        finance_transaction_id, incurred_on,
         category, description, vendor_name, document_type, document_number,
         payment_method, net_amount, vat_amount, total_amount, currency,
         installment_count, status, void_reason, voided_at_utc, note, version,
         created_at_utc, updated_at_utc)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON DUPLICATE KEY UPDATE id = id`,
     [
       expense.id,
       expense.clientOperationKey,
       expense.projectId,
       expense.creditCardId,
+      expense.sourceAccountId,
+      expense.financeTransactionId,
       expense.incurredOn,
       expense.category,
       expense.description,
@@ -550,7 +577,8 @@ export async function updateExpenseRecord(
 ): Promise<boolean> {
   const [result] = await connection.execute<ResultSetHeader>(
     `UPDATE expense
-        SET project_id = ?, credit_card_id = ?, incurred_on = ?, category = ?,
+        SET project_id = ?, credit_card_id = ?, source_account_id = ?,
+            finance_transaction_id = ?, incurred_on = ?, category = ?,
             description = ?, vendor_name = ?, document_type = ?,
             document_number = ?, payment_method = ?, net_amount = ?,
             vat_amount = ?, total_amount = ?, currency = ?,
@@ -560,6 +588,8 @@ export async function updateExpenseRecord(
     [
       expense.projectId,
       expense.creditCardId,
+      expense.sourceAccountId,
+      expense.financeTransactionId,
       expense.incurredOn,
       expense.category,
       expense.description,

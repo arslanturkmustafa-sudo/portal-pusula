@@ -18,7 +18,9 @@ export default async function ExpensesPage() {
       <ExpensesPageWorkspace
         capabilities={{
           canReadAudit: can("audit.read"),
+          canReadAccounts: can("finance.accounts.read"),
           canReverseExpenses: can("finance.expenses.reverse"),
+          canWriteAccounts: can("finance.accounts.write"),
           canWriteExpenses: can("finance.expenses.write"),
         }}
       />

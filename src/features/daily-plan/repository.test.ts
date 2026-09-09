@@ -49,9 +49,11 @@ describe("daily agenda repository", () => {
           customer_code: "ONCU",
           customer_id: "10000000-0000-4000-8000-000000000001",
           customer_name: "Öncü Üretim",
+          delivered_on: null,
           internal_duration_minutes: 120,
           internal_planned_at_utc: new Date("2026-09-02T06:00:00.000Z"),
           location_label: "Merkez ofis",
+          resolution_note: null,
           resolution_status: "planned",
           visit_id: "30000000-0000-4000-8000-000000000001",
         },
@@ -61,10 +63,12 @@ describe("daily agenda repository", () => {
           customer_code: "ROTA",
           customer_id: "10000000-0000-4000-8000-000000000002",
           customer_name: "Rota Teknoloji",
+          delivered_on: "2026-09-03",
           internal_duration_minutes: null,
           internal_planned_at_utc: null,
           location_label: null,
-          resolution_status: "makeup_pending",
+          resolution_note: "Yerinde kontrol tamamlandı.",
+          resolution_status: "completed",
           visit_id: "30000000-0000-4000-8000-000000000002",
         },
       ],
@@ -82,6 +86,8 @@ describe("daily agenda repository", () => {
     expect(sql).toContain("FROM monthly_visit_commitment AS visit");
     expect(sql).toContain("INNER JOIN consulting_contract AS contract");
     expect(sql).toContain("INNER JOIN customer");
+    expect(sql).toContain("visit.delivered_on");
+    expect(sql).toContain("visit.resolution_note");
     expect(sql).toContain("WHERE visit.committed_on BETWEEN ? AND ?");
     expect(sql).toMatch(
       /ORDER BY visit\.committed_on ASC,[\s\S]*visit\.internal_planned_at_utc IS NULL ASC,[\s\S]*visit\.internal_planned_at_utc ASC,[\s\S]*visit\.id ASC/u,
@@ -95,9 +101,11 @@ describe("daily agenda repository", () => {
         customerCode: "ONCU",
         customerId: "10000000-0000-4000-8000-000000000001",
         customerName: "Öncü Üretim",
+        deliveredOn: null,
         internalDurationMinutes: 120,
         internalPlannedAtUtc: "2026-09-02 06:00:00.000000",
         locationLabel: "Merkez ofis",
+        resolutionNote: null,
         resolutionStatus: "planned",
         visitId: "30000000-0000-4000-8000-000000000001",
       },
@@ -107,10 +115,12 @@ describe("daily agenda repository", () => {
         customerCode: "ROTA",
         customerId: "10000000-0000-4000-8000-000000000002",
         customerName: "Rota Teknoloji",
+        deliveredOn: "2026-09-03",
         internalDurationMinutes: null,
         internalPlannedAtUtc: null,
         locationLabel: null,
-        resolutionStatus: "makeup_pending",
+        resolutionNote: "Yerinde kontrol tamamlandı.",
+        resolutionStatus: "completed",
         visitId: "30000000-0000-4000-8000-000000000002",
       },
     ]);

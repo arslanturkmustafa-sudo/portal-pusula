@@ -10,12 +10,23 @@ const mocks = vi.hoisted(() => {
 });
 vi.mock("@/features/finance", () => ({
   CreditCardInactiveError: class extends Error {},
+  ExpenseAccountPermissionError: class extends Error {},
   ExpenseAlreadyVoidedError: class extends Error {},
   ExpensePlanLockedError: mocks.ExpensePlanLockedError,
+  ExpenseSourceAccountTypeError: class extends Error {},
+  FinanceAccountInactiveError: class extends Error {},
+  FinanceAccountNotFoundError: class extends Error {},
+  FinanceTransactionAlreadyReversedError: class extends Error {},
+  FinanceTransactionBeforeAccountOpeningError: class extends Error {},
+  FinanceTransactionFutureDateError: class extends Error {},
   SpendingResourceNotFoundError: class extends Error {},
   SpendingVersionConflictError: class extends Error {},
   updateExpense: mocks.update,
   updateExpenseInputSchema: { parse: mocks.parse },
+  voidExpense: mocks.update,
+  voidExpenseInputSchema: {
+    safeParse: (value: unknown) => ({ data: value, success: true }),
+  },
 }));
 vi.mock("@/platform/auth/server-auth", () => ({ authenticateAdminRequest: mocks.authenticate }));
 vi.mock("@/platform/config/readiness-env", () => ({ getDatabaseProbeEnvironment: () => ({}) }));

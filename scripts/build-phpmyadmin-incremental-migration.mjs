@@ -39,6 +39,8 @@ const CUSTOMER_PROJECTS_PARTNERSHIP_MIGRATION_TAG =
 const WORK_TASK_VISIT_MIGRATION_TAG = "0017_work_task_visit";
 const PLANNING_EXPENSE_CATEGORIES_MIGRATION_TAG =
   "0018_planning_expense_categories";
+const EXPENSE_ACCOUNT_LEDGER_MIGRATION_TAG =
+  "0020_expense_account_ledger";
 
 const LEGACY_EXPENSE_CATEGORY_CODES = Object.freeze([
   "rent",
@@ -1291,6 +1293,25 @@ function prerequisitePredicates(statements, migrationTag) {
       statements,
     )) {
       predicates.add(predicate);
+    }
+  }
+
+  if (migrationTag === EXPENSE_ACCOUNT_LEDGER_MIGRATION_TAG) {
+    predicates.add(exactTableStorageAndDefaultPredicate("expense"));
+    predicates.add(
+      exactVarcharColumnPredicate({
+        characterSet: "ascii",
+        collation: "ascii_bin",
+        columnName: "payment_method",
+        length: 24,
+        nullable: false,
+        tableName: "expense",
+      }),
+    );
+    for (const tableName of ["finance_account", "finance_transaction"]) {
+      predicates.add(exactTableStorageAndDefaultPredicate(tableName));
+      predicates.add(exactCanonicalParentIdPredicate(tableName));
+      predicates.add(exactSingleColumnPrimaryKeyPredicate(tableName));
     }
   }
 

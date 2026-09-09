@@ -482,7 +482,7 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
           sessionRestored: true,
         });
         expect(await tableNames(pool)).toHaveLength(31);
-        expect(await journalRows(pool)).toHaveLength(20);
+        expect(await journalRows(pool)).toHaveLength(21);
       } catch (error) {
         reusable = false;
         throw error;
@@ -660,10 +660,10 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
         tablesAfter,
       }).toEqual({
         diagnostics: {
-          application_columns: 347,
-          checks: 166,
-          foreign_keys: 35,
-          indexes: 114,
+          application_columns: 349,
+          checks: 167,
+          foreign_keys: 37,
+          indexes: 116,
           matching_application_tables: 30,
           matching_journal_tables: 1,
           sql_mode: expect.any(String),
@@ -707,7 +707,7 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
           "work_task_project",
           "work_task_visit",
         ],
-        journalCount: 20,
+        journalCount: 21,
       });
 
       await expect(
@@ -721,7 +721,7 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
 
       const bundleSchema = await schemaDefinitionSnapshot(pool);
       await expect(runMigration()).resolves.toBeUndefined();
-      expect(await journalRows(pool)).toHaveLength(20);
+      expect(await journalRows(pool)).toHaveLength(21);
       expect(await schemaDefinitionSnapshot(pool)).toEqual(bundleSchema);
 
       await resetKnownTables(pool);

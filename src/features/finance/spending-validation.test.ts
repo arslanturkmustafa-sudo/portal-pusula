@@ -25,6 +25,7 @@ const expense = {
   note: null,
   paymentMethod: "bank_transfer" as const,
   projectId: recordId,
+  sourceAccountId: recordId,
   vatAmount: "20",
   vendorName: "Örnek Teknoloji",
 };

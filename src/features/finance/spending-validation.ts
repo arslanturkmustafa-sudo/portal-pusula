@@ -129,6 +129,7 @@ const expenseFields = {
   note: nullableTextSchema(2000).default(null),
   paymentMethod: expensePaymentMethodSchema,
   projectId: nullableUuidSchema.default(null),
+  sourceAccountId: nullableUuidSchema.default(null),
   vatAmount: moneySchema(false).default("0.0000"),
   vendorName: nullableTextSchema(191).default(null),
 } as const;
@@ -141,6 +142,7 @@ function validateExpenseShape(
     installmentCount: number;
     netAmount: string;
     paymentMethod: z.infer<typeof expensePaymentMethodSchema>;
+    sourceAccountId: string | null;
     vatAmount: string;
   }>,
   context: z.RefinementCtx,
@@ -173,6 +175,15 @@ function validateExpenseShape(
       code: "custom",
       message: "Taksit yalnız kredi kartı giderinde kullanılabilir.",
       path: ["installmentCount"],
+    });
+  }
+  const usesDirectAccount =
+    value.paymentMethod === "cash" || value.paymentMethod === "bank_transfer";
+  if (usesDirectAccount !== (value.sourceAccountId !== null)) {
+    context.addIssue({
+      code: "custom",
+      message: "Nakit veya banka ödemesinde kaynak hesap seçimi zorunludur.",
+      path: ["sourceAccountId"],
     });
   }
   if (value.documentType === "none" && value.documentNumber !== null) {
@@ -217,6 +228,14 @@ export const updateExpenseInputSchema = z
       });
     }
   });
+
+export const voidExpenseInputSchema = z
+  .object({
+    status: z.literal("voided"),
+    version: z.number().int().min(1).max(4_294_967_294),
+    voidReason: z.string().trim().min(1).max(2000),
+  })
+  .strict();
 
 export const expenseListFilterSchema = z
   .object({
@@ -296,6 +315,7 @@ export type UpdateCreditCardInput = z.infer<
 >;
 export type CreateExpenseInput = z.infer<typeof createExpenseInputSchema>;
 export type UpdateExpenseInput = z.infer<typeof updateExpenseInputSchema>;
+export type VoidExpenseInput = z.infer<typeof voidExpenseInputSchema>;
 export type ExpenseListFilter = z.infer<typeof expenseListFilterSchema>;
 export type InstallmentListFilter = z.infer<
   typeof installmentListFilterSchema

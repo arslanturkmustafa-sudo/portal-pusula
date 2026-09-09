@@ -48,6 +48,14 @@ type CreditCardDto = Readonly<{
   version: number;
 }>;
 
+type FinanceAccountDto = Readonly<{
+  accountType: "bank" | "cash";
+  bankName: string | null;
+  displayName: string;
+  id: string;
+  status: "active" | "inactive";
+}>;
+
 type ExpenseDto = Readonly<{
   category: ExpenseCategory;
   createdAtUtc?: string;
@@ -59,12 +67,16 @@ type ExpenseDto = Readonly<{
   id: string;
   incurredOn: string;
   installmentCount: number;
+  financeTransactionId?: string | null;
   netAmount: string;
   note: string | null;
   paymentMethod: PaymentMethod;
   projectId: string | null;
   projectName: string | null;
   projectShortCode: string | null;
+  sourceAccountId?: string | null;
+  sourceAccountName?: string | null;
+  sourceAccountType?: "bank" | "cash" | null;
   status: ExpenseStatus;
   totalAmount: string;
   updatedAtUtc?: string;
@@ -86,6 +98,7 @@ type ExpenseDraft = {
   note: string;
   paymentMethod: PaymentMethod;
   projectId: string;
+  sourceAccountId: string;
   vatAmount: string;
   vendorName: string;
 };
@@ -200,7 +213,7 @@ function liveTotal(netAmount: string, vatAmount: string): string {
   }
 }
 
-function emptyDraft(): ExpenseDraft {
+function emptyDraft(canUseAccountLedger = true): ExpenseDraft {
   return {
     category: "other",
     creditCardId: "",
@@ -211,8 +224,9 @@ function emptyDraft(): ExpenseDraft {
     installmentCount: "1",
     netAmount: "",
     note: "",
-    paymentMethod: "bank_transfer",
+    paymentMethod: canUseAccountLedger ? "bank_transfer" : "other",
     projectId: "",
+    sourceAccountId: "",
     vatAmount: "0",
     vendorName: "",
   };
@@ -231,6 +245,7 @@ function draftFromExpense(expense: ExpenseDto, copy: boolean): ExpenseDraft {
     note: expense.note ?? "",
     paymentMethod: expense.paymentMethod,
     projectId: expense.projectId ?? "",
+    sourceAccountId: expense.sourceAccountId ?? "",
     vatAmount: editableMoney(expense.vatAmount),
     vendorName: expense.vendorName ?? "",
   };
@@ -259,6 +274,10 @@ function expenseBody(draft: ExpenseDraft) {
     note: nullable(draft.note),
     paymentMethod: draft.paymentMethod,
     projectId: nullable(draft.projectId),
+    sourceAccountId:
+      draft.paymentMethod === "cash" || draft.paymentMethod === "bank_transfer"
+        ? nullable(draft.sourceAccountId)
+        : null,
     vatAmount: canonicalMoneyInput(draft.vatAmount),
     vendorName: nullable(draft.vendorName),
   };
@@ -271,14 +290,18 @@ function canonicalSearch(value: string): string {
 type ExpensesWorkspaceProps = Readonly<{
   capabilities?: Readonly<{
     canReadAudit: boolean;
+    canReadAccounts?: boolean;
     canReverseExpenses: boolean;
+    canWriteAccounts?: boolean;
     canWriteExpenses: boolean;
   }>;
 }>;
 
 const fullExpenseCapabilities: NonNullable<ExpensesWorkspaceProps["capabilities"]> = {
   canReadAudit: true,
+  canReadAccounts: true,
   canReverseExpenses: true,
+  canWriteAccounts: true,
   canWriteExpenses: true,
 };
 
@@ -287,6 +310,7 @@ export function ExpensesWorkspace({
 }: ExpensesWorkspaceProps = {}) {
   const [projects, setProjects] = useState<readonly ProjectDto[]>([]);
   const [cards, setCards] = useState<readonly CreditCardDto[]>([]);
+  const [accounts, setAccounts] = useState<readonly FinanceAccountDto[]>([]);
   const [categories, setCategories] = useState<readonly ExpenseCategoryDto[]>(
     fallbackCategoryDefinitions,
   );
@@ -295,7 +319,11 @@ export function ExpensesWorkspace({
   const [requestRevision, setRequestRevision] = useState(0);
   const [editorMode, setEditorMode] = useState<EditorMode>(null);
   const [editingExpense, setEditingExpense] = useState<ExpenseDto | null>(null);
-  const [draft, setDraft] = useState<ExpenseDraft>(() => emptyDraft());
+  const canUseAccountLedger =
+    capabilities.canReadAccounts === true && capabilities.canWriteAccounts === true;
+  const [draft, setDraft] = useState<ExpenseDraft>(() =>
+    emptyDraft(canUseAccountLedger),
+  );
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [formError, setFormError] = useState<string | null>(null);
   const [announcement, setAnnouncement] = useState("");
@@ -342,6 +370,20 @@ export function ExpensesWorkspace({
     if (!cardsResponse.ok) throw new Error("Cards are unavailable.");
     const cardPayload = (await cardsResponse.json()) as { cards?: CreditCardDto[] };
 
+    let accountPayload: { accounts?: FinanceAccountDto[] } = { accounts: [] };
+    if (capabilities.canReadAccounts) {
+      const accountsResponse = await fetch("/api/finance/accounts", {
+        cache: "no-store",
+        credentials: "same-origin",
+        signal,
+      });
+      if (accountsResponse.status === 401) return redirectToLogin();
+      if (!accountsResponse.ok) throw new Error("Accounts are unavailable.");
+      accountPayload = (await accountsResponse.json()) as {
+        accounts?: FinanceAccountDto[];
+      };
+    }
+
     const categoriesResponse = await fetch("/api/finance/expense-categories", {
       cache: "no-store",
       credentials: "same-origin",
@@ -367,6 +409,7 @@ export function ExpensesWorkspace({
     if (
       !Array.isArray(projectPayload.projects) ||
       !Array.isArray(cardPayload.cards) ||
+      !Array.isArray(accountPayload.accounts) ||
       !Array.isArray(categoryPayload.categories) ||
       !Array.isArray(expensePayload.expenses)
     ) {
@@ -374,10 +417,11 @@ export function ExpensesWorkspace({
     }
     setProjects(projectPayload.projects);
     setCards(cardPayload.cards);
+    setAccounts(accountPayload.accounts);
     setCategories(categoryPayload.categories);
     setExpenses(expensePayload.expenses);
     setLoadState("ready");
-  }, []);
+  }, [capabilities.canReadAccounts]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -387,6 +431,7 @@ export function ExpensesWorkspace({
         if (error instanceof DOMException && error.name === "AbortError") return;
         setProjects([]);
         setCards([]);
+        setAccounts([]);
         setCategories(fallbackCategoryDefinitions);
         setExpenses([]);
         setLoadState("error");
@@ -404,6 +449,11 @@ export function ExpensesWorkspace({
   const activeCards = useMemo(
     () => cards.filter((card) => card.status === "active"),
     [cards],
+  );
+
+  const activeAccounts = useMemo(
+    () => accounts.filter((account) => account.status === "active"),
+    [accounts],
   );
 
   const categoryLabels = useMemo(
@@ -463,7 +513,7 @@ export function ExpensesWorkspace({
   }
 
   function openCreate(): void {
-    const nextDraft = emptyDraft();
+    const nextDraft = emptyDraft(canUseAccountLedger);
     setDraft(
       pendingCategoryCode === null
         ? nextDraft
@@ -493,6 +543,17 @@ export function ExpensesWorkspace({
         !activeCards.some((card) => card.id === copied.creditCardId)
           ? ""
           : copied.creditCardId,
+      sourceAccountId:
+        (copied.paymentMethod === "cash" || copied.paymentMethod === "bank_transfer") &&
+        (!canUseAccountLedger ||
+          !activeAccounts.some(
+            (account) =>
+              account.id === copied.sourceAccountId &&
+              account.accountType ===
+                (copied.paymentMethod === "cash" ? "cash" : "bank"),
+          ))
+          ? ""
+          : copied.sourceAccountId,
     });
     setEditingExpense(null);
     setEditorMode("copy");
@@ -602,6 +663,17 @@ export function ExpensesWorkspace({
       setFormError("Kredi kartıyla ödenen gider için kart seçin.");
       return;
     }
+    if (
+      (body.paymentMethod === "cash" || body.paymentMethod === "bank_transfer") &&
+      body.sourceAccountId === null
+    ) {
+      setFormError(
+        body.paymentMethod === "cash"
+          ? "Nakit giderin düşeceği kasayı seçin."
+          : "Banka giderinin düşeceği hesabı seçin.",
+      );
+      return;
+    }
 
     const existing = editorMode === "edit" ? editingExpense : null;
     setSaveState("saving");
@@ -647,6 +719,16 @@ export function ExpensesWorkspace({
         const conflictMessage = {
           credit_card_inactive:
             "Seçili kart pasif. Aktif bir kart seçin veya ödeme yöntemini değiştirin.",
+          finance_account_inactive:
+            "Seçili kasa veya banka hesabı pasif. Aktif bir hesap seçin.",
+          finance_account_not_found:
+            "Seçili kasa veya banka hesabı artık bulunamıyor.",
+          finance_account_type_mismatch:
+            "Nakit ödeme için kasa, banka ödemesi için banka hesabı seçin.",
+          finance_transaction_before_account_opening:
+            "Gider tarihi seçili hesabın açılış tarihinden önce olamaz.",
+          finance_transaction_future_date:
+            "Nakit veya banka hesabından çıkan gider gelecekteki bir tarihe kaydedilemez.",
           expense_already_voided: "İptal edilmiş gider artık düzenlenemez.",
           expense_plan_locked:
             "Bu gider ödeme planına işlendiği için kart, taksit veya tutar bilgileri değiştirilemez.",
@@ -802,7 +884,12 @@ export function ExpensesWorkspace({
             <label>
               <span>Gider tarihi</span>
               <input
-                max="9999-12-31"
+                max={
+                  draft.paymentMethod === "cash" ||
+                  draft.paymentMethod === "bank_transfer"
+                    ? istanbulToday()
+                    : "9999-12-31"
+                }
                 min="1000-01-01"
                 required
                 type="date"
@@ -888,11 +975,21 @@ export function ExpensesWorkspace({
                     installmentCount:
                       paymentMethod === "credit_card" ? draft.installmentCount : "1",
                     paymentMethod,
+                    sourceAccountId: "",
                   });
                 }}
               >
                 {Object.entries(paymentLabels).map(([value, label]) => (
-                  <option key={value} value={value}>{label}</option>
+                  <option
+                    disabled={
+                      (value === "cash" || value === "bank_transfer") &&
+                      !canUseAccountLedger
+                    }
+                    key={value}
+                    value={value}
+                  >
+                    {label}
+                  </option>
                 ))}
               </select>
             </label>
@@ -932,6 +1029,50 @@ export function ExpensesWorkspace({
                   />
                 </label>
               </>
+            ) : null}
+            {draft.paymentMethod === "cash" ||
+            draft.paymentMethod === "bank_transfer" ? (
+              <label>
+                <span>
+                  {draft.paymentMethod === "cash"
+                    ? "Ödemenin çıktığı kasa"
+                    : "Ödemenin çıktığı banka hesabı"}
+                </span>
+                <select
+                  disabled={!canUseAccountLedger}
+                  required
+                  value={draft.sourceAccountId}
+                  onChange={(event) =>
+                    updateDraft({ sourceAccountId: event.target.value })
+                  }
+                >
+                  <option value="">Hesap seçin</option>
+                  {editorMode === "edit" &&
+                  draft.sourceAccountId !== "" &&
+                  !activeAccounts.some(
+                    (account) => account.id === draft.sourceAccountId,
+                  ) ? (
+                    <option value={draft.sourceAccountId}>
+                      {editingExpense?.sourceAccountName ?? "Mevcut hesap"} (pasif)
+                    </option>
+                  ) : null}
+                  {activeAccounts
+                    .filter(
+                      (account) =>
+                        account.accountType ===
+                        (draft.paymentMethod === "cash" ? "cash" : "bank"),
+                    )
+                    .map((account) => (
+                      <option key={account.id} value={account.id}>
+                        {account.displayName}
+                        {account.bankName === null ? "" : ` · ${account.bankName}`}
+                      </option>
+                    ))}
+                </select>
+                {!canUseAccountLedger ? (
+                  <small>Kasa/banka okuma ve düzenleme yetkisi gereklidir.</small>
+                ) : null}
+              </label>
             ) : null}
             <label>
               <span>Belge türü</span>
@@ -1077,6 +1218,9 @@ export function ExpensesWorkspace({
                 <td data-label="Ödeme">
                   {paymentLabels[expense.paymentMethod]}
                   {expense.creditCardName === null ? "" : ` · ${expense.creditCardName}`}
+                  {expense.sourceAccountName == null
+                    ? ""
+                    : ` · ${expense.sourceAccountName}`}
                   {expense.installmentCount > 1 ? ` · ${expense.installmentCount} taksit` : ""}
                 </td>
                 <td data-label="Net">{formatMoney(expense.netAmount)}</td>
@@ -1091,7 +1235,12 @@ export function ExpensesWorkspace({
                       <>
                         <button
                           aria-label={`${expense.description} giderini düzenle`}
-                          disabled={expense.status === "voided"}
+                          disabled={
+                            expense.status === "voided" ||
+                            ((expense.paymentMethod === "cash" ||
+                              expense.paymentMethod === "bank_transfer") &&
+                              !canUseAccountLedger)
+                          }
                           type="button"
                           onClick={() => openEdit(expense)}
                         >
@@ -1107,7 +1256,15 @@ export function ExpensesWorkspace({
                       </>
                     ) : null}
                     <RecordLifecycleControls
-                      actions={capabilities.canReverseExpenses && expense.status === "active" ? [{
+                      actions={
+                        capabilities.canReverseExpenses &&
+                        expense.status === "active" &&
+                        (!(
+                          expense.paymentMethod === "cash" ||
+                          expense.paymentMethod === "bank_transfer"
+                        ) ||
+                          canUseAccountLedger)
+                          ? [{
                         description: "Gideri silmeden finansal toplamlardan çıkarır ve gerekçeli iz bırakır.",
                         id: "void",
                         label: "Geçersiz kıl",
@@ -1117,7 +1274,9 @@ export function ExpensesWorkspace({
                           version: expense.version,
                         },
                         tone: "danger",
-                      }] : []}
+                            }]
+                          : []
+                      }
                       canReadHistory={capabilities.canReadAudit}
                       entityId={expense.id}
                       entityLabel={expense.description}

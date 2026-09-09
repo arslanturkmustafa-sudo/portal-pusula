@@ -5,6 +5,7 @@ import {
   FinanceAccountNotFoundError,
   FinanceTransactionAlreadyReversedError,
   FinanceTransactionIdempotencyConflictError,
+  FinanceTransactionManagedByExpenseError,
   FinanceTransactionNotFoundError,
   FinanceTransactionReversalNotAllowedError,
   reverseFinanceTransaction,
@@ -74,6 +75,9 @@ export async function POST(
     }
     if (error instanceof FinanceTransactionReversalNotAllowedError) {
       return spendingJson({ status: "reversal_not_allowed" }, 409);
+    }
+    if (error instanceof FinanceTransactionManagedByExpenseError) {
+      return spendingJson({ status: "expense_managed_transaction" }, 409);
     }
     if (error instanceof FinanceTransactionIdempotencyConflictError) {
       return spendingJson({ status: "idempotency_conflict" }, 409);

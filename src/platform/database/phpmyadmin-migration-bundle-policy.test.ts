@@ -117,8 +117,8 @@ describe.sequential("clean-only phpMyAdmin migration bundle policy", () => {
     expect(second.summary).toEqual(first.summary);
     expect(second.sql).toBe(first.sql);
     expect(second.manifestText).toBe(first.manifestText);
-    expect(first.summary.migrationCount).toBe(20);
-    expect(first.summary.statementCount).toBe(206);
+    expect(first.summary.migrationCount).toBe(21);
+    expect(first.summary.statementCount).toBe(214);
     expect(first.summary.sqlBytes).toBe(Buffer.byteLength(first.sql));
     expect(first.summary.sqlSha256).toBe(
       createHash("sha256").update(first.sql).digest("hex"),
@@ -307,7 +307,15 @@ describe.sequential("clean-only phpMyAdmin migration bundle policy", () => {
         tableName: "expense",
       },
       {
+        name: "fk_expense_finance_transaction",
+        tableName: "expense",
+      },
+      {
         name: "fk_expense_project",
+        tableName: "expense",
+      },
+      {
+        name: "fk_expense_source_account",
         tableName: "expense",
       },
       {
@@ -581,10 +589,16 @@ describe.sequential("clean-only phpMyAdmin migration bundle policy", () => {
         sqlFileName: "0019_tax_obligations.sql",
         statementCount: 4,
       },
+      {
+        createdAt: 1788938626518,
+        hash: "a95bed1c3e8f65d71a5063423ceefbfc676678c03699e2d89d098f1b31811226",
+        sqlFileName: "0020_expense_account_ledger.sql",
+        statementCount: 8,
+      },
     ]);
     expect(
       manifest.migrations.flatMap((migration) => migration.statementHashes),
-    ).toHaveLength(206);
+    ).toHaveLength(214);
     expect(
       manifest.migrations
         .flatMap((migration) => migration.statementHashes)

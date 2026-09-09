@@ -64,6 +64,8 @@ const financeAccountsLedgerMigrationTag = "0016_finance_accounts_ledger";
 const workTaskVisitMigrationTag = "0017_work_task_visit";
 const planningExpenseCategoriesMigrationTag =
   "0018_planning_expense_categories";
+const taxObligationsMigrationTag = "0019_tax_obligations";
+const expenseAccountLedgerMigrationTag = "0020_expense_account_ledger";
 const incremental0011Backfills = untyped0011Backfills as {
   consultingContract: string;
   customerProject: string;
@@ -471,6 +473,28 @@ describe.sequential("phpMyAdmin incremental migration bundle policy", () => {
       },
       statementCount: 9,
     },
+    {
+      expectedJournalCount: 19,
+      expectedPreviousTag: planningExpenseCategoriesMigrationTag,
+      migrationTag: taxObligationsMigrationTag,
+      requiredTarget: {
+        name: "tax_obligation",
+        tableName: "tax_obligation",
+        type: "create-table",
+      },
+      statementCount: 4,
+    },
+    {
+      expectedJournalCount: 20,
+      expectedPreviousTag: taxObligationsMigrationTag,
+      migrationTag: expenseAccountLedgerMigrationTag,
+      requiredTarget: {
+        name: "source_account_id",
+        tableName: "expense",
+        type: "add-column",
+      },
+      statementCount: 8,
+    },
   ])(
     "builds deterministic guarded $migrationTag artifact",
     async ({
@@ -518,6 +542,103 @@ describe.sequential("phpMyAdmin incremental migration bundle policy", () => {
       }
     },
   );
+
+  it("allows only the exact 0020 expense-ledger DDL and guards both parent identities", async () => {
+    const migrationSql = await readFile(
+      resolve(
+        projectRoot,
+        "drizzle",
+        `${expenseAccountLedgerMigrationTag}.sql`,
+      ),
+      "utf8",
+    );
+    const migrationStatements = migrationSql
+      .split(/--> statement-breakpoint\s*/gu)
+      .map((statement) => statement.trim().replace(/;$/u, ""));
+    const artifact = await buildCurrentIncremental(
+      expenseAccountLedgerMigrationTag,
+      await temporaryOutputDirectory(),
+    );
+    const initialGuard = artifact.sql.slice(
+      0,
+      artifact.sql.indexOf("SET @pp_candidate_sql = 0x"),
+    );
+
+    expect(
+      migrationStatements.map((statement) =>
+        analyzeIncrementalMigrationStatement(
+          statement,
+          expenseAccountLedgerMigrationTag,
+        ),
+      ),
+    ).toHaveLength(8);
+    expect(artifact.manifest.migration).toMatchObject({
+      createdAt: 1788938626518,
+      hash: "a95bed1c3e8f65d71a5063423ceefbfc676678c03699e2d89d098f1b31811226",
+      tag: expenseAccountLedgerMigrationTag,
+    });
+    expect(artifact.manifest.targetObjects).toEqual(
+      expect.arrayContaining([
+        {
+          name: "finance_transaction_id",
+          tableName: "expense",
+          type: "add-column",
+        },
+        {
+          name: "uq_expense_finance_transaction",
+          tableName: "expense",
+          type: "create-index",
+        },
+        {
+          name: "chk_expense_account_movement_shape",
+          tableName: "expense",
+          type: "check",
+        },
+        {
+          name: "fk_expense_source_account",
+          tableName: "expense",
+          type: "foreign-key",
+        },
+        {
+          name: "fk_expense_finance_transaction",
+          tableName: "expense",
+          type: "foreign-key",
+        },
+      ]),
+    );
+    expect(initialGuard).toContain(
+      "TABLE_NAME = 'expense' AND COLUMN_NAME = 'payment_method' AND DATA_TYPE = 'varchar' AND COLUMN_TYPE = 'varchar(24)'",
+    );
+    for (const tableName of ["finance_account", "finance_transaction"]) {
+      expect(initialGuard).toContain(
+        `TABLE_NAME = '${tableName}' AND COLUMN_NAME = 'id' AND DATA_TYPE = 'char' AND COLUMN_TYPE = 'char(36)'`,
+      );
+      expect(initialGuard).toContain(
+        `TABLE_NAME = '${tableName}' AND CONSTRAINT_NAME = 'PRIMARY' AND CONSTRAINT_TYPE = 'PRIMARY KEY') = 1`,
+      );
+    }
+
+    const movementCheck = migrationStatements.find((statement) =>
+      statement.includes("chk_expense_account_movement_shape"),
+    );
+    const sourceForeignKey = migrationStatements.find((statement) =>
+      statement.includes("fk_expense_source_account"),
+    );
+    expect(movementCheck).toBeDefined();
+    expect(sourceForeignKey).toBeDefined();
+    expect(() =>
+      analyzeIncrementalMigrationStatement(
+        movementCheck!.replace("BINARY 'bank_transfer'", "BINARY 'other'"),
+        expenseAccountLedgerMigrationTag,
+      ),
+    ).toThrow();
+    expect(() =>
+      analyzeIncrementalMigrationStatement(
+        sourceForeignKey!.replace("`finance_account`", "`user_account`"),
+        expenseAccountLedgerMigrationTag,
+      ),
+    ).toThrow();
+  });
 
   it("guards the exact 0018 category catalog, seed, and expense ownership", async () => {
     const first = await buildCurrentIncremental(

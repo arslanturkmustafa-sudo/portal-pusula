@@ -9,6 +9,7 @@ import {
   type DailyPlanMonthTask,
   type DailyPlanMonthVisit,
 } from "./daily-plan-month-grid";
+import { DailyPlanCompletedVisitTasks } from "./daily-plan-completed-visit-tasks";
 import { DailyPlanDayTasks } from "./daily-plan-day-tasks";
 import { DailyPlanVisitCompletion } from "./daily-plan-visit-completion";
 
@@ -24,9 +25,11 @@ type DailyPlanItem = Readonly<{
   customerCode: string;
   customerId: string;
   customerName: string;
+  deliveredOn: string | null;
   internalDurationMinutes: number | null;
   internalPlannedAtUtc: string | null;
   locationLabel: string | null;
+  resolutionNote: string | null;
   resolutionStatus: VisitResolutionStatus;
   visitId: string;
 }>;
@@ -206,13 +209,20 @@ function VisitDetails({
   canWriteVisits,
   item,
   onCompleted,
+  onTasksSaved,
+  tasks,
 }: Readonly<{
   canWriteTasks: boolean;
   canWriteVisits: boolean;
   item: DailyPlanItem;
   onCompleted: (visitId: string) => void;
+  onTasksSaved: (visitId: string) => void;
+  tasks: readonly DailyPlanMonthTask[];
 }>) {
   const canComplete = canCompleteVisit(canWriteVisits, item);
+  const completedVisitTasks = tasks.filter(
+    (task) => task.linkedVisitId === item.visitId && task.status === "done",
+  );
 
   return (
     <article
@@ -251,6 +261,20 @@ function VisitDetails({
           }}
         />
       ) : null}
+      {item.resolutionStatus === "completed" && item.deliveredOn !== null ? (
+        <DailyPlanCompletedVisitTasks
+          canAppend={canWriteVisits && canWriteTasks}
+          onSaved={onTasksSaved}
+          target={{
+            contractId: item.contractId,
+            customerId: item.customerId,
+            deliveredOn: item.deliveredOn,
+            resolutionNote: item.resolutionNote,
+            visitId: item.visitId,
+          }}
+          tasks={completedVisitTasks}
+        />
+      ) : null}
     </article>
   );
 }
@@ -261,6 +285,7 @@ function PlanDaySection({
   date,
   items,
   onCompleted,
+  onTasksSaved,
   tasks,
 }: Readonly<{
   canWriteTasks: boolean;
@@ -268,6 +293,7 @@ function PlanDaySection({
   date: string;
   items: readonly DailyPlanItem[];
   onCompleted: (visitId: string) => void;
+  onTasksSaved: (visitId: string) => void;
   tasks: readonly DailyPlanMonthTask[];
 }>) {
   const timedItems = items.filter(
@@ -279,6 +305,9 @@ function PlanDaySection({
   const dateId = `daily-plan-date-${date}`;
   const timedId = `timed-visits-${date}`;
   const untimedId = `untimed-visits-${date}`;
+  const genericTasks = tasks.filter(
+    (task) => !(task.status === "done" && task.linkedVisitId !== null),
+  );
 
   return (
     <section className="daily-plan-date-group" aria-labelledby={dateId}>
@@ -311,6 +340,8 @@ function PlanDaySection({
                   canWriteVisits={canWriteVisits}
                   item={item}
                   onCompleted={onCompleted}
+                  onTasksSaved={onTasksSaved}
+                  tasks={tasks}
                 />
               </li>
             ))}
@@ -336,6 +367,8 @@ function PlanDaySection({
                   canWriteVisits={canWriteVisits}
                   item={item}
                   onCompleted={onCompleted}
+                  onTasksSaved={onTasksSaved}
+                  tasks={tasks}
                 />
               </li>
             ))}
@@ -343,7 +376,7 @@ function PlanDaySection({
         </section>
       ) : null}
 
-      <DailyPlanDayTasks date={date} tasks={tasks} />
+      <DailyPlanDayTasks date={date} tasks={genericTasks} />
     </section>
   );
 }
@@ -599,6 +632,13 @@ export function DailyPlanWorkspace({
     setRequestRevision((current) => current + 1);
   }
 
+  function markTasksSaved(visitId: string) {
+    setCompletionNotice("Ziyarete bağlı tamamlanan görevler kaydedildi.");
+    completionFocusVisitIdRef.current = visitId;
+    setLoadState("loading");
+    setRequestRevision((current) => current + 1);
+  }
+
   function openMonthDay(date: string) {
     setItems([]);
     setTasks([]);
@@ -839,6 +879,7 @@ export function DailyPlanWorkspace({
                   items={day.items}
                   key={day.date}
                   onCompleted={markCompleted}
+                  onTasksSaved={markTasksSaved}
                   tasks={day.tasks}
                 />
               ))}

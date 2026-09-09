@@ -33,6 +33,14 @@ const card = {
 
 const inactiveCard = { ...card, status: "inactive" as const };
 
+const bankAccount = {
+  accountType: "bank" as const,
+  bankName: "Örnek Banka",
+  displayName: "Ticari hesap",
+  id: "account-1",
+  status: "active" as const,
+};
+
 const categories = [
   { code: "rent", displayName: "Kira", id: "category-rent", isSystem: true },
   {
@@ -60,6 +68,9 @@ const expense = {
   projectId: project.id,
   projectName: project.displayName,
   projectShortCode: project.shortCode,
+  sourceAccountId: bankAccount.id,
+  sourceAccountName: bankAccount.displayName,
+  sourceAccountType: bankAccount.accountType,
   status: "active",
   totalAmount: "16500.0000",
   vatAmount: "2750.0000",
@@ -83,6 +94,7 @@ describe("ExpensesWorkspace", () => {
         requestOrder.push(url);
         if (url === "/api/projects") return jsonResponse({ projects: [project] });
         if (url === "/api/finance/cards") return jsonResponse({ cards: [card] });
+        if (url === "/api/finance/accounts") return jsonResponse({ accounts: [bankAccount] });
         if (url === "/api/finance/expense-categories") {
           return jsonResponse({ categories });
         }
@@ -99,6 +111,7 @@ describe("ExpensesWorkspace", () => {
     expect(requestOrder).toEqual([
       "/api/projects",
       "/api/finance/cards",
+      "/api/finance/accounts",
       "/api/finance/expense-categories",
       "/api/finance/expenses",
     ]);
@@ -112,6 +125,7 @@ describe("ExpensesWorkspace", () => {
         const url = String(input);
         if (url === "/api/projects") return jsonResponse({ projects: [project] });
         if (url === "/api/finance/cards") return jsonResponse({ cards: [card] });
+        if (url === "/api/finance/accounts") return jsonResponse({ accounts: [bankAccount] });
         if (url === "/api/finance/expense-categories") {
           return jsonResponse({ categories });
         }
@@ -124,7 +138,9 @@ describe("ExpensesWorkspace", () => {
       <ExpensesWorkspace
         capabilities={{
           canReadAudit: false,
+          canReadAccounts: true,
           canReverseExpenses: false,
+          canWriteAccounts: true,
           canWriteExpenses: true,
         }}
       />,
@@ -180,6 +196,7 @@ describe("ExpensesWorkspace", () => {
       const url = String(input);
       if (url === "/api/projects") return jsonResponse({ projects: [project] });
       if (url === "/api/finance/cards") return jsonResponse({ cards: [card] });
+      if (url === "/api/finance/accounts") return jsonResponse({ accounts: [bankAccount] });
       if (url === "/api/finance/expense-categories") {
         return jsonResponse({ categories });
       }
@@ -245,6 +262,7 @@ describe("ExpensesWorkspace", () => {
         const url = String(input);
         if (url === "/api/projects") return jsonResponse({ projects: [project] });
         if (url === "/api/finance/cards") return jsonResponse({ cards: [card] });
+        if (url === "/api/finance/accounts") return jsonResponse({ accounts: [bankAccount] });
         if (url === "/api/finance/expense-categories") {
           return jsonResponse({ categories });
         }
@@ -278,6 +296,7 @@ describe("ExpensesWorkspace", () => {
         const url = String(input);
         if (url === "/api/projects") return jsonResponse({ projects: [project] });
         if (url === "/api/finance/cards") return jsonResponse({ cards: [inactiveCard] });
+        if (url === "/api/finance/accounts") return jsonResponse({ accounts: [bankAccount] });
         if (url === "/api/finance/expense-categories") {
           return jsonResponse({ categories });
         }
@@ -315,6 +334,7 @@ describe("ExpensesWorkspace", () => {
         const url = String(input);
         if (url === "/api/projects") return jsonResponse({ projects: [project] });
         if (url === "/api/finance/cards") return jsonResponse({ cards: [card] });
+        if (url === "/api/finance/accounts") return jsonResponse({ accounts: [bankAccount] });
         if (url === "/api/finance/expense-categories" && init?.method === "POST") {
           categoryBody = JSON.parse(String(init.body)) as Record<string, unknown>;
           return jsonResponse({ category: customCategory, created: true }, 201);
@@ -366,6 +386,7 @@ describe("ExpensesWorkspace", () => {
       const url = String(input);
       if (url === "/api/projects") return jsonResponse({ projects: [project] });
       if (url === "/api/finance/cards") return jsonResponse({ cards: [card] });
+      if (url === "/api/finance/accounts") return jsonResponse({ accounts: [bankAccount] });
       if (url === "/api/finance/expense-categories" && init?.method === "POST") {
         return jsonResponse({ category: customCategory, created: true }, 201);
       }
