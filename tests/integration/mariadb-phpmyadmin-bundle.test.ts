@@ -663,7 +663,7 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
           application_columns: 349,
           checks: 167,
           foreign_keys: 37,
-          indexes: 115,
+          indexes: 116,
           matching_application_tables: 30,
           matching_journal_tables: 1,
           sql_mode: expect.any(String),
