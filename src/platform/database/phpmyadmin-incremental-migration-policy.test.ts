@@ -66,6 +66,8 @@ const planningExpenseCategoriesMigrationTag =
   "0018_planning_expense_categories";
 const taxObligationsMigrationTag = "0019_tax_obligations";
 const expenseAccountLedgerMigrationTag = "0020_expense_account_ledger";
+const userNotificationSettingsMigrationTag =
+  "0021_user_notification_settings";
 const incremental0011Backfills = untyped0011Backfills as {
   consultingContract: string;
   customerProject: string;
@@ -494,6 +496,17 @@ describe.sequential("phpMyAdmin incremental migration bundle policy", () => {
         type: "add-column",
       },
       statementCount: 8,
+    },
+    {
+      expectedJournalCount: 21,
+      expectedPreviousTag: expenseAccountLedgerMigrationTag,
+      migrationTag: userNotificationSettingsMigrationTag,
+      requiredTarget: {
+        name: "user_notification_setting",
+        tableName: "user_notification_setting",
+        type: "create-table",
+      },
+      statementCount: 2,
     },
   ])(
     "builds deterministic guarded $migrationTag artifact",

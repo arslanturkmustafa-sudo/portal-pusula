@@ -70,6 +70,11 @@ export {
   type UserPermissionRecord,
 } from "./user-permission";
 export {
+  type NewUserNotificationSettingRecord,
+  userNotificationSetting,
+  type UserNotificationSettingRecord,
+} from "./user-notification-setting";
+export {
   workTask,
   type NewWorkTaskRecord,
   type WorkTaskRecord,

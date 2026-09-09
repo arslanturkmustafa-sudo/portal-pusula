@@ -16,6 +16,7 @@ type PortalIconName =
   | "finance"
   | "more"
   | "projects"
+  | "settings"
   | "tasks"
   | "users";
 
@@ -79,6 +80,13 @@ export const portalNavigationItems: readonly PortalNavigationItem[] = [
     shortLabel: "Ekip",
   },
   {
+    href: "/ayarlar",
+    icon: "settings",
+    label: "Ayarlar",
+    permissions: ["accounts.manage"],
+    shortLabel: "Ayar",
+  },
+  {
     href: "/hesabim",
     icon: "account",
     label: "Hesabım",
@@ -131,6 +139,14 @@ function PortalNavIcon({ name }: Readonly<{ name: PortalIconName }>) {
         <path d="M15 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
         <circle cx="8.5" cy="7" r="4" />
         <path d="M18 8v6M21 11h-6" />
+      </>
+    ),
+    settings: (
+      <>
+        <path d="M4 6h16M4 12h16M4 18h16" />
+        <circle cx="9" cy="6" r="2" fill="currentColor" />
+        <circle cx="15" cy="12" r="2" fill="currentColor" />
+        <circle cx="8" cy="18" r="2" fill="currentColor" />
       </>
     ),
     more: (

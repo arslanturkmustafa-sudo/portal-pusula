@@ -22,6 +22,7 @@ describe("PortalNavigation", () => {
       ["Finans", "/finans"],
       ["Projeler", "/projeler"],
       ["Kullanıcılar", "/kullanicilar"],
+      ["Ayarlar", "/ayarlar"],
       ["Hesabım", "/hesabim"],
     ] as const;
 
@@ -48,6 +49,7 @@ describe("PortalNavigation", () => {
     expect(within(navigation).getByRole("link", { name: "Görevler" })).toBeVisible();
     expect(within(navigation).queryByRole("link", { name: "Finans" })).toBeNull();
     expect(within(navigation).queryByRole("link", { name: "Kullanıcılar" })).toBeNull();
+    expect(within(navigation).queryByRole("link", { name: "Ayarlar" })).toBeNull();
   });
 
   it("routes an accounts-only finance member directly to the protected accounts workspace", () => {
