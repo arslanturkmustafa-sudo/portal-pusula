@@ -8,6 +8,8 @@ import {
   index,
   int,
   mysqlTable,
+  tinyint,
+  uniqueIndex,
   varchar,
 } from "drizzle-orm/mysql-core";
 
@@ -25,6 +27,13 @@ export const workTask = mysqlTable(
     status: varchar("status", { length: 24 }).default("backlog").notNull(),
     priority: varchar("priority", { length: 16 }).default("normal").notNull(),
     dueOn: date("due_on", { mode: "string" }),
+    recurrenceFrequency: varchar("recurrence_frequency", { length: 16 }),
+    recurrenceAnchorDay: tinyint("recurrence_anchor_day", { unsigned: true }),
+    recurrenceEndsOn: date("recurrence_ends_on", { mode: "string" }),
+    recurrenceSeriesId: char("recurrence_series_id", { length: 36 }),
+    recurrenceGeneratedFromTaskId: char("recurrence_generated_from_task_id", {
+      length: 36,
+    }),
     completedAtUtc: datetime("completed_at_utc", {
       fsp: 6,
       mode: "string",
@@ -95,6 +104,38 @@ export const workTask = mysqlTable(
         AND ${table.completedAtUtc} IS NULL
       )`,
     ),
+    check(
+      "chk_work_task_recurrence",
+      sql`(
+          ${table.recurrenceFrequency} IS NULL
+          AND ${table.recurrenceAnchorDay} IS NULL
+          AND ${table.recurrenceEndsOn} IS NULL
+          AND ${table.recurrenceSeriesId} IS NULL
+        ) OR (
+          ${table.recurrenceFrequency} IS NOT NULL
+          AND BINARY ${table.recurrenceFrequency} IN (
+            BINARY 'daily', BINARY 'weekly', BINARY 'monthly'
+          )
+          AND ${table.recurrenceAnchorDay} IS NOT NULL
+          AND ${table.recurrenceAnchorDay} BETWEEN 1 AND 31
+          AND ${table.dueOn} IS NOT NULL
+          AND ${table.recurrenceSeriesId} IS NOT NULL
+          AND OCTET_LENGTH(${table.recurrenceSeriesId}) = 36
+          AND BINARY ${table.recurrenceSeriesId} REGEXP '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+          AND (
+            ${table.recurrenceEndsOn} IS NULL
+            OR ${table.recurrenceEndsOn} >= ${table.dueOn}
+          )
+        )`,
+    ),
+    check(
+      "chk_work_task_recurrence_source",
+      sql`${table.recurrenceGeneratedFromTaskId} IS NULL OR (
+        OCTET_LENGTH(${table.recurrenceGeneratedFromTaskId}) = 36
+        AND BINARY ${table.recurrenceGeneratedFromTaskId} REGEXP '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+        AND BINARY ${table.recurrenceGeneratedFromTaskId} <> BINARY ${table.id}
+      )`,
+    ),
     check("chk_work_task_version", sql`${table.version} >= 1`),
     check(
       "chk_work_task_archive",
@@ -150,6 +191,20 @@ export const workTask = mysqlTable(
     })
       .onDelete("restrict")
       .onUpdate("restrict"),
+    foreignKey({
+      name: "fk_work_task_recurrence_source",
+      columns: [table.recurrenceGeneratedFromTaskId],
+      foreignColumns: [table.id],
+    })
+      .onDelete("restrict")
+      .onUpdate("restrict"),
+    uniqueIndex("uq_work_task_recurrence_source").on(
+      table.recurrenceGeneratedFromTaskId,
+    ),
+    index("idx_work_task_recurrence_series").on(
+      table.recurrenceSeriesId,
+      table.dueOn,
+    ),
     index("idx_work_task_board").on(
       table.archivedAtUtc,
       table.status,

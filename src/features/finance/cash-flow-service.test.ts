@@ -291,6 +291,46 @@ describe("cash flow report composition", () => {
     ]);
   });
 
+  it("excludes scheduled cash events before a future report range", () => {
+    const report = composeCashFlowReport(
+      {
+        accountOpenings: [],
+        actual: [],
+        balance: {
+          accountCount: 1,
+          closingBalanceAmount: "1000.0000",
+          currentAssetAmount: "1000.0000",
+          openingBalanceAmount: "1000.0000",
+        },
+        dueItems: [],
+        forecast: [
+          {
+            amount: "100.0000",
+            bucket: "scheduled",
+            direction: "outflow",
+            entryCount: 1,
+            eventOn: "2026-09-18",
+            kind: "direct_expense",
+          },
+          {
+            amount: "20.0000",
+            bucket: "scheduled",
+            direction: "outflow",
+            entryCount: 1,
+            eventOn: "2026-09-25",
+            kind: "direct_expense",
+          },
+        ],
+        unclassifiedExpenseAmount: "0.0000",
+        unclassifiedExpenseCount: 0,
+      },
+      { from: "2026-09-20", granularity: "weekly", to: "2026-09-30" },
+      "2026-09-15",
+    );
+
+    expect(report.forecast.scheduled.outflowAmount).toBe("20.0000");
+  });
+
   it("adds account opening balances only in the monthly period where the account was created", () => {
     const report = composeCashFlowReport(
       {

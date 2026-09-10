@@ -41,6 +41,8 @@ const PLANNING_EXPENSE_CATEGORIES_MIGRATION_TAG =
   "0018_planning_expense_categories";
 const EXPENSE_ACCOUNT_LEDGER_MIGRATION_TAG =
   "0020_expense_account_ledger";
+const RECURRING_TASKS_EXPENSES_MIGRATION_TAG =
+  "0022_recurring_tasks_expenses";
 
 const LEGACY_EXPENSE_CATEGORY_CODES = Object.freeze([
   "rent",
@@ -999,6 +1001,18 @@ function exactExpenseCategoryCodeColumnPredicate(tableName, columnName) {
   });
 }
 
+function exactNullableDateColumnPredicate(tableName, columnName) {
+  return `(SELECT COUNT(*) FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE()
+               AND TABLE_NAME = ${sqlString(tableName)}
+               AND COLUMN_NAME = ${sqlString(columnName)}
+               AND DATA_TYPE = 'date'
+               AND COLUMN_TYPE = 'date'
+               AND IS_NULLABLE = 'YES'
+               AND (COLUMN_DEFAULT IS NULL OR BINARY COLUMN_DEFAULT = BINARY 'NULL')
+               AND EXTRA = '') = 1`;
+}
+
 function planningExpenseCategoriesGlobalPreflightPredicates(statements) {
   const seed = statements.find(
     (item) =>
@@ -1050,6 +1064,39 @@ function expenseCategoryForeignKeyPreflightPredicate() {
           ON BINARY c.\`code\` = BINARY e.\`category\`
        WHERE c.\`code\` IS NULL) = 0`,
   ].join(" AND ");
+}
+
+function recurringTasksExpensesGlobalPreflightPredicates() {
+  const predicates = [];
+  for (const tableName of [
+    "work_task",
+    "project",
+    "credit_card",
+    "finance_account",
+  ]) {
+    predicates.push(
+      exactTableStorageAndDefaultPredicate(tableName),
+      exactCanonicalParentIdPredicate(tableName),
+      exactSingleColumnPrimaryKeyPredicate(tableName),
+    );
+  }
+  predicates.push(
+    exactNullableDateColumnPredicate("work_task", "due_on"),
+    exactTableStorageAndDefaultPredicate("expense_category"),
+    exactExpenseCategoryCodeColumnPredicate("expense_category", "code"),
+    constraintPredicate(
+      "expense_category",
+      "uq_expense_category_code",
+      "UNIQUE",
+    ),
+    orderedIndexPredicate({
+      columnNames: ["code"],
+      indexName: "uq_expense_category_code",
+      tableName: "expense_category",
+      unique: true,
+    }),
+  );
+  return predicates;
 }
 
 function exactCanonicalParentIdPredicate(tableName) {
@@ -1312,6 +1359,12 @@ function prerequisitePredicates(statements, migrationTag) {
       predicates.add(exactTableStorageAndDefaultPredicate(tableName));
       predicates.add(exactCanonicalParentIdPredicate(tableName));
       predicates.add(exactSingleColumnPrimaryKeyPredicate(tableName));
+    }
+  }
+
+  if (migrationTag === RECURRING_TASKS_EXPENSES_MIGRATION_TAG) {
+    for (const predicate of recurringTasksExpensesGlobalPreflightPredicates()) {
+      predicates.add(predicate);
     }
   }
 

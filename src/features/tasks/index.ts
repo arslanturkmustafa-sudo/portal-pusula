@@ -1,5 +1,6 @@
 export type {
   TaskPriority,
+  TaskRecurrenceFrequency,
   TaskStatus,
   WorkTask,
 } from "./repository";

@@ -10,6 +10,7 @@ import {
   mapArchiveMetadata,
   type ArchiveMetadata,
 } from "@/features/lifecycle";
+import type { RecurrenceFrequency } from "@/platform/recurrence/schedule";
 
 export type TaskStatus =
   | "backlog"
@@ -19,6 +20,7 @@ export type TaskStatus =
   | "done"
   | "cancelled";
 export type TaskPriority = "low" | "normal" | "high" | "urgent";
+export type TaskRecurrenceFrequency = RecurrenceFrequency;
 
 export type WorkTaskState = ArchiveMetadata & Readonly<{
   assigneeUserAccountId: string | null;
@@ -30,6 +32,11 @@ export type WorkTaskState = ArchiveMetadata & Readonly<{
   id: string;
   priority: TaskPriority;
   projectId: string | null;
+  recurrenceAnchorDay: number | null;
+  recurrenceEndsOn: string | null;
+  recurrenceFrequency: RecurrenceFrequency | null;
+  recurrenceGeneratedFromTaskId: string | null;
+  recurrenceSeriesId: string | null;
   status: TaskStatus;
   title: string;
   updatedAtUtc: string;
@@ -59,6 +66,11 @@ type WorkTaskStateRow = RowDataPacket & {
   id: string;
   priority: string;
   project_id: string | null;
+  recurrence_anchor_day: number | null;
+  recurrence_ends_on: string | Date | null;
+  recurrence_frequency: string | null;
+  recurrence_generated_from_task_id: string | null;
+  recurrence_series_id: string | null;
   status: string;
   title: string;
   updated_at_utc: string | Date;
@@ -73,6 +85,8 @@ type WorkTaskRow = WorkTaskStateRow & {
   project_code: string | null;
   project_name: string | null;
 };
+
+type GeneratedTaskRow = RowDataPacket & { id: string };
 
 function canonicalDate(value: string | Date): string {
   if (value instanceof Date) return value.toISOString().slice(0, 10);
@@ -112,7 +126,33 @@ function taskPriority(value: string): TaskPriority {
   return value;
 }
 
+function taskRecurrenceFrequency(
+  value: string | null,
+): RecurrenceFrequency | null {
+  if (value === null) return null;
+  if (value !== "daily" && value !== "weekly" && value !== "monthly") {
+    throw new Error("Task recurrence frequency is invalid.");
+  }
+  return value;
+}
+
 function mapTaskState(row: WorkTaskStateRow): WorkTaskState {
+  const recurrenceFrequency = taskRecurrenceFrequency(row.recurrence_frequency);
+  if (
+    (recurrenceFrequency === null &&
+      (row.recurrence_anchor_day !== null ||
+        row.recurrence_ends_on !== null ||
+        row.recurrence_series_id !== null)) ||
+    (recurrenceFrequency !== null &&
+      (row.due_on === null ||
+        row.recurrence_series_id === null ||
+        row.recurrence_anchor_day === null ||
+        !Number.isInteger(row.recurrence_anchor_day) ||
+        row.recurrence_anchor_day < 1 ||
+        row.recurrence_anchor_day > 31))
+  ) {
+    throw new Error("Task recurrence projection is invalid.");
+  }
   return {
     ...mapArchiveMetadata(row),
     assigneeUserAccountId: row.assignee_user_account_id,
@@ -127,6 +167,14 @@ function mapTaskState(row: WorkTaskStateRow): WorkTaskState {
     id: row.id,
     priority: taskPriority(row.priority),
     projectId: row.project_id,
+    recurrenceAnchorDay: row.recurrence_anchor_day,
+    recurrenceEndsOn:
+      row.recurrence_ends_on === null
+        ? null
+        : canonicalDate(row.recurrence_ends_on),
+    recurrenceFrequency,
+    recurrenceGeneratedFromTaskId: row.recurrence_generated_from_task_id,
+    recurrenceSeriesId: row.recurrence_series_id,
     status: taskStatus(row.status),
     title: row.title,
     updatedAtUtc: canonicalDateTime(row.updated_at_utc),
@@ -169,6 +217,9 @@ const TASK_STATE_COLUMNS = `
   task.id, task.customer_id, task.assignee_user_account_id,
   task_link.project_id,
   task.title, task.description, task.status, task.priority, task.due_on,
+  task.recurrence_frequency, task.recurrence_anchor_day,
+  task.recurrence_ends_on, task.recurrence_series_id,
+  task.recurrence_generated_from_task_id,
   task.completed_at_utc, task.archive_reason, task.archived_at_utc,
   task.archived_by_user_account_id, task.version, task.created_at_utc,
   task.updated_at_utc`;
@@ -243,10 +294,12 @@ export async function insertTaskRecord(
   const [result] = await connection.execute<ResultSetHeader>(
     `INSERT INTO work_task
        (id, customer_id, assignee_user_account_id, title, description,
-        status, priority, due_on, completed_at_utc, version,
+        status, priority, due_on, recurrence_frequency,
+        recurrence_anchor_day, recurrence_ends_on, recurrence_series_id,
+        recurrence_generated_from_task_id, completed_at_utc, version,
         archive_reason, archived_at_utc, archived_by_user_account_id,
         created_at_utc, updated_at_utc)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       task.id,
       task.customerId,
@@ -256,6 +309,11 @@ export async function insertTaskRecord(
       task.status,
       task.priority,
       task.dueOn,
+      task.recurrenceFrequency,
+      task.recurrenceAnchorDay,
+      task.recurrenceEndsOn,
+      task.recurrenceSeriesId,
+      task.recurrenceGeneratedFromTaskId,
       task.completedAtUtc,
       task.version,
       task.archiveReason,
@@ -277,7 +335,10 @@ export async function updateTaskRecord(
     `UPDATE work_task
         SET customer_id = ?, assignee_user_account_id = ?, title = ?,
             description = ?, status = ?, priority = ?, due_on = ?,
-            completed_at_utc = ?, archive_reason = ?, archived_at_utc = ?,
+            recurrence_frequency = ?, recurrence_anchor_day = ?,
+            recurrence_ends_on = ?, recurrence_series_id = ?,
+            recurrence_generated_from_task_id = ?, completed_at_utc = ?,
+            archive_reason = ?, archived_at_utc = ?,
             archived_by_user_account_id = ?, version = ?, updated_at_utc = ?
       WHERE id = ? AND version = ?`,
     [
@@ -288,6 +349,11 @@ export async function updateTaskRecord(
       task.status,
       task.priority,
       task.dueOn,
+      task.recurrenceFrequency,
+      task.recurrenceAnchorDay,
+      task.recurrenceEndsOn,
+      task.recurrenceSeriesId,
+      task.recurrenceGeneratedFromTaskId,
       task.completedAtUtc,
       task.archiveReason,
       task.archivedAtUtc,
@@ -299,6 +365,21 @@ export async function updateTaskRecord(
     ],
   );
   return result.affectedRows === 1;
+}
+
+export async function findTaskGeneratedFromTaskId(
+  connection: PoolConnection,
+  sourceTaskId: string,
+): Promise<string | null> {
+  const [rows] = await connection.execute<GeneratedTaskRow[]>(
+    `SELECT id
+       FROM work_task
+      WHERE recurrence_generated_from_task_id = ?
+      LIMIT 1
+      FOR UPDATE`,
+    [sourceTaskId],
+  );
+  return rows[0]?.id ?? null;
 }
 
 export async function replaceTaskProjectRecord(

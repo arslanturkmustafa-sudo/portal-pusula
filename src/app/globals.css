@@ -2425,11 +2425,20 @@ button, a { color: inherit; }
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 0.5rem;
   margin-top: 0.72rem;
   color: var(--ink-soft);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 0.54rem;
+}
+.task-recurrence-badge {
+  padding: 0.16rem 0.3rem;
+  border: 1px solid color-mix(in srgb, var(--forest) 36%, var(--line));
+  background: color-mix(in srgb, var(--forest) 5%, var(--sheet));
+  color: var(--forest);
+  font-size: 0.5rem;
+  font-weight: 750;
 }
 .task-due-overdue { color: #9b3f25; font-weight: 750; }
 .task-card-actions {
@@ -3080,6 +3089,195 @@ button, a { color: inherit; }
   font-family: Georgia, "Times New Roman", serif;
   font-size: 1.25rem;
 }
+.expense-record-kind {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.expense-record-kind legend {
+  width: 100%;
+  margin-bottom: 0.35rem;
+  color: var(--ink-soft);
+  font-size: 0.58rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.expense-record-kind label {
+  min-height: 42px;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.42rem;
+  padding: 0.45rem 0.65rem;
+  border: 1px solid var(--line-strong);
+  background: var(--sheet);
+  cursor: pointer;
+}
+.expense-record-kind label:has(input:checked) {
+  border-color: var(--forest);
+  background: var(--forest);
+  color: var(--sheet);
+}
+.expense-record-kind input { width: auto; min-height: 0; margin: 0; }
+.expense-record-kind label > span {
+  margin: 0;
+  color: inherit;
+  font-size: 0.67rem;
+  text-transform: none;
+}
+.recurring-expense-register {
+  border-top: 1px solid var(--ink);
+  border-bottom: 1px solid var(--ink);
+}
+.recurring-expense-heading {
+  min-height: 76px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.95rem 0 0.75rem;
+}
+.recurring-expense-heading h3 {
+  margin: 0;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.35rem;
+  font-weight: 500;
+}
+.recurring-expense-heading > p {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 0.64rem;
+  font-weight: 700;
+}
+.recurring-expense-error {
+  margin: 0;
+  padding: 0.65rem 0;
+  border-top: 1px solid var(--line);
+  color: #79351f;
+  font-size: 0.7rem;
+}
+.recurring-expense-list {
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--line-strong);
+  list-style: none;
+}
+.recurring-expense-list > li {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(210px, 1.1fr) minmax(315px, 1.35fr) auto;
+  align-items: center;
+  gap: 0.55rem 1rem;
+  padding: 0.85rem 0;
+  border-bottom: 1px solid var(--line);
+}
+.recurring-expense-list > li:last-child { border-bottom: 0; }
+.recurring-expense-list > li.is-paused { color: var(--ink-soft); }
+.recurring-expense-identity {
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.7rem;
+}
+.recurring-expense-identity strong,
+.recurring-expense-identity small { display: block; overflow-wrap: anywhere; }
+.recurring-expense-identity strong { font-size: 0.74rem; }
+.recurring-expense-identity small {
+  margin-top: 0.2rem;
+  color: var(--ink-soft);
+  font-size: 0.58rem;
+}
+.recurring-expense-status {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.58rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.recurring-expense-status::before {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #47745f;
+  content: "";
+}
+.recurring-expense-status.is-paused::before { background: var(--line-strong); }
+.recurring-expense-facts {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0;
+}
+.recurring-expense-facts > div {
+  min-width: 0;
+  padding: 0 0.6rem;
+  border-right: 1px solid var(--line);
+}
+.recurring-expense-facts > div:first-child { padding-left: 0; }
+.recurring-expense-facts > div:last-child { border-right: 0; }
+.recurring-expense-facts dt {
+  color: var(--ink-soft);
+  font-size: 0.53rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.recurring-expense-facts dd {
+  margin: 0.2rem 0 0;
+  font-size: 0.65rem;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+.recurring-expense-facts small {
+  display: block;
+  margin-top: 0.15rem;
+  color: var(--ink-soft);
+  font-size: 0.54rem;
+}
+.recurring-expense-context {
+  grid-column: 1 / 3;
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 0.58rem;
+  overflow-wrap: anywhere;
+}
+.recurring-expense-actions {
+  grid-column: 3;
+  grid-row: 1 / span 2;
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.35rem;
+}
+.recurring-expense-actions button {
+  min-height: 40px;
+  padding: 0 0.55rem;
+  border: 1px solid var(--line-strong);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.6rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.recurring-expense-actions button:hover { background: var(--sheet-soft); }
+.recurring-expense-actions button.is-primary {
+  border-color: var(--forest);
+  background: var(--forest);
+  color: var(--sheet);
+}
+.recurring-expense-actions button:disabled { cursor: not-allowed; opacity: 0.5; }
+.recurring-expense-empty {
+  min-height: 76px;
+  display: flex !important;
+  align-items: center !important;
+  color: var(--ink-soft);
+  font-size: 0.7rem;
+}
 .expense-toolbar {
   display: grid;
   grid-template-columns: minmax(138px, 0.6fr) minmax(170px, 0.9fr) minmax(150px, 0.7fr) minmax(210px, 1.4fr);
@@ -3448,6 +3646,10 @@ button, a { color: inherit; }
   .expense-command-actions > * { flex: 1; }
   .expense-category-entry { grid-template-columns: 1fr; }
   .expense-category-actions { justify-content: flex-end; }
+  .recurring-expense-list > li { grid-template-columns: 1fr; }
+  .recurring-expense-context,
+  .recurring-expense-actions { grid-column: 1; grid-row: auto; }
+  .recurring-expense-actions { justify-content: flex-start; }
   .expense-toolbar { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .expense-search { grid-column: 1 / -1; }
   .card-register-heading,
@@ -3525,6 +3727,20 @@ button, a { color: inherit; }
   .expense-command-actions { align-items: stretch; flex-direction: column; }
   .expense-command-actions > *,
   .expense-category-actions > * { min-height: 44px; }
+  .expense-record-kind { align-items: stretch; flex-direction: column; }
+  .expense-record-kind label { width: 100%; }
+  .recurring-expense-heading { align-items: flex-start; flex-direction: column; }
+  .recurring-expense-facts { grid-template-columns: 1fr; }
+  .recurring-expense-facts > div,
+  .recurring-expense-facts > div:first-child {
+    padding: 0.45rem 0;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .recurring-expense-facts > div:last-child { border-bottom: 0; }
+  .recurring-expense-actions { display: grid; grid-template-columns: 1fr 1fr; }
+  .recurring-expense-actions button { min-height: 44px; }
+  .recurring-expense-actions button.is-primary { grid-column: 1 / -1; }
   .expense-category-actions { display: grid; grid-template-columns: 1fr; }
   .card-plan-card-summary { grid-template-columns: 1fr; }
   .card-plan-card-summary > div,

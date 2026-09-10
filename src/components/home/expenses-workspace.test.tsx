@@ -99,6 +99,7 @@ describe("ExpensesWorkspace", () => {
           return jsonResponse({ categories });
         }
         if (url === "/api/finance/expenses") return jsonResponse({ expenses: [expense], summary: {} });
+        if (url === "/api/finance/recurring-expenses") return jsonResponse({ plans: [] });
         throw new Error(`Unexpected request: ${url}`);
       }),
     );
@@ -114,6 +115,7 @@ describe("ExpensesWorkspace", () => {
       "/api/finance/accounts",
       "/api/finance/expense-categories",
       "/api/finance/expenses",
+      "/api/finance/recurring-expenses",
     ]);
     expect(screen.getAllByText("₺16.500,00").length).toBeGreaterThan(0);
   });
@@ -130,6 +132,7 @@ describe("ExpensesWorkspace", () => {
           return jsonResponse({ categories });
         }
         if (url === "/api/finance/expenses") return jsonResponse({ expenses: [expense] });
+        if (url === "/api/finance/recurring-expenses") return jsonResponse({ plans: [] });
         throw new Error(`Unexpected request: ${url}`);
       }),
     );
@@ -163,6 +166,7 @@ describe("ExpensesWorkspace", () => {
           return jsonResponse({ categories });
         }
         if (url === "/api/finance/expenses") return jsonResponse({ expenses: [expense] });
+        if (url === "/api/finance/recurring-expenses") return jsonResponse({ plans: [] });
         throw new Error(`Unexpected request: ${url}`);
       }),
     );
@@ -220,6 +224,7 @@ describe("ExpensesWorkspace", () => {
         }, 201);
       }
       if (url === "/api/finance/expenses") return jsonResponse({ expenses: [] });
+      if (url === "/api/finance/recurring-expenses") return jsonResponse({ plans: [] });
       throw new Error(`Unexpected request: ${url}`);
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -267,6 +272,7 @@ describe("ExpensesWorkspace", () => {
           return jsonResponse({ categories });
         }
         if (url === "/api/finance/expenses") return jsonResponse({ expenses: [expense] });
+        if (url === "/api/finance/recurring-expenses") return jsonResponse({ plans: [] });
         throw new Error(`Unexpected request: ${url}`);
       }),
     );
@@ -301,6 +307,7 @@ describe("ExpensesWorkspace", () => {
           return jsonResponse({ categories });
         }
         if (url === "/api/finance/expenses") return jsonResponse({ expenses: [cardExpense] });
+        if (url === "/api/finance/recurring-expenses") return jsonResponse({ plans: [] });
         throw new Error(`Unexpected request: ${url}`);
       }),
     );
@@ -343,6 +350,7 @@ describe("ExpensesWorkspace", () => {
           return jsonResponse({ categories });
         }
         if (url === "/api/finance/expenses") return jsonResponse({ expenses: [] });
+        if (url === "/api/finance/recurring-expenses") return jsonResponse({ plans: [] });
         throw new Error(`Unexpected request: ${url}`);
       }),
     );
@@ -396,6 +404,7 @@ describe("ExpensesWorkspace", () => {
       if (url === "/api/finance/expenses") {
         return jsonResponse({ expenses: [expense] });
       }
+      if (url === "/api/finance/recurring-expenses") return jsonResponse({ plans: [] });
       throw new Error(`Unexpected request: ${url}`);
     });
     vi.stubGlobal("fetch", fetchMock);
