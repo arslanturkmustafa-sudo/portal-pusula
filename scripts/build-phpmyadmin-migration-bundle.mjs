@@ -45,6 +45,8 @@ const PLANNING_EXPENSE_CATEGORIES_MIGRATION_TAG =
 const TAX_OBLIGATIONS_MIGRATION_TAG = "0019_tax_obligations";
 const EXPENSE_ACCOUNT_LEDGER_MIGRATION_TAG =
   "0020_expense_account_ledger";
+const RECURRING_TASKS_EXPENSES_MIGRATION_TAG =
+  "0022_recurring_tasks_expenses";
 
 // 0020 alters an existing financial table, so keep every accepted statement
 // byte-independent but semantically exact after whitespace normalization.
@@ -57,6 +59,29 @@ const EXPENSE_ACCOUNT_LEDGER_STATEMENT_HASHES = new Set([
   "038e132fa99c272b8522ef096c19b66aa53b8d20214991c3f9ef0ba92fda0fe2",
   "6048483fa6e2b3e168726262a1857f60e813326e9c7a5c93662e37629197d7fb",
   "a17b7171308d190ef67e81f9efb11f85082c7430f88d9e441152bad7d50de848",
+]);
+
+// 0022 adds recurrence to an existing task table and introduces the matching
+// expense schedule table. Lock every accepted DDL shape so the phpMyAdmin
+// builders cannot silently accept a broadened constraint, FK, or index.
+const RECURRING_TASKS_EXPENSES_STATEMENT_HASHES = new Set([
+  "a30463d900a913094697583baab3c16a106bbc34560ed7421e7c5e803067c6f0",
+  "190d7961626e5128b9bc65f918e1a00ca7a4de26de77c69bf84e24daad1f5f88",
+  "3fa45cd0be3e691804fb1ebdee6a360aa7653e569ec75250b9a16df857fdce3a",
+  "a757ba1714f36c4fb3cd1df7e5090c35650a3a043066f9a883a47905e61de276",
+  "bb664d687bd9f81710f4c4400ac60a19e2039c3a1d9a69dbb1b083cda72012d3",
+  "735ac2f3ee242359b58bee1f346c55d98923d8d5f1667afedf0d694e63b62bf4",
+  "68ab4af6d5c3f617c30fe2762e5ac3d91d404339f4464a4274390b5e3538c449",
+  "10d5bb511f1e08c4be570a3fb4b47347f725b26c0a5c754b1ff853ef852cba01",
+  "2bae211e3d6d57d6bc1c58f75ca39bd4750c6dcec9e49349928bbeaf763e54c8",
+  "ff4f3f6a9410affe52484f07e51b7a9e3dc465e7a74178c31209447a4ebb250c",
+  "5f85244cc867f3aeec0afa37df119754b507a4c9aed0ab6055ea45e02671a6bf",
+  "4666e34331a48bf600510b594db5bbd6d4fa0cde88255f0a3080d82e0e23de32",
+  "faef0c09dcfa6e8c60d35c4fbe4011cbd45e1931a1eef4c4948f2374ad64101b",
+  "4fd446cb7888a85411047f0e39e726d777d72e7c31d701d57b26646493a12829",
+  "6d0eb245960126eb24f9780dffd5b29f7c48463b1f770248f656f46306b91cc3",
+  "3bbe91f4f1433ab303a4ad37d1958c390d9c38701641dde088ff7ed194d5cfa0",
+  "5a538e7be29a38250f7382e3cae4b9b46cdb9c11bfdcf61f0d9d61dc9e2afc72",
 ]);
 
 const EXPENSE_CATEGORY_SEED_ROWS = Object.freeze([
@@ -128,6 +153,16 @@ const managedForwardColumns = new Map([
     `${EXPENSE_ACCOUNT_LEDGER_MIGRATION_TAG}:${tableName}:${columnName}`,
     { columnName, definition, tableName },
   ]),
+  ...[
+    ["work_task", "recurrence_frequency", "varchar(16) CHARACTER SET ascii COLLATE ascii_bin"],
+    ["work_task", "recurrence_anchor_day", "tinyint unsigned"],
+    ["work_task", "recurrence_ends_on", "date"],
+    ["work_task", "recurrence_series_id", "char(36) CHARACTER SET ascii COLLATE ascii_bin"],
+    ["work_task", "recurrence_generated_from_task_id", "char(36) CHARACTER SET ascii COLLATE ascii_bin"],
+  ].map(([tableName, columnName, definition]) => [
+    `${RECURRING_TASKS_EXPENSES_MIGRATION_TAG}:${tableName}:${columnName}`,
+    { columnName, definition, tableName },
+  ]),
 ]);
 
 const managedDroppedChecks = new Set([
@@ -170,6 +205,7 @@ const managedUniqueConstraints = new Set([
   `${FINANCIAL_REVERSALS_MIGRATION_TAG}:partnership_contribution_receipt:uq_partnership_contribution_receipt_reversal:reversal_of_id`,
   `${FINANCIAL_REVERSALS_MIGRATION_TAG}:receivable_collection:uq_receivable_collection_reversal:reversal_of_id`,
   `${EXPENSE_ACCOUNT_LEDGER_MIGRATION_TAG}:expense:uq_expense_finance_transaction:finance_transaction_id`,
+  `${RECURRING_TASKS_EXPENSES_MIGRATION_TAG}:work_task:uq_work_task_recurrence_source:recurrence_generated_from_task_id`,
 ]);
 const CUSTOMER_PROJECT_BACKFILL_SQL = `INSERT INTO \`customer_project\` (\`customer_id\`, \`project_id\`, \`status\`, \`version\`, \`created_at_utc\`, \`updated_at_utc\`) SELECT \`seed\`.\`customer_id\`, \`seed\`.\`project_id\`, 'active', 1, CURRENT_TIMESTAMP(6), CURRENT_TIMESTAMP(6) FROM (SELECT \`customer\`.\`id\` AS \`customer_id\`, \`project\`.\`id\` AS \`project_id\` FROM \`customer\` CROSS JOIN \`project\` WHERE BINARY \`project\`.\`short_code\` = BINARY 'MUHENDIS_KAFASI' UNION DISTINCT SELECT \`work_task\`.\`customer_id\` AS \`customer_id\`, \`work_task_project\`.\`project_id\` AS \`project_id\` FROM \`work_task\` JOIN \`work_task_project\` ON \`work_task_project\`.\`task_id\` = \`work_task\`.\`id\` WHERE \`work_task\`.\`customer_id\` IS NOT NULL) AS \`seed\``;
 const CONSULTING_CONTRACT_BACKFILL_SQL = `UPDATE \`consulting_contract\` JOIN \`project\` ON BINARY \`project\`.\`short_code\` = BINARY 'MUHENDIS_KAFASI' SET \`consulting_contract\`.\`project_id\` = \`project\`.\`id\` WHERE \`consulting_contract\`.\`project_id\` IS NULL`;
@@ -192,10 +228,16 @@ function sha256(value) {
 }
 
 function assertExactManagedMigrationStatement(statement, migrationTag) {
-  if (migrationTag !== EXPENSE_ACCOUNT_LEDGER_MIGRATION_TAG) return;
+  const acceptedHashes =
+    migrationTag === EXPENSE_ACCOUNT_LEDGER_MIGRATION_TAG
+      ? EXPENSE_ACCOUNT_LEDGER_STATEMENT_HASHES
+      : migrationTag === RECURRING_TASKS_EXPENSES_MIGRATION_TAG
+        ? RECURRING_TASKS_EXPENSES_STATEMENT_HASHES
+        : null;
+  if (acceptedHashes === null) return;
 
   const normalized = statement.replaceAll(/\s+/gu, " ").trim();
-  if (!EXPENSE_ACCOUNT_LEDGER_STATEMENT_HASHES.has(sha256(normalized))) {
+  if (!acceptedHashes.has(sha256(normalized))) {
     throw new PhpMyAdminBundleError();
   }
 }
@@ -612,6 +654,23 @@ function managedColumnSpec(definition) {
     };
   }
 
+  if (definition === "tinyint unsigned") {
+    return {
+      dataType: "tinyint",
+      defaultValue: null,
+      nullable: true,
+      unsigned: true,
+    };
+  }
+
+  if (definition === "date") {
+    return {
+      dataType: "date",
+      defaultValue: null,
+      nullable: true,
+    };
+  }
+
   throw new PhpMyAdminBundleError();
 }
 
@@ -622,7 +681,8 @@ function parseManagedForwardStatement(statement, migrationTag) {
     migrationTag !== FINANCE_ACCOUNTS_LEDGER_MIGRATION_TAG &&
     migrationTag !== PLANNING_EXPENSE_CATEGORIES_MIGRATION_TAG &&
     migrationTag !== TAX_OBLIGATIONS_MIGRATION_TAG &&
-    migrationTag !== EXPENSE_ACCOUNT_LEDGER_MIGRATION_TAG
+    migrationTag !== EXPENSE_ACCOUNT_LEDGER_MIGRATION_TAG &&
+    migrationTag !== RECURRING_TASKS_EXPENSES_MIGRATION_TAG
   ) {
     return null;
   }

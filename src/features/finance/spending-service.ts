@@ -3,7 +3,7 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 
 import Decimal from "decimal.js";
-import type { Pool } from "mysql2/promise";
+import type { Pool, PoolConnection } from "mysql2/promise";
 
 import { listActiveOwnerEmailRecipients } from "@/features/account/repository";
 import { findProjectForUpdate } from "@/features/projects/repository";
@@ -582,108 +582,116 @@ export async function listExpenses(
   });
 }
 
-export async function createExpense(
-  pool: Pool,
+export async function createExpenseInConnection(
+  connection: PoolConnection,
   rawInput: CreateExpenseInput,
   context: SpendingWriteContext,
 ): Promise<Readonly<{ created: boolean; expense: Expense }>> {
   const input = createExpenseInputSchema.parse(rawInput);
   if (context.actorId !== undefined) assertCanonicalUuid(context.actorId);
   const now = toUtcDateTime6(context.now ?? new Date());
-  return withUtcTransaction(pool, async (connection) => {
-    const replay = await findExpenseByOperationKeyForUpdate(
-      connection,
-      input.clientOperationKey,
-    );
-    if (replay) {
-      if (!expenseMatches(replay, input)) {
-        throw new SpendingIdempotencyConflictError();
-      }
-      return { created: false, expense: replay };
-    }
-    if (!(await findActiveExpenseCategoryByCodeForUpdate(connection, input.category))) {
-      throw new SpendingResourceNotFoundError();
-    }
-    await requireProject(connection, input.projectId);
-    const card = await selectedCard(connection, input.creditCardId);
-    if (isDirectAccountPayment(input.paymentMethod)) {
-      requireAccountLedgerPermission(context);
-    }
-    const sourceAccount = await selectedSourceAccount(
-      connection,
-      input.sourceAccountId,
-      input.paymentMethod,
-    );
-    const totalAmount = moneyTotal(input.netAmount, input.vatAmount);
-    const financeTransactionId =
-      sourceAccount === null
-        ? null
-        : await createExpenseMovement(
-            connection,
-            {
-              amount: totalAmount,
-              description: input.description,
-              occurredOn: input.incurredOn,
-              operationKey: input.clientOperationKey,
-              sourceAccountId: sourceAccount.id,
-            },
-            context,
-          );
-    const pending: Expense = {
-      ...input,
-      createdAtUtc: now,
-      creditCardName: card?.displayName ?? null,
-      currency: "TRY",
-      financeTransactionId,
-      id: randomUUID(),
-      projectName: null,
-      projectShortCode: null,
-      sourceAccountName: sourceAccount?.displayName ?? null,
-      sourceAccountType: sourceAccount?.accountType ?? null,
-      status: "active",
-      totalAmount,
-      updatedAtUtc: now,
-      version: 1,
-      voidedAtUtc: null,
-      voidReason: null,
-    };
-    const persisted = await insertExpenseRecordIdempotently(connection, pending);
-    if (!expenseMatches(persisted, input)) {
+  const replay = await findExpenseByOperationKeyForUpdate(
+    connection,
+    input.clientOperationKey,
+  );
+  if (replay) {
+    if (!expenseMatches(replay, input)) {
       throw new SpendingIdempotencyConflictError();
     }
-    const created = persisted.id === pending.id;
-    if (created) {
-      if (card !== null) {
-        await insertCardInstallmentRecords(
+    return { created: false, expense: replay };
+  }
+  if (!(await findActiveExpenseCategoryByCodeForUpdate(connection, input.category))) {
+    throw new SpendingResourceNotFoundError();
+  }
+  await requireProject(connection, input.projectId);
+  const card = await selectedCard(connection, input.creditCardId);
+  if (isDirectAccountPayment(input.paymentMethod)) {
+    requireAccountLedgerPermission(context);
+  }
+  const sourceAccount = await selectedSourceAccount(
+    connection,
+    input.sourceAccountId,
+    input.paymentMethod,
+  );
+  const totalAmount = moneyTotal(input.netAmount, input.vatAmount);
+  const financeTransactionId =
+    sourceAccount === null
+      ? null
+      : await createExpenseMovement(
           connection,
-          generatedInstallments(persisted, card, now),
+          {
+            amount: totalAmount,
+            description: input.description,
+            occurredOn: input.incurredOn,
+            operationKey: input.clientOperationKey,
+            sourceAccountId: sourceAccount.id,
+          },
+          context,
         );
-      }
-      await appendAuditEvent(connection, {
-        action: "expense.created",
-        actorId: context.actorId,
-        actorType: "user",
-        afterSummary: expenseAuditSummary(persisted),
-        correlationId: context.correlationId,
-        entityId: persisted.id,
-        entityType: "expense",
-        occurredAtUtc: now,
-      });
-      if (context.emailNotificationsEnabled === true) {
-        const recipients = await listActiveOwnerEmailRecipients(connection);
-        const message = buildExpenseCreatedEmail(persisted);
-        for (const recipient of recipients) {
-          await enqueueEmailDelivery(connection, {
-            availableAtUtc: now,
-            idempotencyKey: `expense-created:${persisted.id}:${recipient.id}`,
-            message,
-            recipientAccountId: recipient.id,
-          });
-        }
+  const pending: Expense = {
+    ...input,
+    createdAtUtc: now,
+    creditCardName: card?.displayName ?? null,
+    currency: "TRY",
+    financeTransactionId,
+    id: randomUUID(),
+    projectName: null,
+    projectShortCode: null,
+    sourceAccountName: sourceAccount?.displayName ?? null,
+    sourceAccountType: sourceAccount?.accountType ?? null,
+    status: "active",
+    totalAmount,
+    updatedAtUtc: now,
+    version: 1,
+    voidedAtUtc: null,
+    voidReason: null,
+  };
+  const persisted = await insertExpenseRecordIdempotently(connection, pending);
+  if (!expenseMatches(persisted, input)) {
+    throw new SpendingIdempotencyConflictError();
+  }
+  const created = persisted.id === pending.id;
+  if (created) {
+    if (card !== null) {
+      await insertCardInstallmentRecords(
+        connection,
+        generatedInstallments(persisted, card, now),
+      );
+    }
+    await appendAuditEvent(connection, {
+      action: "expense.created",
+      actorId: context.actorId,
+      actorType: "user",
+      afterSummary: expenseAuditSummary(persisted),
+      correlationId: context.correlationId,
+      entityId: persisted.id,
+      entityType: "expense",
+      occurredAtUtc: now,
+    });
+    if (context.emailNotificationsEnabled === true) {
+      const recipients = await listActiveOwnerEmailRecipients(connection);
+      const message = buildExpenseCreatedEmail(persisted);
+      for (const recipient of recipients) {
+        await enqueueEmailDelivery(connection, {
+          availableAtUtc: now,
+          idempotencyKey: `expense-created:${persisted.id}:${recipient.id}`,
+          message,
+          recipientAccountId: recipient.id,
+        });
       }
     }
-    return { created, expense: persisted };
-  });
+  }
+  return { created, expense: persisted };
+}
+
+export async function createExpense(
+  pool: Pool,
+  rawInput: CreateExpenseInput,
+  context: SpendingWriteContext,
+): Promise<Readonly<{ created: boolean; expense: Expense }>> {
+  return withUtcTransaction(pool, (connection) =>
+    createExpenseInConnection(connection, rawInput, context),
+  );
 }
 
 export async function updateExpense(

@@ -107,6 +107,11 @@ export {
   type NewExpenseRecord,
 } from "./finance-spending";
 export {
+  recurringExpense,
+  type NewRecurringExpenseRecord,
+  type RecurringExpenseRecord,
+} from "./recurring-expense";
+export {
   partnershipCommission,
   partnershipContribution,
   partnershipContributionReceipt,

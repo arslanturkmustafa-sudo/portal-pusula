@@ -45,6 +45,8 @@ function taskFixture(
     projectCode: "BYPUSULA",
     projectId: "project-1",
     projectName: "ByPusula",
+    recurrenceEndsOn: null,
+    recurrenceFrequency: null,
     status,
     title: `Görev ${status}`,
     updatedAtUtc: "2026-09-01T08:00:00.000Z",
@@ -257,6 +259,8 @@ describe("TasksWorkspace", () => {
       dueOn: null,
       priority: "normal",
       projectId: project.id,
+      recurrenceEndsOn: null,
+      recurrenceFrequency: null,
       status: "backlog",
       title: "Teklifi hazırla",
     });
@@ -268,6 +272,168 @@ describe("TasksWorkspace", () => {
     expect(screen.queryByRole("heading", { name: "Görev ekle" })).not
       .toBeInTheDocument();
     await waitFor(() => expect(card).toHaveFocus());
+  });
+
+  it("creates a monthly task recurrence and shows its cadence on the card", async () => {
+    let postBody: Record<string, unknown> | null = null;
+    const createdTask = taskFixture("backlog", {
+      dueOn: "2026-09-30",
+      id: "task-recurring",
+      recurrenceEndsOn: "2026-12-31",
+      recurrenceFrequency: "monthly",
+      title: "Aylık durum raporu",
+      version: 1,
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async (input, init) => {
+        const url = String(input);
+        if (url === "/api/tasks" && init?.method === "POST") {
+          postBody = JSON.parse(String(init.body)) as Record<string, unknown>;
+          return jsonResponse({ task: createdTask }, 201);
+        }
+        if (url === "/api/tasks") return jsonResponse({ tasks: [] });
+        if (url === "/api/customers") return jsonResponse({ customers: [customer] });
+        if (url === "/api/projects") return jsonResponse({ projects: [project] });
+        throw new Error(`Unexpected request: ${url}`);
+      }),
+    );
+    const user = userEvent.setup();
+
+    render(<TasksWorkspace />);
+    await user.click(await screen.findByRole("button", { name: "+ Görev ekle" }));
+    await user.type(screen.getByLabelText("Görev başlığı"), "Aylık durum raporu");
+    await user.type(screen.getByLabelText("Vade"), "2026-09-30");
+    await user.selectOptions(screen.getByLabelText("Tekrar"), "monthly");
+    await user.type(screen.getByLabelText("Tekrar bitiş tarihi"), "2026-12-31");
+    await user.click(screen.getByRole("button", { name: "Görevi kaydet" }));
+
+    expect(postBody).toMatchObject({
+      dueOn: "2026-09-30",
+      recurrenceEndsOn: "2026-12-31",
+      recurrenceFrequency: "monthly",
+      title: "Aylık durum raporu",
+    });
+    const card = await screen.findByRole("article", { name: "Aylık durum raporu" });
+    expect(within(card).getByText(/Her ay/)).toBeInTheDocument();
+  });
+
+  it("reloads the board after completing a recurring task so its next occurrence appears", async () => {
+    const recurringTask = taskFixture("todo", {
+      id: "task-recurring-source",
+      recurrenceFrequency: "weekly",
+      title: "Haftalık kontrol",
+    });
+    const completedTask = {
+      ...recurringTask,
+      completedAtUtc: "2026-09-02T10:00:00.000Z",
+      status: "done" as const,
+      version: 4,
+    };
+    const nextTask = taskFixture("todo", {
+      dueOn: "2100-01-07",
+      id: "task-recurring-next",
+      recurrenceFrequency: "weekly",
+      title: "Haftalık kontrol",
+      version: 1,
+    });
+    let taskReadCount = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async (input, init) => {
+        const url = String(input);
+        if (url === "/api/tasks/task-recurring-source" && init?.method === "PATCH") {
+          return jsonResponse({ task: completedTask });
+        }
+        if (url === "/api/tasks") {
+          taskReadCount += 1;
+          return jsonResponse({
+            tasks:
+              taskReadCount === 1
+                ? [recurringTask]
+                : [completedTask, nextTask],
+          });
+        }
+        if (url === "/api/customers") return jsonResponse({ customers: [customer] });
+        if (url === "/api/projects") return jsonResponse({ projects: [project] });
+        throw new Error(`Unexpected request: ${url}`);
+      }),
+    );
+    const user = userEvent.setup();
+
+    render(<TasksWorkspace />);
+    await user.selectOptions(
+      await screen.findByRole("combobox", { name: "Haftalık kontrol durumu" }),
+      "done",
+    );
+
+    await waitFor(() => {
+      expect(taskReadCount).toBe(2);
+      expect(screen.getAllByRole("article", { name: "Haftalık kontrol" }))
+        .toHaveLength(2);
+    });
+  });
+
+  it("reloads the board when a recurring task is completed from the editor", async () => {
+    const recurringTask = taskFixture("todo", {
+      id: "task-recurring-editor",
+      recurrenceFrequency: "monthly",
+      title: "Aylık kapanış",
+    });
+    const completedTask = {
+      ...recurringTask,
+      completedAtUtc: "2026-09-02T10:00:00.000Z",
+      status: "done" as const,
+      version: 4,
+    };
+    const nextTask = taskFixture("todo", {
+      dueOn: "2100-01-31",
+      id: "task-recurring-editor-next",
+      recurrenceFrequency: "monthly",
+      title: "Aylık kapanış",
+      version: 1,
+    });
+    let taskReadCount = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async (input, init) => {
+        const url = String(input);
+        if (url === "/api/tasks/task-recurring-editor" && init?.method === "PATCH") {
+          return jsonResponse({ task: completedTask });
+        }
+        if (url === "/api/tasks") {
+          taskReadCount += 1;
+          return jsonResponse({
+            tasks:
+              taskReadCount === 1
+                ? [recurringTask]
+                : [completedTask, nextTask],
+          });
+        }
+        if (url === "/api/customers") return jsonResponse({ customers: [customer] });
+        if (url === "/api/projects") return jsonResponse({ projects: [project] });
+        throw new Error(`Unexpected request: ${url}`);
+      }),
+    );
+    const user = userEvent.setup();
+
+    render(<TasksWorkspace />);
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Aylık kapanış görevini düzenle",
+      }),
+    );
+    const editor = await screen.findByRole("region", {
+      name: "Görevi güncelle",
+    });
+    await user.selectOptions(within(editor).getByLabelText("Durum"), "done");
+    await user.click(screen.getByRole("button", { name: "Değişiklikleri kaydet" }));
+
+    await waitFor(() => {
+      expect(taskReadCount).toBe(2);
+      expect(screen.getAllByRole("article", { name: "Aylık kapanış" }))
+        .toHaveLength(2);
+    });
   });
 
   it("moves and then edits with the latest version and all editable fields", async () => {
@@ -340,6 +506,8 @@ describe("TasksWorkspace", () => {
         dueOn: "2099-12-31",
         priority: "normal",
         projectId: project.id,
+        recurrenceEndsOn: null,
+        recurrenceFrequency: null,
         status: "in_progress",
         title: "Teklifi ara",
         version: 3,

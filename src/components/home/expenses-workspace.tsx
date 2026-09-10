@@ -16,10 +16,13 @@ import { RecordLifecycleControls } from "@/components/portal/record-lifecycle-co
 type LoadState = "error" | "loading" | "ready";
 type SaveState = "idle" | "saving";
 type EditorMode = "copy" | "create" | "edit" | null;
+type ExpenseRecordKind = "one_time" | "recurring";
 type ExpenseStatus = "active" | "voided";
 type PaymentMethod = "bank_transfer" | "cash" | "credit_card" | "other";
 type ExpenseCategory = string;
 type DocumentType = "invoice" | "none" | "other" | "receipt";
+type RecurringFrequency = "monthly" | "weekly";
+type RecurringStatus = "active" | "paused";
 
 type ExpenseCategoryDto = Readonly<{
   code: string;
@@ -101,6 +104,38 @@ type ExpenseDraft = {
   sourceAccountId: string;
   vatAmount: string;
   vendorName: string;
+};
+
+type RecurringExpensePlanDto = Readonly<{
+  anchorDay: number;
+  category: ExpenseCategory;
+  creditCardId: string | null;
+  creditCardName: string | null;
+  description: string;
+  endsOn: string | null;
+  frequency: RecurringFrequency;
+  id: string;
+  netAmount: string;
+  nextDueOn: string;
+  note: string | null;
+  paymentMethod: PaymentMethod;
+  projectId: string | null;
+  projectName: string | null;
+  projectShortCode: string | null;
+  sourceAccountId: string | null;
+  sourceAccountName: string | null;
+  sourceAccountType: "bank" | "cash" | null;
+  status: RecurringStatus;
+  totalAmount: string;
+  vatAmount: string;
+  vendorName: string | null;
+  version: number;
+}>;
+
+type RecurringDraft = {
+  endsOn: string;
+  frequency: RecurringFrequency;
+  nextDueOn: string;
 };
 
 const fallbackCategoryDefinitions: readonly ExpenseCategoryDto[] = [
@@ -232,6 +267,10 @@ function emptyDraft(canUseAccountLedger = true): ExpenseDraft {
   };
 }
 
+function emptyRecurringDraft(): RecurringDraft {
+  return { endsOn: "", frequency: "monthly", nextDueOn: istanbulToday() };
+}
+
 function draftFromExpense(expense: ExpenseDto, copy: boolean): ExpenseDraft {
   return {
     category: expense.category,
@@ -248,6 +287,33 @@ function draftFromExpense(expense: ExpenseDto, copy: boolean): ExpenseDraft {
     sourceAccountId: expense.sourceAccountId ?? "",
     vatAmount: editableMoney(expense.vatAmount),
     vendorName: expense.vendorName ?? "",
+  };
+}
+
+function draftFromRecurringPlan(plan: RecurringExpensePlanDto): ExpenseDraft {
+  return {
+    category: plan.category,
+    creditCardId: plan.creditCardId ?? "",
+    description: plan.description,
+    documentNumber: "",
+    documentType: "none",
+    incurredOn: plan.nextDueOn,
+    installmentCount: "1",
+    netAmount: editableMoney(plan.netAmount),
+    note: plan.note ?? "",
+    paymentMethod: plan.paymentMethod,
+    projectId: plan.projectId ?? "",
+    sourceAccountId: plan.sourceAccountId ?? "",
+    vatAmount: editableMoney(plan.vatAmount),
+    vendorName: plan.vendorName ?? "",
+  };
+}
+
+function recurringDraftFromPlan(plan: RecurringExpensePlanDto): RecurringDraft {
+  return {
+    endsOn: plan.endsOn ?? "",
+    frequency: plan.frequency,
+    nextDueOn: plan.nextDueOn,
   };
 }
 
@@ -270,6 +336,27 @@ function expenseBody(draft: ExpenseDraft) {
       draft.paymentMethod === "credit_card"
         ? Number(draft.installmentCount)
         : 1,
+    netAmount: canonicalMoneyInput(draft.netAmount),
+    note: nullable(draft.note),
+    paymentMethod: draft.paymentMethod,
+    projectId: nullable(draft.projectId),
+    sourceAccountId:
+      draft.paymentMethod === "cash" || draft.paymentMethod === "bank_transfer"
+        ? nullable(draft.sourceAccountId)
+        : null,
+    vatAmount: canonicalMoneyInput(draft.vatAmount),
+    vendorName: nullable(draft.vendorName),
+  };
+}
+
+function recurringPlanBody(draft: ExpenseDraft, recurrence: RecurringDraft) {
+  return {
+    category: draft.category,
+    creditCardId:
+      draft.paymentMethod === "credit_card" ? nullable(draft.creditCardId) : null,
+    description: draft.description.trim(),
+    endsOn: nullable(recurrence.endsOn),
+    frequency: recurrence.frequency,
     netAmount: canonicalMoneyInput(draft.netAmount),
     note: nullable(draft.note),
     paymentMethod: draft.paymentMethod,
@@ -315,14 +402,24 @@ export function ExpensesWorkspace({
     fallbackCategoryDefinitions,
   );
   const [expenses, setExpenses] = useState<readonly ExpenseDto[]>([]);
+  const [recurringPlans, setRecurringPlans] = useState<
+    readonly RecurringExpensePlanDto[]
+  >([]);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [requestRevision, setRequestRevision] = useState(0);
   const [editorMode, setEditorMode] = useState<EditorMode>(null);
   const [editingExpense, setEditingExpense] = useState<ExpenseDto | null>(null);
+  const [editingPlan, setEditingPlan] = useState<RecurringExpensePlanDto | null>(
+    null,
+  );
+  const [recordKind, setRecordKind] = useState<ExpenseRecordKind>("one_time");
   const canUseAccountLedger =
     capabilities.canReadAccounts === true && capabilities.canWriteAccounts === true;
   const [draft, setDraft] = useState<ExpenseDraft>(() =>
     emptyDraft(canUseAccountLedger),
+  );
+  const [recurringDraft, setRecurringDraft] = useState<RecurringDraft>(
+    emptyRecurringDraft,
   );
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [formError, setFormError] = useState<string | null>(null);
@@ -338,6 +435,8 @@ export function ExpensesWorkspace({
   const [projectFilter, setProjectFilter] = useState("all");
   const [paymentFilter, setPaymentFilter] = useState<PaymentMethod | "all">("all");
   const [query, setQuery] = useState("");
+  const [planActionId, setPlanActionId] = useState<string | null>(null);
+  const [planActionError, setPlanActionError] = useState<string | null>(null);
   const editorTitleRef = useRef<HTMLHeadingElement>(null);
   const categoryTriggerRef = useRef<HTMLButtonElement>(null);
   const operationRef = useRef<Readonly<{ fingerprint: string; key: string }> | null>(
@@ -406,12 +505,26 @@ export function ExpensesWorkspace({
       expenses?: ExpenseDto[];
     };
 
+    const recurringResponse = await fetch("/api/finance/recurring-expenses", {
+      cache: "no-store",
+      credentials: "same-origin",
+      signal,
+    });
+    if (recurringResponse.status === 401) return redirectToLogin();
+    if (!recurringResponse.ok) {
+      throw new Error("Recurring expense plans are unavailable.");
+    }
+    const recurringPayload = (await recurringResponse.json()) as {
+      plans?: RecurringExpensePlanDto[];
+    };
+
     if (
       !Array.isArray(projectPayload.projects) ||
       !Array.isArray(cardPayload.cards) ||
       !Array.isArray(accountPayload.accounts) ||
       !Array.isArray(categoryPayload.categories) ||
-      !Array.isArray(expensePayload.expenses)
+      !Array.isArray(expensePayload.expenses) ||
+      !Array.isArray(recurringPayload.plans)
     ) {
       throw new Error("Expense workspace response is invalid.");
     }
@@ -420,6 +533,7 @@ export function ExpensesWorkspace({
     setAccounts(accountPayload.accounts);
     setCategories(categoryPayload.categories);
     setExpenses(expensePayload.expenses);
+    setRecurringPlans(recurringPayload.plans);
     setLoadState("ready");
   }, [capabilities.canReadAccounts]);
 
@@ -434,6 +548,7 @@ export function ExpensesWorkspace({
         setAccounts([]);
         setCategories(fallbackCategoryDefinitions);
         setExpenses([]);
+        setRecurringPlans([]);
         setLoadState("error");
       });
     return () => controller.abort();
@@ -512,6 +627,10 @@ export function ExpensesWorkspace({
     setDraft((current) => ({ ...current, ...next }));
   }
 
+  function updateRecurringDraft(next: Partial<RecurringDraft>): void {
+    setRecurringDraft((current) => ({ ...current, ...next }));
+  }
+
   function openCreate(): void {
     const nextDraft = emptyDraft(canUseAccountLedger);
     setDraft(
@@ -521,14 +640,20 @@ export function ExpensesWorkspace({
     );
     setPendingCategoryCode(null);
     setEditingExpense(null);
+    setEditingPlan(null);
+    setRecordKind("one_time");
+    setRecurringDraft(emptyRecurringDraft());
     setEditorMode("create");
     setFormError(null);
+    setPlanActionError(null);
     operationRef.current = null;
   }
 
   function openEdit(expense: ExpenseDto): void {
     setDraft(draftFromExpense(expense, false));
     setEditingExpense(expense);
+    setEditingPlan(null);
+    setRecordKind("one_time");
     setEditorMode("edit");
     setFormError(null);
     operationRef.current = null;
@@ -556,14 +681,30 @@ export function ExpensesWorkspace({
           : copied.sourceAccountId,
     });
     setEditingExpense(null);
+    setEditingPlan(null);
+    setRecordKind("one_time");
+    setRecurringDraft(emptyRecurringDraft());
     setEditorMode("copy");
     setFormError(null);
+    operationRef.current = null;
+  }
+
+  function openEditPlan(plan: RecurringExpensePlanDto): void {
+    setDraft(draftFromRecurringPlan(plan));
+    setRecurringDraft(recurringDraftFromPlan(plan));
+    setEditingExpense(null);
+    setEditingPlan(plan);
+    setRecordKind("recurring");
+    setEditorMode("edit");
+    setFormError(null);
+    setPlanActionError(null);
     operationRef.current = null;
   }
 
   function closeEditor(): void {
     setEditorMode(null);
     setEditingExpense(null);
+    setEditingPlan(null);
     setSaveState("idle");
     setFormError(null);
     operationRef.current = null;
@@ -648,8 +789,140 @@ export function ExpensesWorkspace({
     }
   }
 
+  async function saveRecurringPlan(): Promise<void> {
+    const body = recurringPlanBody(draft, recurringDraft);
+    if (body.description === "") {
+      setFormError("Açıklama zorunludur.");
+      return;
+    }
+    if (
+      body.netAmount === "" ||
+      body.vatAmount === "" ||
+      recurringDraft.nextDueOn === ""
+    ) {
+      setFormError("İlk vade ile net ve KDV tutarlarını girin.");
+      return;
+    }
+    if (
+      recurringDraft.endsOn !== "" &&
+      recurringDraft.endsOn < recurringDraft.nextDueOn
+    ) {
+      setFormError("Bitiş tarihi sıradaki vadeden önce olamaz.");
+      return;
+    }
+    if (body.paymentMethod === "credit_card" && body.creditCardId === null) {
+      setFormError("Tekrarlayan kart gideri için kart seçin.");
+      return;
+    }
+    if (
+      (body.paymentMethod === "cash" || body.paymentMethod === "bank_transfer") &&
+      body.sourceAccountId === null
+    ) {
+      setFormError(
+        body.paymentMethod === "cash"
+          ? "Planın ödeneceği kasayı seçin."
+          : "Planın ödeneceği banka hesabını seçin.",
+      );
+      return;
+    }
+
+    const existing = editorMode === "edit" ? editingPlan : null;
+    setSaveState("saving");
+    setFormError(null);
+    const fingerprint = JSON.stringify({
+      ...body,
+      nextDueOn: recurringDraft.nextDueOn,
+    });
+    if (
+      existing === null &&
+      (operationRef.current === null ||
+        operationRef.current.fingerprint !== fingerprint)
+    ) {
+      operationRef.current = {
+        fingerprint,
+        key: globalThis.crypto.randomUUID(),
+      };
+    }
+    const requestBody =
+      existing === null
+        ? {
+            ...body,
+            clientOperationKey: operationRef.current?.key,
+            firstDueOn: recurringDraft.nextDueOn,
+          }
+        : {
+            ...body,
+            nextDueOn: recurringDraft.nextDueOn,
+            status: existing.status,
+            version: existing.version,
+          };
+
+    try {
+      const response = await fetch(
+        existing === null
+          ? "/api/finance/recurring-expenses"
+          : `/api/finance/recurring-expenses/${existing.id}`,
+        {
+          body: JSON.stringify(requestBody),
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          method: existing === null ? "POST" : "PATCH",
+        },
+      );
+      if (response.status === 401) return redirectToLogin();
+      const payload = (await response.json()) as {
+        plan?: RecurringExpensePlanDto;
+        status?: string;
+      };
+      if (!response.ok || payload.plan === undefined) {
+        const message = {
+          credit_card_inactive: "Seçili kart pasif. Aktif bir kart seçin.",
+          finance_account_inactive:
+            "Seçili kasa veya banka hesabı pasif. Aktif bir hesap seçin.",
+          finance_account_not_found:
+            "Seçili kasa veya banka hesabı artık bulunamıyor.",
+          finance_account_type_mismatch:
+            "Nakit planı için kasa, banka planı için banka hesabı seçin.",
+          idempotency_conflict:
+            "Bu kayıt isteği daha önce farklı içerikle kullanıldı.",
+          version_conflict:
+            "Plan başka bir işlemde değişti. Listeyi yenileyip tekrar deneyin.",
+        }[payload.status ?? ""];
+        setFormError(
+          payload.status === "validation_error"
+            ? "Vade, tekrar sıklığı, tutar ve ödeme alanlarını kontrol edin."
+            : message ?? "Tekrarlayan gider planı kaydedilemedi.",
+        );
+        setSaveState("idle");
+        return;
+      }
+      const saved = payload.plan;
+      setRecurringPlans((current) =>
+        existing === null
+          ? [saved, ...current]
+          : current.map((plan) => (plan.id === saved.id ? saved : plan)),
+      );
+      setAnnouncement(
+        existing === null
+          ? `${saved.description} tekrarlayan gider planı oluşturuldu.`
+          : `${saved.description} planı güncellendi.`,
+      );
+      operationRef.current = null;
+      closeEditor();
+    } catch {
+      setFormError(
+        "Tekrarlayan gider planı kaydedilemedi. Bağlantıyı kontrol edip yeniden deneyin.",
+      );
+      setSaveState("idle");
+    }
+  }
+
   async function submitExpense(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
+    if (recordKind === "recurring") {
+      await saveRecurringPlan();
+      return;
+    }
     const body = expenseBody(draft);
     if (body.description === "") {
       setFormError("Açıklama zorunludur.");
@@ -768,6 +1041,126 @@ export function ExpensesWorkspace({
     }
   }
 
+  function recurringUpdateBody(
+    plan: RecurringExpensePlanDto,
+    status: RecurringStatus,
+  ) {
+    return {
+      category: plan.category,
+      creditCardId: plan.creditCardId,
+      description: plan.description,
+      endsOn: plan.endsOn,
+      frequency: plan.frequency,
+      netAmount: plan.netAmount,
+      nextDueOn: plan.nextDueOn,
+      note: plan.note,
+      paymentMethod: plan.paymentMethod,
+      projectId: plan.projectId,
+      sourceAccountId: plan.sourceAccountId,
+      status,
+      vatAmount: plan.vatAmount,
+      vendorName: plan.vendorName,
+      version: plan.version,
+    };
+  }
+
+  async function changePlanStatus(
+    plan: RecurringExpensePlanDto,
+    status: RecurringStatus,
+  ): Promise<void> {
+    setPlanActionId(plan.id);
+    setPlanActionError(null);
+    try {
+      const response = await fetch(`/api/finance/recurring-expenses/${plan.id}`, {
+        body: JSON.stringify(recurringUpdateBody(plan, status)),
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        method: "PATCH",
+      });
+      if (response.status === 401) return redirectToLogin();
+      const payload = (await response.json()) as {
+        plan?: RecurringExpensePlanDto;
+        status?: string;
+      };
+      if (!response.ok || payload.plan === undefined) {
+        setPlanActionError(
+          payload.status === "version_conflict"
+            ? "Plan başka bir işlemde değişti. Sayfayı yenileyip tekrar deneyin."
+            : "Planın durumu değiştirilemedi.",
+        );
+        return;
+      }
+      const savedPlan = payload.plan;
+      setRecurringPlans((current) =>
+        current.map((item) => (item.id === savedPlan.id ? savedPlan : item)),
+      );
+      setAnnouncement(
+        status === "paused"
+          ? `${plan.description} planı pasife alındı.`
+          : `${plan.description} planı etkinleştirildi.`,
+      );
+    } catch {
+      setPlanActionError("Planın durumu değiştirilemedi. Bağlantıyı kontrol edin.");
+    } finally {
+      setPlanActionId(null);
+    }
+  }
+
+  async function realizePlan(plan: RecurringExpensePlanDto): Promise<void> {
+    setPlanActionId(plan.id);
+    setPlanActionError(null);
+    try {
+      const response = await fetch(
+        `/api/finance/recurring-expenses/${plan.id}/realize`,
+        {
+          body: JSON.stringify({
+            version: plan.version,
+          }),
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          method: "POST",
+        },
+      );
+      if (response.status === 401) return redirectToLogin();
+      const payload = (await response.json()) as {
+        expense?: ExpenseDto;
+        plan?: RecurringExpensePlanDto;
+        status?: string;
+      };
+      if (!response.ok || payload.expense === undefined || payload.plan === undefined) {
+        const message = {
+          finance_account_inactive:
+            "Planın kasası veya banka hesabı pasif. Önce planı düzenleyin.",
+          finance_account_not_found:
+            "Planın kasası veya banka hesabı artık bulunamıyor.",
+          finance_transaction_before_account_opening:
+            "Vade tarihi seçili hesabın açılış tarihinden önce.",
+          not_due: "Bu planın vadesi henüz gelmedi.",
+          plan_paused: "Pasif plan gider olarak işlenemez.",
+          version_conflict:
+            "Plan başka bir işlemde değişti. Sayfayı yenileyip tekrar deneyin.",
+        }[payload.status ?? ""];
+        setPlanActionError(message ?? "Plan gider olarak işlenemedi.");
+        return;
+      }
+      const savedExpense = payload.expense;
+      const savedPlan = payload.plan;
+      setRecurringPlans((current) =>
+        current.map((item) => (item.id === savedPlan.id ? savedPlan : item)),
+      );
+      setExpenses((current) => [savedExpense, ...current]);
+      setAnnouncement(
+        `${plan.description} gider olarak işlendi. Sıradaki vade ${formatDate(savedPlan.nextDueOn)}.`,
+      );
+    } catch {
+      setPlanActionError("Plan gider olarak işlenemedi. Bağlantıyı kontrol edin.");
+    } finally {
+      setPlanActionId(null);
+    }
+  }
+
+  const today = istanbulToday();
+
   return (
     <section className="expense-workspace" aria-labelledby="expense-ledger-title">
       <p className="sr-only" aria-live="polite">{announcement}</p>
@@ -861,42 +1254,131 @@ export function ExpensesWorkspace({
         <section className="finance-entry expense-entry" aria-labelledby="expense-form-title">
           <div className="finance-entry-intro">
             <p className="section-kicker">
-              {editorMode === "edit" ? "Kayıt düzeltme" : "Yeni gider"}
+              {recordKind === "recurring"
+                ? editingPlan === null
+                  ? "Yeni ödeme planı"
+                  : "Plan düzeltme"
+                : editorMode === "edit"
+                  ? "Kayıt düzeltme"
+                  : "Yeni gider"}
             </p>
             <h3 id="expense-form-title" ref={editorTitleRef} tabIndex={-1}>
-              {editorMode === "edit"
-                ? "Gideri düzenle"
-                : editorMode === "copy"
-                  ? "Gider kopyası"
-                  : "Gider ekle"}
+              {recordKind === "recurring"
+                ? editingPlan === null
+                  ? "Tekrarlayan gider planı"
+                  : "Tekrarlayan planı düzenle"
+                : editorMode === "edit"
+                  ? "Gideri düzenle"
+                  : editorMode === "copy"
+                    ? "Gider kopyası"
+                    : "Gider ekle"}
             </h3>
             <p>
-              Belge görseli gerekmez. Net ve KDV tutarları ayrı saklanır;
-              toplam otomatik hesaplanır.
+              {recordKind === "recurring"
+                ? "Plan oluşturmak hesabınızdan para düşmez. Vadesi geldiğinde gideri siz işlersiniz."
+                : "Belge görseli gerekmez. Net ve KDV tutarları ayrı saklanır; toplam otomatik hesaplanır."}
             </p>
             <dl className="expense-live-total">
-              <dt>Ödenecek toplam</dt>
+              <dt>
+                {recordKind === "recurring" ? "Her dönem planlanan" : "Ödenecek toplam"}
+              </dt>
               <dd>{liveTotal(draft.netAmount, draft.vatAmount)}</dd>
             </dl>
           </div>
 
           <form className="finance-form expense-form" onSubmit={(event) => void submitExpense(event)}>
+            <fieldset className="finance-form-wide expense-record-kind">
+              <legend>Kayıt türü</legend>
+              <label>
+                <input
+                  checked={recordKind === "one_time"}
+                  disabled={editorMode === "edit"}
+                  name="expense-record-kind"
+                  onChange={() => setRecordKind("one_time")}
+                  type="radio"
+                  value="one_time"
+                />
+                <span>Tek seferlik gider</span>
+              </label>
+              <label>
+                <input
+                  checked={recordKind === "recurring"}
+                  disabled={editorMode === "edit"}
+                  name="expense-record-kind"
+                  onChange={() => {
+                    setRecordKind("recurring");
+                    setRecurringDraft((current) => ({
+                      ...current,
+                      nextDueOn: draft.incurredOn,
+                    }));
+                  }}
+                  type="radio"
+                  value="recurring"
+                />
+                <span>Tekrarlayan gider planı</span>
+              </label>
+            </fieldset>
             <label>
-              <span>Gider tarihi</span>
+              <span>
+                {recordKind === "recurring"
+                  ? editingPlan === null
+                    ? "İlk vade"
+                    : "Sıradaki vade"
+                  : "Gider tarihi"}
+              </span>
               <input
                 max={
-                  draft.paymentMethod === "cash" ||
-                  draft.paymentMethod === "bank_transfer"
+                  recordKind === "one_time" &&
+                  (draft.paymentMethod === "cash" ||
+                    draft.paymentMethod === "bank_transfer")
                     ? istanbulToday()
                     : "9999-12-31"
                 }
                 min="1000-01-01"
                 required
                 type="date"
-                value={draft.incurredOn}
-                onChange={(event) => updateDraft({ incurredOn: event.target.value })}
+                value={
+                  recordKind === "recurring"
+                    ? recurringDraft.nextDueOn
+                    : draft.incurredOn
+                }
+                onChange={(event) =>
+                  recordKind === "recurring"
+                    ? updateRecurringDraft({ nextDueOn: event.target.value })
+                    : updateDraft({ incurredOn: event.target.value })
+                }
               />
             </label>
+            {recordKind === "recurring" ? (
+              <>
+                <label>
+                  <span>Tekrar</span>
+                  <select
+                    value={recurringDraft.frequency}
+                    onChange={(event) =>
+                      updateRecurringDraft({
+                        frequency: event.target.value as RecurringFrequency,
+                      })
+                    }
+                  >
+                    <option value="weekly">Her hafta</option>
+                    <option value="monthly">Her ay</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Bitiş tarihi</span>
+                  <input
+                    min={recurringDraft.nextDueOn || "1000-01-01"}
+                    type="date"
+                    value={recurringDraft.endsOn}
+                    onChange={(event) =>
+                      updateRecurringDraft({ endsOn: event.target.value })
+                    }
+                  />
+                  <small>Boş bırakırsanız siz pasife alana kadar sürer.</small>
+                </label>
+              </>
+            ) : null}
             <label>
               <span>Proje / iş hattı</span>
               <select
@@ -1007,7 +1489,9 @@ export function ExpensesWorkspace({
                     draft.creditCardId !== "" &&
                     !activeCards.some((card) => card.id === draft.creditCardId) ? (
                       <option value={draft.creditCardId}>
-                        {editingExpense?.creditCardName ?? "Mevcut kart"} (pasif)
+                        {editingExpense?.creditCardName ??
+                          editingPlan?.creditCardName ??
+                          "Mevcut kart"} (pasif)
                       </option>
                     ) : null}
                     {activeCards.map((card) => (
@@ -1017,17 +1501,19 @@ export function ExpensesWorkspace({
                     ))}
                   </select>
                 </label>
-                <label>
-                  <span>Taksit sayısı</span>
-                  <input
-                    max={36}
-                    min={1}
-                    required
-                    type="number"
-                    value={draft.installmentCount}
-                    onChange={(event) => updateDraft({ installmentCount: event.target.value })}
-                  />
-                </label>
+                {recordKind === "one_time" ? (
+                  <label>
+                    <span>Taksit sayısı</span>
+                    <input
+                      max={36}
+                      min={1}
+                      required
+                      type="number"
+                      value={draft.installmentCount}
+                      onChange={(event) => updateDraft({ installmentCount: event.target.value })}
+                    />
+                  </label>
+                ) : null}
               </>
             ) : null}
             {draft.paymentMethod === "cash" ||
@@ -1053,7 +1539,9 @@ export function ExpensesWorkspace({
                     (account) => account.id === draft.sourceAccountId,
                   ) ? (
                     <option value={draft.sourceAccountId}>
-                      {editingExpense?.sourceAccountName ?? "Mevcut hesap"} (pasif)
+                      {editingExpense?.sourceAccountName ??
+                        editingPlan?.sourceAccountName ??
+                        "Mevcut hesap"} (pasif)
                     </option>
                   ) : null}
                   {activeAccounts
@@ -1074,29 +1562,33 @@ export function ExpensesWorkspace({
                 ) : null}
               </label>
             ) : null}
-            <label>
-              <span>Belge türü</span>
-              <select
-                value={draft.documentType}
-                onChange={(event) =>
-                  updateDraft({ documentType: event.target.value as DocumentType })
-                }
-              >
-                {Object.entries(documentLabels).map(([value, label]) => (
-                  <option key={value} value={value}>{label}</option>
-                ))}
-              </select>
-            </label>
-            {draft.documentType !== "none" ? (
-              <label>
-                <span>Belge numarası</span>
-                <input
-                  maxLength={191}
-                  placeholder="İsteğe bağlı"
-                  value={draft.documentNumber}
-                  onChange={(event) => updateDraft({ documentNumber: event.target.value })}
-                />
-              </label>
+            {recordKind === "one_time" ? (
+              <>
+                <label>
+                  <span>Belge türü</span>
+                  <select
+                    value={draft.documentType}
+                    onChange={(event) =>
+                      updateDraft({ documentType: event.target.value as DocumentType })
+                    }
+                  >
+                    {Object.entries(documentLabels).map(([value, label]) => (
+                      <option key={value} value={value}>{label}</option>
+                    ))}
+                  </select>
+                </label>
+                {draft.documentType !== "none" ? (
+                  <label>
+                    <span>Belge numarası</span>
+                    <input
+                      maxLength={191}
+                      placeholder="İsteğe bağlı"
+                      value={draft.documentNumber}
+                      onChange={(event) => updateDraft({ documentNumber: event.target.value })}
+                    />
+                  </label>
+                ) : null}
+              </>
             ) : null}
             <label className="finance-form-wide">
               <span>İç not</span>
@@ -1116,12 +1608,156 @@ export function ExpensesWorkspace({
                 Vazgeç
               </button>
               <button className="primary-action" disabled={saveState === "saving"} type="submit">
-                {saveState === "saving" ? "Kaydediliyor…" : "Gideri kaydet"}
+                {saveState === "saving"
+                  ? "Kaydediliyor…"
+                  : recordKind === "recurring"
+                    ? "Planı kaydet"
+                    : "Gideri kaydet"}
               </button>
             </div>
           </form>
         </section>
       ) : null}
+
+      <section
+        className="recurring-expense-register"
+        aria-labelledby="recurring-expense-title"
+      >
+        <header className="recurring-expense-heading">
+          <div>
+            <p className="section-kicker">Ödeme ritmi</p>
+            <h3 id="recurring-expense-title">Tekrarlayan gider planları</h3>
+          </div>
+          <p>
+            {loadState === "ready"
+              ? `${recurringPlans.filter((plan) => plan.status === "active").length} aktif plan`
+              : "Planlar yükleniyor…"}
+          </p>
+        </header>
+        {planActionError === null ? null : (
+          <p className="recurring-expense-error" role="alert">
+            {planActionError}
+          </p>
+        )}
+        <ul className="recurring-expense-list">
+          {recurringPlans.map((plan) => {
+            const usesProtectedAccount =
+              plan.paymentMethod === "cash" ||
+              plan.paymentMethod === "bank_transfer";
+            const accountActionBlocked =
+              usesProtectedAccount && !canUseAccountLedger;
+            const isDue = plan.status === "active" && plan.nextDueOn <= today;
+            const hasEnded =
+              plan.endsOn !== null && plan.nextDueOn > plan.endsOn;
+            const paymentDetail =
+              plan.creditCardName ?? plan.sourceAccountName ?? null;
+
+            return (
+              <li
+                className={plan.status === "paused" ? "is-paused" : undefined}
+                key={plan.id}
+              >
+                <div className="recurring-expense-identity">
+                  <div>
+                    <strong>{plan.description}</strong>
+                    <small>
+                      {categoryLabels[plan.category] ?? plan.category}
+                      {plan.vendorName === null ? "" : ` · ${plan.vendorName}`}
+                    </small>
+                  </div>
+                  <span
+                    className={`recurring-expense-status is-${plan.status}`}
+                  >
+                    {hasEnded
+                      ? "Süresi tamamlandı"
+                      : plan.status === "active"
+                        ? isDue
+                          ? "Vadesi geldi"
+                          : "Aktif"
+                        : "Pasif"}
+                  </span>
+                </div>
+                <dl className="recurring-expense-facts">
+                  <div>
+                    <dt>Sıradaki vade</dt>
+                    <dd>{formatDate(plan.nextDueOn)}</dd>
+                  </div>
+                  <div>
+                    <dt>Tekrar</dt>
+                    <dd>{plan.frequency === "weekly" ? "Her hafta" : "Her ay"}</dd>
+                  </div>
+                  <div>
+                    <dt>Dönem toplamı</dt>
+                    <dd>{formatMoney(plan.totalAmount)}</dd>
+                    <small>KDV {formatMoney(plan.vatAmount)}</small>
+                  </div>
+                </dl>
+                <p className="recurring-expense-context">
+                  {plan.projectName ?? "Genel / projesiz"}
+                  {` · ${paymentLabels[plan.paymentMethod]}`}
+                  {paymentDetail === null ? "" : ` · ${paymentDetail}`}
+                  {plan.endsOn === null ? "" : ` · Bitiş ${formatDate(plan.endsOn)}`}
+                </p>
+                {capabilities.canWriteExpenses ? (
+                  <div className="recurring-expense-actions">
+                    <button
+                      disabled={planActionId !== null || accountActionBlocked}
+                      title={
+                        accountActionBlocked
+                          ? "Bu planı düzenlemek için kasa/banka yetkisi gerekir."
+                          : undefined
+                      }
+                      type="button"
+                      onClick={() => openEditPlan(plan)}
+                    >
+                      Düzenle
+                    </button>
+                    {plan.status === "active" ? (
+                      <button
+                        disabled={planActionId !== null || accountActionBlocked}
+                        type="button"
+                        onClick={() => void changePlanStatus(plan, "paused")}
+                      >
+                        Pasife al
+                      </button>
+                    ) : hasEnded ? null : (
+                      <button
+                        disabled={planActionId !== null || accountActionBlocked}
+                        type="button"
+                        onClick={() => void changePlanStatus(plan, "active")}
+                      >
+                        Etkinleştir
+                      </button>
+                    )}
+                    {isDue ? (
+                      <button
+                        className="is-primary"
+                        disabled={planActionId !== null || accountActionBlocked}
+                        title={
+                          accountActionBlocked
+                            ? "Bu gideri işlemek için kasa/banka yetkisi gerekir."
+                            : undefined
+                        }
+                        type="button"
+                        onClick={() => void realizePlan(plan)}
+                      >
+                        {planActionId === plan.id ? "İşleniyor…" : "Gideri işle"}
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
+              </li>
+            );
+          })}
+          {recurringPlans.length === 0 ? (
+            <li className="recurring-expense-empty">
+              {loadState === "loading"
+                ? "Tekrarlayan gider planları yükleniyor…"
+                : "Henüz tekrarlayan gider planı yok."}
+            </li>
+          ) : null}
+        </ul>
+      </section>
 
       <div className="expense-toolbar" aria-label="Gider filtreleri">
         <label>

@@ -68,6 +68,8 @@ const taxObligationsMigrationTag = "0019_tax_obligations";
 const expenseAccountLedgerMigrationTag = "0020_expense_account_ledger";
 const userNotificationSettingsMigrationTag =
   "0021_user_notification_settings";
+const recurringTasksExpensesMigrationTag =
+  "0022_recurring_tasks_expenses";
 const incremental0011Backfills = untyped0011Backfills as {
   consultingContract: string;
   customerProject: string;
@@ -508,6 +510,17 @@ describe.sequential("phpMyAdmin incremental migration bundle policy", () => {
       },
       statementCount: 2,
     },
+    {
+      expectedJournalCount: 22,
+      expectedPreviousTag: userNotificationSettingsMigrationTag,
+      migrationTag: recurringTasksExpensesMigrationTag,
+      requiredTarget: {
+        name: "recurring_expense",
+        tableName: "recurring_expense",
+        type: "create-table",
+      },
+      statementCount: 17,
+    },
   ])(
     "builds deterministic guarded $migrationTag artifact",
     async ({
@@ -651,6 +664,168 @@ describe.sequential("phpMyAdmin incremental migration bundle policy", () => {
         expenseAccountLedgerMigrationTag,
       ),
     ).toThrow();
+  });
+
+  it("allows only the exact 0022 recurrence DDL and fails closed on partial state", async () => {
+    const migrationSql = await readFile(
+      resolve(
+        projectRoot,
+        "drizzle",
+        `${recurringTasksExpensesMigrationTag}.sql`,
+      ),
+      "utf8",
+    );
+    const migrationStatements = migrationSql
+      .split(/--> statement-breakpoint\s*/gu)
+      .map((statement) => statement.trim().replace(/;$/u, ""));
+    const artifact = await buildCurrentIncremental(
+      recurringTasksExpensesMigrationTag,
+      await temporaryOutputDirectory(),
+    );
+    const initialGuard = artifact.sql.slice(
+      0,
+      artifact.sql.indexOf("SET @pp_candidate_sql = 0x"),
+    );
+
+    expect(
+      migrationStatements.map((statement) =>
+        analyzeIncrementalMigrationStatement(
+          statement,
+          recurringTasksExpensesMigrationTag,
+        ),
+      ),
+    ).toHaveLength(17);
+    expect(artifact.manifest).toMatchObject({
+      expectedJournalCount: 22,
+      expectedPreviousMigration: {
+        tag: userNotificationSettingsMigrationTag,
+      },
+      migration: {
+        createdAt: 1789060097371,
+        hash: "9aca25ba6a18ee00a0cedb32f8e5a6ea22b2dfdb813302b9a87bffc3f03cbf5f",
+        tag: recurringTasksExpensesMigrationTag,
+      },
+    });
+    expect(artifact.manifest.migration.statementHashes).toHaveLength(17);
+    expect(artifact.manifest.targetObjects).toEqual(
+      expect.arrayContaining([
+        {
+          name: "recurring_expense",
+          tableName: "recurring_expense",
+          type: "create-table",
+        },
+        {
+          name: "recurrence_frequency",
+          tableName: "work_task",
+          type: "add-column",
+        },
+        {
+          name: "uq_work_task_recurrence_source",
+          tableName: "work_task",
+          type: "create-index",
+        },
+        {
+          name: "fk_recurring_expense_category",
+          tableName: "recurring_expense",
+          type: "foreign-key",
+        },
+        {
+          name: "chk_work_task_recurrence",
+          tableName: "work_task",
+          type: "check",
+        },
+        {
+          name: "fk_work_task_recurrence_source",
+          tableName: "work_task",
+          type: "foreign-key",
+        },
+        {
+          name: "idx_work_task_recurrence_series",
+          tableName: "work_task",
+          type: "create-index",
+        },
+      ]),
+    );
+    expect(candidateStatements(artifact.sql)).toEqual([
+      ...migrationStatements,
+      expect.stringContaining("INSERT INTO `__drizzle_migrations`"),
+    ]);
+
+    expect(initialGuard).toContain(
+      "TABLE_NAME = 'recurring_expense') = 0",
+    );
+    for (const columnName of [
+      "recurrence_frequency",
+      "recurrence_anchor_day",
+      "recurrence_ends_on",
+      "recurrence_series_id",
+      "recurrence_generated_from_task_id",
+    ]) {
+      expect(initialGuard).toContain(
+        `TABLE_NAME = 'work_task' AND COLUMN_NAME = '${columnName}') = 0`,
+      );
+    }
+    for (const tableName of [
+      "work_task",
+      "project",
+      "credit_card",
+      "finance_account",
+    ]) {
+      expect(initialGuard).toContain(
+        `TABLE_NAME = '${tableName}' AND COLUMN_NAME = 'id' AND DATA_TYPE = 'char' AND COLUMN_TYPE = 'char(36)'`,
+      );
+      expect(initialGuard).toContain(
+        `TABLE_NAME = '${tableName}' AND CONSTRAINT_NAME = 'PRIMARY' AND CONSTRAINT_TYPE = 'PRIMARY KEY') = 1`,
+      );
+    }
+    expect(initialGuard).toContain(
+      "TABLE_NAME = 'work_task' AND COLUMN_NAME = 'due_on' AND DATA_TYPE = 'date' AND COLUMN_TYPE = 'date' AND IS_NULLABLE = 'YES'",
+    );
+    expect(initialGuard).toContain(
+      "TABLE_NAME = 'expense_category' AND COLUMN_NAME = 'code' AND DATA_TYPE = 'varchar' AND COLUMN_TYPE = 'varchar(32)'",
+    );
+    expect(initialGuard).toContain(
+      "TABLE_NAME = 'expense_category' AND CONSTRAINT_NAME = 'uq_expense_category_code' AND CONSTRAINT_TYPE = 'UNIQUE') = 1",
+    );
+    expect(initialGuard).toContain(
+      "TABLE_NAME = 'work_task' AND CONSTRAINT_NAME = 'chk_work_task_recurrence') = 0",
+    );
+    expect(initialGuard).toContain(
+      "TABLE_NAME = 'work_task' AND INDEX_NAME = 'idx_work_task_recurrence_series') = 0",
+    );
+
+    const addFrequency = migrationStatements.find((statement) =>
+      statement.includes("ADD `recurrence_frequency`"),
+    );
+    const recurrenceCheck = migrationStatements.find((statement) =>
+      statement.includes("chk_work_task_recurrence`"),
+    );
+    const categoryForeignKey = migrationStatements.find((statement) =>
+      statement.includes("fk_recurring_expense_category"),
+    );
+    const seriesIndex = migrationStatements.find((statement) =>
+      statement.includes("idx_work_task_recurrence_series"),
+    );
+    expect(addFrequency).toBeDefined();
+    expect(recurrenceCheck).toBeDefined();
+    expect(categoryForeignKey).toBeDefined();
+    expect(seriesIndex).toBeDefined();
+    for (const mutated of [
+      addFrequency!.replace("ascii_bin", "utf8mb4_unicode_ci"),
+      recurrenceCheck!.replace("BINARY 'daily'", "BINARY 'yearly'"),
+      categoryForeignKey!.replace("`expense_category`", "`expense`"),
+      seriesIndex!.replace(
+        "(`recurrence_series_id`,`due_on`)",
+        "(`due_on`,`recurrence_series_id`)",
+      ),
+    ]) {
+      expect(() =>
+        analyzeIncrementalMigrationStatement(
+          mutated,
+          recurringTasksExpensesMigrationTag,
+        ),
+      ).toThrow();
+    }
   });
 
   it("guards the exact 0018 category catalog, seed, and expense ownership", async () => {

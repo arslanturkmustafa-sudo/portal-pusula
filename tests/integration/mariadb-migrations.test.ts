@@ -47,6 +47,7 @@ const financeLedgerEntryTable = "finance_ledger_entry";
 const financeTransactionTable = "finance_transaction";
 const workTaskVisitTable = "work_task_visit";
 const taxObligationTable = "tax_obligation";
+const recurringExpenseTable = "recurring_expense";
 const platformTables = [
   "audit_event",
   "job_run",
@@ -81,9 +82,10 @@ const allMigratedPlatformTables = [
   financeTransactionTable,
   workTaskVisitTable,
   taxObligationTable,
+  recurringExpenseTable,
 ] as const;
 const repositoryRoot = process.cwd();
-const expectedMigrationCount = 22;
+const expectedMigrationCount = 23;
 const migrationLockWaitTimeoutMs = 5_000;
 const migrationLockPollIntervalMs = 25;
 
@@ -353,6 +355,7 @@ async function waitForBlockedMigrationRunners(
 async function resetKnownMigrationArtifacts(pool: Pool): Promise<void> {
   // These identifiers are compile-time constants and this suite is enabled only
   // for the disposable MariaDB provisioned by scripts/test-mariadb.mjs.
+  await pool.query(`DROP TABLE IF EXISTS \`${recurringExpenseTable}\``);
   await pool.query(`DROP TABLE IF EXISTS \`${taxObligationTable}\``);
   await pool.query(`DROP TABLE IF EXISTS \`${workTaskVisitTable}\``);
   await pool.query(`DROP TABLE IF EXISTS \`${financeLedgerEntryTable}\``);
@@ -1204,7 +1207,7 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
       ]);
     });
 
-    it("records the immutable 0000 through 0021 migration hash chain", async () => {
+    it("records the immutable 0000 through 0022 migration hash chain", async () => {
       const [rows] = await pool.query<MigrationRow[]>(
         `SELECT id, hash, created_at FROM \`${migrationTable}\` ORDER BY id`,
       );
@@ -1318,6 +1321,11 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
           created_at: 1788995986876,
           hash: "435b28ee71f0ab1a267d012c040569cefe8610935bdaf8586f6ddfb1367c6ef7",
           id: 22,
+        },
+        {
+          created_at: 1789060097371,
+          hash: "9aca25ba6a18ee00a0cedb32f8e5a6ea22b2dfdb813302b9a87bffc3f03cbf5f",
+          id: 23,
         },
       ]);
     });

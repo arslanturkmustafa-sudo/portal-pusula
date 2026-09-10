@@ -29,6 +29,7 @@ const validPasswordHash =
   "scrypt:32768:8:1:AAAAAAAAAAAAAAAAAAAAAA:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
 const dropOrder = [
+  "recurring_expense",
   "user_notification_setting",
   "work_task_visit",
   "finance_ledger_entry",

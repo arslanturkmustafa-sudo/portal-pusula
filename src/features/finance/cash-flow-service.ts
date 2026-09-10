@@ -194,7 +194,11 @@ export function composeCashFlowReport(
   generatedOn: string,
 ): CashFlowReport {
   const filter = cashFlowFilterSchema.parse(rawFilter);
-  const scheduled = snapshot.forecast.filter((line) => line.bucket === "scheduled");
+  const scheduled = snapshot.forecast.filter(
+    (line) =>
+      line.bucket === "scheduled" &&
+      inPeriod(line.eventOn, { endOn: filter.to, startOn: filter.from }),
+  );
   const overdue = snapshot.forecast.filter((line) => line.bucket === "overdue");
   const overdueInRange = overdue.filter(
     (line) =>
@@ -245,6 +249,7 @@ export function composeCashFlowReport(
       "Kart planında harcama açıklamaları gösterilmez; toplam, ödenen ve kalan tutar aynı vade satırında sunulur.",
       "Vergi yükümlülükleri KDV, gelir vergisi veya geçici vergi olarak kendi vade gününde gösterilir; yalnız açık tutarlar nakit tahminine eklenir.",
       "Kart dışı giderlerden yalnız ileri tarihli planlar kategori ve tarih bazında gruplanır; geçmiş giderler üstteki hesap defteri görünümünde kalır.",
+      "Tekrarlayan gider planları ödeme gerçekleşene kadar yalnız vade tahminidir; hesap bakiyesini değiştirmez ve gerçekleşen gider oluşturulduğunda ilerleyen sonraki vade aynı dönemin iki kez sayılmasını önler.",
       "Dönem açılışı yalnız Europe/Istanbul iş gününe göre dönemden önce oluşturulmuş hesapların başlangıç bakiyelerini içerir; dönem içinde açılan hesapların başlangıç bakiyesi ayrı gösterilir ve kapanışta uzlaştırılır.",
       "Gerçekleşen hareketler Europe/Istanbul iş gününe göre bugünle sınırlandırılır; ileri tarihli açık kalemler tahmin olarak ayrı gösterilir.",
       "Gecikmiş toplam, seçilen aralıktan önce doğmuş olsa da bugün hâlâ açık olan tüm vadeli kalemleri içerir; dönem satırları yalnız kendi tarih aralığına düşen gecikmeleri gösterir.",

@@ -151,7 +151,44 @@ describe("cash flow repository", () => {
         ],
         [],
       ])
-      .mockResolvedValueOnce([[{ amount: "50.0000", entry_count: 1 }], []]);
+      .mockResolvedValueOnce([[{ amount: "50.0000", entry_count: 1 }], []])
+      .mockResolvedValueOnce([
+        [
+          {
+            anchor_day: "31",
+            category_label: "Kira",
+            credit_card_label: null,
+            description: "Ofis kirası",
+            ends_on: "2026-09-30",
+            frequency: "monthly",
+            id: "30000000-0000-4000-8000-000000000006",
+            next_due_on: "2026-08-31",
+            payment_due_day: null,
+            payment_method: "bank_transfer",
+            project_label: "Genel operasyon",
+            source_account_label: "Ticari hesap",
+            statement_closing_day: null,
+            total_amount: "16500.0000",
+          },
+          {
+            anchor_day: "20",
+            category_label: "Yazılım",
+            credit_card_label: "Şirket kartı",
+            description: "Yazılım aboneliği",
+            ends_on: "2026-08-20",
+            frequency: "monthly",
+            id: "30000000-0000-4000-8000-000000000007",
+            next_due_on: "2026-08-20",
+            payment_due_day: "5",
+            payment_method: "credit_card",
+            project_label: null,
+            source_account_label: null,
+            statement_closing_day: "25",
+            total_amount: "1200.0000",
+          },
+        ],
+        [],
+      ]);
 
     await expect(
       readCashFlowLedger(
@@ -254,6 +291,42 @@ describe("cash flow repository", () => {
           status: "planned",
           totalAmount: "80.0000",
         },
+        {
+          direction: "outflow",
+          dueOn: "2026-08-31",
+          id: "recurring_expense:30000000-0000-4000-8000-000000000006:2026-08-31",
+          kind: "other_expense",
+          label: "Ofis kirası",
+          remainingAmount: "16500.0000",
+          settledAmount: "0.0000",
+          sourceLabel: "Kira · Genel operasyon · Ticari hesap",
+          status: "overdue",
+          totalAmount: "16500.0000",
+        },
+        {
+          direction: "outflow",
+          dueOn: "2026-09-30",
+          id: "recurring_expense:30000000-0000-4000-8000-000000000006:2026-09-30",
+          kind: "other_expense",
+          label: "Ofis kirası",
+          remainingAmount: "16500.0000",
+          settledAmount: "0.0000",
+          sourceLabel: "Kira · Genel operasyon · Ticari hesap",
+          status: "planned",
+          totalAmount: "16500.0000",
+        },
+        {
+          direction: "outflow",
+          dueOn: "2026-09-05",
+          id: "recurring_expense:30000000-0000-4000-8000-000000000007:2026-08-20",
+          kind: "card_payment",
+          label: "Yazılım aboneliği",
+          remainingAmount: "1200.0000",
+          settledAmount: "0.0000",
+          sourceLabel: "Yazılım · Şirket kartı",
+          status: "overdue",
+          totalAmount: "1200.0000",
+        },
       ],
       forecast: [
         {
@@ -280,12 +353,36 @@ describe("cash flow repository", () => {
           eventOn: "2026-09-27",
           kind: "tax_payment",
         },
+        {
+          amount: "16500.0000",
+          bucket: "overdue",
+          direction: "outflow",
+          entryCount: 1,
+          eventOn: "2026-08-31",
+          kind: "direct_expense",
+        },
+        {
+          amount: "16500.0000",
+          bucket: "scheduled",
+          direction: "outflow",
+          entryCount: 1,
+          eventOn: "2026-09-30",
+          kind: "direct_expense",
+        },
+        {
+          amount: "1200.0000",
+          bucket: "overdue",
+          direction: "outflow",
+          entryCount: 1,
+          eventOn: "2026-09-05",
+          kind: "card_installment",
+        },
       ],
       unclassifiedExpenseAmount: "50.0000",
       unclassifiedExpenseCount: 1,
     });
 
-    expect(execute).toHaveBeenCalledTimes(8);
+    expect(execute).toHaveBeenCalledTimes(9);
     expect(String(execute.mock.calls[0]?.[0])).toContain("finance_transaction");
 
     const balanceSql = String(execute.mock.calls[2]?.[0]);
@@ -460,5 +557,23 @@ describe("cash flow repository", () => {
       "2026-09-30",
       "2026-09-15",
     ]);
+
+    const recurringExpenseSql = String(execute.mock.calls[8]?.[0]);
+    expect(recurringExpenseSql).toContain("FROM recurring_expense recurring");
+    expect(recurringExpenseSql).toContain(
+      "BINARY recurring.status = BINARY 'active'",
+    );
+    expect(recurringExpenseSql).toContain(
+      "LEFT JOIN expense_category category",
+    );
+    expect(recurringExpenseSql).toContain(
+      "LEFT JOIN finance_account source_account",
+    );
+    expect(recurringExpenseSql).toContain("LEFT JOIN credit_card card");
+    expect(recurringExpenseSql).toContain("LEFT JOIN project project");
+    expect(recurringExpenseSql).toContain("recurring.payment_method");
+    expect(recurringExpenseSql).toContain("card.statement_closing_day");
+    expect(recurringExpenseSql).toContain("card.payment_due_day");
+    expect(execute.mock.calls[8]?.[1]).toEqual(["2026-09-30"]);
   });
 });

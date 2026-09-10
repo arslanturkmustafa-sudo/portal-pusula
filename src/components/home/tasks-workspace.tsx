@@ -16,6 +16,7 @@ import { redirectToPortalLogin as redirectToLogin } from "@/platform/navigation/
 
 type TaskStatus = "backlog" | "todo" | "in_progress" | "blocked" | "done" | "cancelled";
 type TaskPriority = "low" | "normal" | "high" | "urgent";
+type TaskRecurrenceFrequency = "daily" | "weekly" | "monthly";
 type LoadState = "error" | "loading" | "ready";
 type SaveState = "idle" | "saving";
 type DueFilter = "all" | "today" | "overdue";
@@ -37,6 +38,8 @@ type TaskDto = Readonly<{
   projectCode: string | null;
   projectId: string | null;
   projectName: string | null;
+  recurrenceEndsOn: string | null;
+  recurrenceFrequency: TaskRecurrenceFrequency | null;
   status: TaskStatus;
   title: string;
   updatedAtUtc: string;
@@ -68,6 +71,8 @@ type TaskDraft = {
   dueOn: string;
   priority: TaskPriority;
   projectId: string;
+  recurrenceEndsOn: string;
+  recurrenceFrequency: "" | TaskRecurrenceFrequency;
   status: TaskStatus;
   title: string;
 };
@@ -102,6 +107,12 @@ const priorityOrder: Readonly<Record<TaskPriority, number>> = {
   urgent: 0,
 };
 
+const recurrenceLabels: Readonly<Record<TaskRecurrenceFrequency, string>> = {
+  daily: "Her gün",
+  monthly: "Her ay",
+  weekly: "Her hafta",
+};
+
 const dueDateFormatter = new Intl.DateTimeFormat("tr-TR", {
   day: "numeric",
   month: "short",
@@ -116,6 +127,8 @@ function emptyDraft(): TaskDraft {
     dueOn: "",
     priority: "normal",
     projectId: "",
+    recurrenceEndsOn: "",
+    recurrenceFrequency: "",
     status: "backlog",
     title: "",
   };
@@ -128,6 +141,8 @@ function taskDraft(task: TaskDto): TaskDraft {
     dueOn: task.dueOn ?? "",
     priority: task.priority,
     projectId: task.projectId ?? "",
+    recurrenceEndsOn: task.recurrenceEndsOn ?? "",
+    recurrenceFrequency: task.recurrenceFrequency ?? "",
     status: task.status,
     title: task.title,
   };
@@ -184,6 +199,8 @@ function taskBody(draft: TaskDraft) {
     dueOn: draft.dueOn || null,
     priority: draft.priority,
     projectId: draft.projectId || null,
+    recurrenceEndsOn: draft.recurrenceEndsOn || null,
+    recurrenceFrequency: draft.recurrenceFrequency || null,
     status: draft.status,
     title: draft.title.trim(),
   };
@@ -197,6 +214,12 @@ function taskUpdateBody(draft: TaskDraft, task: TaskDto) {
     ...(next.dueOn === task.dueOn ? {} : { dueOn: next.dueOn }),
     ...(next.priority === task.priority ? {} : { priority: next.priority }),
     ...(next.projectId === task.projectId ? {} : { projectId: next.projectId }),
+    ...(next.recurrenceEndsOn === task.recurrenceEndsOn
+      ? {}
+      : { recurrenceEndsOn: next.recurrenceEndsOn }),
+    ...(next.recurrenceFrequency === task.recurrenceFrequency
+      ? {}
+      : { recurrenceFrequency: next.recurrenceFrequency }),
     ...(next.status === task.status ? {} : { status: next.status }),
     ...(next.title === task.title ? {} : { title: next.title }),
     version: task.version,
@@ -210,6 +233,8 @@ function taskBodyFromRecord(task: TaskDto, status: TaskStatus) {
     dueOn: task.dueOn,
     priority: task.priority,
     projectId: task.projectId,
+    recurrenceEndsOn: task.recurrenceEndsOn,
+    recurrenceFrequency: task.recurrenceFrequency,
     status,
     title: task.title,
     version: task.version,
@@ -295,7 +320,7 @@ function TaskCard({
 
       {task.visitLinked ? (
         <p className="task-card-customer" id={visitLockId}>
-          Ziyarete bağlı · firma, proje, vade ve durum ziyaret kaydınca yönetilir
+          Ziyarete bağlı · firma, proje, vade, tekrar ve durum ziyaret kaydınca yönetilir
         </p>
       ) : null}
 
@@ -306,6 +331,14 @@ function TaskCard({
           <span className={overdue ? "task-due-overdue" : undefined}>
             <time dateTime={task.dueOn}>{dueDateLabel(task.dueOn, today)}</time>
             {overdue ? " · Gecikti" : null}
+          </span>
+        )}
+        {task.recurrenceFrequency === null ? null : (
+          <span className="task-recurrence-badge">
+            {recurrenceLabels[task.recurrenceFrequency]}
+            {task.recurrenceEndsOn === null
+              ? null
+              : ` · ${dueDateFormatter.format(dateAtNoonUtc(task.recurrenceEndsOn))} tarihine kadar`}
           </span>
         )}
         <span>v{task.version}</span>
@@ -652,6 +685,26 @@ export function TasksWorkspace({
       setFormError("Görev başlığı zorunludur.");
       return;
     }
+    if (body.recurrenceFrequency !== null && body.dueOn === null) {
+      setFormError("Tekrarlanan görevlerde vade zorunludur.");
+      return;
+    }
+    if (
+      body.recurrenceEndsOn !== null &&
+      body.dueOn !== null &&
+      body.recurrenceEndsOn < body.dueOn
+    ) {
+      setFormError("Tekrar bitiş tarihi görev vadesinden önce olamaz.");
+      return;
+    }
+    if (
+      editingTask === null &&
+      body.recurrenceFrequency !== null &&
+      (body.status === "done" || body.status === "cancelled")
+    ) {
+      setFormError("Tekrarlanan yeni görev tamamlandı veya iptal durumunda başlayamaz.");
+      return;
+    }
 
     const existing = editingTask;
     const requestBody = existing === null ? body : taskUpdateBody(draft, existing);
@@ -704,6 +757,13 @@ export function TasksWorkspace({
         ...current.filter((task) => task.id !== savedTask.id),
         savedTask,
       ]);
+      if (
+        existing !== null &&
+        existing.recurrenceFrequency !== null &&
+        savedTask.status === "done"
+      ) {
+        setRequestRevision((current) => current + 1);
+      }
       if (existing === null) {
         setQuery("");
         setCustomerFilter("all");
@@ -777,6 +837,12 @@ export function TasksWorkspace({
       setTasks((current) =>
         current.map((item) => (item.id === savedTask.id ? savedTask : item)),
       );
+      if (
+        task.recurrenceFrequency !== null &&
+        savedTask.status === "done"
+      ) {
+        setRequestRevision((current) => current + 1);
+      }
       setMobileStatus(savedTask.status);
       setAnnouncement(
         `${savedTask.title} görevi ${statusLabels[savedTask.status]} sütununa taşındı.`,
@@ -856,7 +922,7 @@ export function TasksWorkspace({
             </h2>
             <p>
               {editingTask?.visitLinked
-                ? "Bu görev bir ziyaret kaydından üretildi. Firma, proje, vade ve durum ziyaret kaydınca korunur; başlık, açıklama ve öncelik düzenlenebilir."
+                ? "Bu görev bir ziyaret kaydından üretildi. Firma, proje, vade, tekrar ve durum ziyaret kaydınca korunur; başlık, açıklama ve öncelik düzenlenebilir."
                 : "Görevi ilgili proje dosyasına bağlayın; gerekiyorsa müşteri ve vade ekleyin."}
             </p>
           </div>
@@ -929,11 +995,55 @@ export function TasksWorkspace({
                 disabled={editingTask?.visitLinked === true}
                 max="9999-12-31"
                 min="1000-01-01"
+                required={draft.recurrenceFrequency !== ""}
                 type="date"
                 value={draft.dueOn}
                 onChange={(event) => updateDraft({ dueOn: event.target.value })}
               />
             </label>
+            <label>
+              <span>Tekrar</span>
+              <select
+                disabled={editingTask?.visitLinked === true}
+                value={draft.recurrenceFrequency}
+                onChange={(event) => {
+                  const recurrenceFrequency = event.target.value as
+                    | ""
+                    | TaskRecurrenceFrequency;
+                  updateDraft({
+                    recurrenceEndsOn:
+                      recurrenceFrequency === "" ? "" : draft.recurrenceEndsOn,
+                    recurrenceFrequency,
+                    status:
+                      editingTask === null &&
+                      recurrenceFrequency !== "" &&
+                      (draft.status === "done" || draft.status === "cancelled")
+                        ? "todo"
+                        : draft.status,
+                  });
+                }}
+              >
+                <option value="">Tek seferlik</option>
+                <option value="daily">Günlük</option>
+                <option value="weekly">Haftalık</option>
+                <option value="monthly">Aylık</option>
+              </select>
+            </label>
+            {draft.recurrenceFrequency === "" ? null : (
+              <label>
+                <span>Tekrar bitiş tarihi</span>
+                <input
+                  disabled={editingTask?.visitLinked === true}
+                  max="9999-12-31"
+                  min={draft.dueOn || "1000-01-01"}
+                  type="date"
+                  value={draft.recurrenceEndsOn}
+                  onChange={(event) =>
+                    updateDraft({ recurrenceEndsOn: event.target.value })
+                  }
+                />
+              </label>
+            )}
             <label>
               <span>Öncelik</span>
               <select

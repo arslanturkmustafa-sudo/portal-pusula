@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   findActiveCustomerProjectForUpdate: vi.fn(),
   findCustomerForUpdate: vi.fn(),
   findProjectForUpdate: vi.fn(),
+  findTaskGeneratedFromTaskId: vi.fn(),
   findTaskRecordById: vi.fn(),
   findTaskStateForUpdate: vi.fn(),
   findTaskVisitLinkForUpdate: vi.fn(),
@@ -31,6 +32,7 @@ vi.mock("@/features/projects/repository", () => ({
   findProjectForUpdate: mocks.findProjectForUpdate,
 }));
 vi.mock("@/features/tasks/repository", () => ({
+  findTaskGeneratedFromTaskId: mocks.findTaskGeneratedFromTaskId,
   findTaskRecordById: mocks.findTaskRecordById,
   findTaskStateForUpdate: mocks.findTaskStateForUpdate,
   insertTaskRecord: mocks.insertTaskRecord,
@@ -84,6 +86,11 @@ const before = {
   id: taskId,
   priority: "normal" as const,
   projectId: null,
+  recurrenceAnchorDay: null,
+  recurrenceEndsOn: null,
+  recurrenceFrequency: null,
+  recurrenceGeneratedFromTaskId: null,
+  recurrenceSeriesId: null,
   status: "todo" as const,
   title: "Süreç haritasını tamamla",
   updatedAtUtc: "2026-09-02 09:00:00.000000",
@@ -117,6 +124,7 @@ describe("task service", () => {
       id: "project-id",
     });
     mocks.findTaskRecordById.mockResolvedValue(projection);
+    mocks.findTaskGeneratedFromTaskId.mockResolvedValue(null);
     mocks.findTaskStateForUpdate.mockResolvedValue(before);
     mocks.findTaskVisitLinkForUpdate.mockResolvedValue(null);
     mocks.updateTaskRecord.mockResolvedValue(true);
@@ -217,6 +225,35 @@ describe("task service", () => {
     );
   });
 
+  it("anchors a new recurring task to its first due date and series identity", async () => {
+    await createTaskInTransaction(
+      {} as never,
+      {
+        customerId,
+        description: null,
+        dueOn: "2027-01-31",
+        priority: "normal",
+        projectId: null,
+        recurrenceEndsOn: null,
+        recurrenceFrequency: "monthly",
+        status: "todo",
+        title: "Aylık kontrol",
+      },
+      context,
+      taskId,
+    );
+
+    expect(mocks.insertTaskRecord).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        recurrenceAnchorDay: 31,
+        recurrenceFrequency: "monthly",
+        recurrenceGeneratedFromTaskId: null,
+        recurrenceSeriesId: taskId,
+      }),
+    );
+  });
+
   it("sets completion time and increments the optimistic version", async () => {
     await updateTask(
       {} as Pool,
@@ -242,6 +279,90 @@ describe("task service", () => {
         afterSummary: expect.objectContaining({ status: "done", version: 5 }),
       }),
     );
+  });
+
+  it("generates the next monthly occurrence once and preserves the anchor day", async () => {
+    const recurring = {
+      ...before,
+      dueOn: "2027-01-31",
+      recurrenceAnchorDay: 31,
+      recurrenceEndsOn: "2027-03-31",
+      recurrenceFrequency: "monthly" as const,
+      recurrenceSeriesId: taskId,
+    };
+    mocks.findTaskStateForUpdate.mockResolvedValue(recurring);
+
+    await updateTask(
+      {} as Pool,
+      taskId,
+      { status: "done", version: 4 },
+      context,
+    );
+
+    expect(mocks.findTaskGeneratedFromTaskId).toHaveBeenCalledWith(
+      expect.anything(),
+      taskId,
+    );
+    expect(mocks.insertTaskRecord).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        assigneeUserAccountId: accountId,
+        customerId,
+        dueOn: "2027-02-28",
+        recurrenceAnchorDay: 31,
+        recurrenceEndsOn: "2027-03-31",
+        recurrenceFrequency: "monthly",
+        recurrenceGeneratedFromTaskId: taskId,
+        recurrenceSeriesId: taskId,
+        status: "todo",
+        title: before.title,
+      }),
+    );
+    expect(mocks.appendAuditEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ action: "task.recurrence_generated" }),
+    );
+  });
+
+  it("does not generate a duplicate occurrence for the same completed task", async () => {
+    mocks.findTaskStateForUpdate.mockResolvedValue({
+      ...before,
+      recurrenceAnchorDay: 5,
+      recurrenceFrequency: "weekly",
+      recurrenceSeriesId: taskId,
+    });
+    mocks.findTaskGeneratedFromTaskId.mockResolvedValue(
+      "30000000-0000-4000-8000-000000000002",
+    );
+
+    await updateTask(
+      {} as Pool,
+      taskId,
+      { status: "done", version: 4 },
+      context,
+    );
+
+    expect(mocks.insertTaskRecord).not.toHaveBeenCalled();
+  });
+
+  it("stops recurrence when the next due date exceeds the configured end", async () => {
+    mocks.findTaskStateForUpdate.mockResolvedValue({
+      ...before,
+      dueOn: "2026-09-05",
+      recurrenceAnchorDay: 5,
+      recurrenceEndsOn: "2026-09-05",
+      recurrenceFrequency: "daily",
+      recurrenceSeriesId: taskId,
+    });
+
+    await updateTask(
+      {} as Pool,
+      taskId,
+      { status: "done", version: 4 },
+      context,
+    );
+
+    expect(mocks.insertTaskRecord).not.toHaveBeenCalled();
   });
 
   it("keeps safe fields editable when the task is linked to a visit", async () => {
@@ -296,6 +417,8 @@ describe("task service", () => {
     ["projectId", "40000000-0000-4000-8000-000000000001"],
     ["dueOn", "2026-09-06"],
     ["status", "done"],
+    ["recurrenceFrequency", "weekly"],
+    ["recurrenceEndsOn", "2026-10-01"],
   ] as const)(
     "rejects a linked task %s change before mutation or audit",
     async (field, value) => {

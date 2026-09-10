@@ -12,6 +12,7 @@ import {
 import { findProjectForUpdate } from "@/features/projects/repository";
 import { LifecycleArchivedRecordError } from "@/features/lifecycle";
 import {
+  findTaskGeneratedFromTaskId,
   findTaskRecordById,
   findTaskStateForUpdate,
   insertTaskRecord,
@@ -26,11 +27,16 @@ import {
   type CreateTaskInput,
   createTaskInputSchema,
   type UpdateTaskInput,
+  taskRecurrenceStateSchema,
   updateTaskInputSchema,
 } from "@/features/tasks/validation";
 import { appendAuditEvent } from "@/platform/audit/repository";
 import { withUtcTransaction } from "@/platform/jobs/mysql-transaction";
 import { toUtcDateTime6 } from "@/platform/jobs/time";
+import {
+  nextOccurrenceOn,
+  recurrenceAnchorDay,
+} from "@/platform/recurrence/schedule";
 import { assertCanonicalUuid } from "@/platform/validation/canonical-identifiers";
 
 export class TaskNotFoundError extends Error {
@@ -95,6 +101,11 @@ function auditSummary(task: WorkTaskState) {
     dueOn: task.dueOn,
     priority: task.priority,
     projectId: task.projectId,
+    recurrenceAnchorDay: task.recurrenceAnchorDay,
+    recurrenceEndsOn: task.recurrenceEndsOn,
+    recurrenceFrequency: task.recurrenceFrequency,
+    recurrenceGeneratedFromTaskId: task.recurrenceGeneratedFromTaskId,
+    recurrenceSeriesId: task.recurrenceSeriesId,
     status: task.status,
     title: task.title,
     version: task.version,
@@ -149,6 +160,86 @@ async function taskProjection(
   return task;
 }
 
+async function insertTaskWithAudit(
+  connection: PoolConnection,
+  task: WorkTaskState,
+  context: TaskWriteContext,
+  now: string,
+  action: "task.created" | "task.recurrence_generated",
+): Promise<void> {
+  await insertTaskRecord(connection, task);
+  await replaceTaskProjectRecord(connection, task.id, task.projectId, now);
+  await appendAuditEvent(connection, {
+    action,
+    actorId: context.actorId,
+    actorType: "user",
+    afterSummary: auditSummary(task),
+    correlationId: context.correlationId,
+    entityId: task.id,
+    entityType: "work_task",
+    occurredAtUtc: now,
+  });
+}
+
+async function generateNextRecurringTask(
+  connection: PoolConnection,
+  source: WorkTaskState,
+  context: TaskWriteContext,
+  now: string,
+): Promise<void> {
+  if (
+    source.recurrenceFrequency === null ||
+    source.recurrenceAnchorDay === null ||
+    source.recurrenceSeriesId === null ||
+    source.dueOn === null
+  ) {
+    return;
+  }
+  if ((await findTaskGeneratedFromTaskId(connection, source.id)) !== null) {
+    return;
+  }
+
+  const dueOn = nextOccurrenceOn(
+    source.dueOn,
+    source.recurrenceFrequency,
+    source.recurrenceAnchorDay,
+  );
+  if (source.recurrenceEndsOn !== null && dueOn > source.recurrenceEndsOn) {
+    return;
+  }
+
+  const task: WorkTaskState = {
+    archiveReason: null,
+    archivedAtUtc: null,
+    archivedByUserAccountId: null,
+    assigneeUserAccountId: source.assigneeUserAccountId,
+    completedAtUtc: null,
+    createdAtUtc: now,
+    customerId: source.customerId,
+    description: source.description,
+    dueOn,
+    id: randomUUID(),
+    priority: source.priority,
+    projectId: source.projectId,
+    recurrenceAnchorDay: source.recurrenceAnchorDay,
+    recurrenceEndsOn: source.recurrenceEndsOn,
+    recurrenceFrequency: source.recurrenceFrequency,
+    recurrenceGeneratedFromTaskId: source.id,
+    recurrenceSeriesId: source.recurrenceSeriesId,
+    status: "todo",
+    title: source.title,
+    updatedAtUtc: now,
+    version: 1,
+  };
+  await insertTaskWithAudit(
+    connection,
+    task,
+    context,
+    now,
+    "task.recurrence_generated",
+  );
+}
+
 export async function listTasks(pool: Pool): Promise<readonly WorkTask[]> {
   return withUtcTransaction(pool, listTaskRecords);
 }
@@ -177,6 +268,10 @@ export async function createTaskInTransaction(
     input.assigneeUserAccountId === undefined
       ? (context.actorId ?? null)
       : input.assigneeUserAccountId;
+  const recurrenceAnchor =
+    input.recurrenceFrequency === null
+      ? null
+      : recurrenceAnchorDay(input.dueOn!);
   const task: WorkTaskState = {
     archiveReason: null,
     archivedAtUtc: null,
@@ -190,6 +285,12 @@ export async function createTaskInTransaction(
     id: taskId,
     priority: input.priority,
     projectId: input.projectId,
+    recurrenceAnchorDay: recurrenceAnchor,
+    recurrenceEndsOn: input.recurrenceEndsOn,
+    recurrenceFrequency: input.recurrenceFrequency,
+    recurrenceGeneratedFromTaskId: null,
+    recurrenceSeriesId:
+      input.recurrenceFrequency === null ? null : taskId,
     status: input.status,
     title: input.title,
     updatedAtUtc: now,
@@ -202,18 +303,7 @@ export async function createTaskInTransaction(
     task.assigneeUserAccountId,
     task.projectId,
   );
-  await insertTaskRecord(connection, task);
-  await replaceTaskProjectRecord(connection, task.id, task.projectId, now);
-  await appendAuditEvent(connection, {
-    action: "task.created",
-    actorId: context.actorId,
-    actorType: "user",
-    afterSummary: auditSummary(task),
-    correlationId: context.correlationId,
-    entityId: task.id,
-    entityType: "work_task",
-    occurredAtUtc: now,
-  });
+  await insertTaskWithAudit(connection, task, context, now, "task.created");
   return taskProjection(connection, task.id);
 }
 
@@ -249,6 +339,11 @@ export async function updateTask(
       changes.dueOn !== undefined && changes.dueOn !== before.dueOn;
     const projectChanged =
       changes.projectId !== undefined && changes.projectId !== before.projectId;
+    const recurrenceChanged =
+      (changes.recurrenceFrequency !== undefined &&
+        changes.recurrenceFrequency !== before.recurrenceFrequency) ||
+      (changes.recurrenceEndsOn !== undefined &&
+        changes.recurrenceEndsOn !== before.recurrenceEndsOn);
     const statusChanged =
       changes.status !== undefined && changes.status !== before.status;
     // The task row is already locked above. Locking the immutable link in the
@@ -256,11 +351,40 @@ export async function updateTask(
     const visitLink = await findTaskVisitLinkForUpdate(connection, id);
     if (
       visitLink !== null &&
-      (customerChanged || dueOnChanged || projectChanged || statusChanged)
+      (customerChanged ||
+        dueOnChanged ||
+        projectChanged ||
+        recurrenceChanged ||
+        statusChanged)
     ) {
       throw new TaskVisitLinkedFieldsLockedError();
     }
     const nextStatus = changes.status ?? before.status;
+    const nextDueOn =
+      changes.dueOn === undefined ? before.dueOn : changes.dueOn;
+    const nextRecurrenceFrequency =
+      changes.recurrenceFrequency === undefined
+        ? before.recurrenceFrequency
+        : changes.recurrenceFrequency;
+    const nextRecurrenceEndsOn =
+      nextRecurrenceFrequency === null
+        ? null
+        : changes.recurrenceEndsOn === undefined
+          ? before.recurrenceEndsOn
+          : changes.recurrenceEndsOn;
+    taskRecurrenceStateSchema.parse({
+      dueOn: nextDueOn,
+      recurrenceEndsOn: nextRecurrenceEndsOn,
+      recurrenceFrequency: nextRecurrenceFrequency,
+    });
+    const nextRecurrenceAnchorDay =
+      nextRecurrenceFrequency === null
+        ? null
+        : before.recurrenceFrequency === nextRecurrenceFrequency &&
+            before.recurrenceAnchorDay !== null &&
+            !dueOnChanged
+          ? before.recurrenceAnchorDay
+          : recurrenceAnchorDay(nextDueOn!);
     const after: WorkTaskState = {
       ...before,
       ...changes,
@@ -270,6 +394,14 @@ export async function updateTask(
             ? before.completedAtUtc
             : now
           : null,
+      dueOn: nextDueOn,
+      recurrenceAnchorDay: nextRecurrenceAnchorDay,
+      recurrenceEndsOn: nextRecurrenceEndsOn,
+      recurrenceFrequency: nextRecurrenceFrequency,
+      recurrenceSeriesId:
+        nextRecurrenceFrequency === null
+          ? null
+          : (before.recurrenceSeriesId ?? before.id),
       status: nextStatus,
       updatedAtUtc: now,
       version: before.version + 1,
@@ -316,6 +448,9 @@ export async function updateTask(
       entityType: "work_task",
       occurredAtUtc: now,
     });
+    if (before.status !== "done" && after.status === "done") {
+      await generateNextRecurringTask(connection, after, context, now);
+    }
     return taskProjection(connection, after.id);
   });
 }

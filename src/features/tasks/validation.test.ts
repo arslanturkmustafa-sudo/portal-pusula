@@ -20,6 +20,8 @@ describe("task input", () => {
       dueOn: null,
       priority: "normal",
       projectId: null,
+      recurrenceEndsOn: null,
+      recurrenceFrequency: null,
       status: "backlog",
       title: "Süreç haritasını tamamla",
     });
@@ -57,11 +59,49 @@ describe("task input", () => {
     ).toThrow();
   });
 
+  it("requires a due date and an open initial state for recurring tasks", () => {
+    expect(
+      createTaskInputSchema.parse({
+        dueOn: "2026-09-30",
+        recurrenceEndsOn: "2026-12-31",
+        recurrenceFrequency: "monthly",
+        title: "Aylık kontrol",
+      }),
+    ).toMatchObject({
+      recurrenceEndsOn: "2026-12-31",
+      recurrenceFrequency: "monthly",
+    });
+    expect(() =>
+      createTaskInputSchema.parse({
+        recurrenceFrequency: "weekly",
+        title: "Vadesiz tekrar",
+      }),
+    ).toThrow();
+    expect(() =>
+      createTaskInputSchema.parse({
+        dueOn: "2026-09-30",
+        recurrenceFrequency: "monthly",
+        status: "done",
+        title: "Tamamlanmış tekrar",
+      }),
+    ).toThrow();
+  });
+
   it("requires an optimistic version and at least one actual change", () => {
     expect(() => updateTaskInputSchema.parse({ version: 1 })).toThrow();
     expect(() => updateTaskInputSchema.parse({ title: "Eksik sürüm" })).toThrow();
     expect(
-      updateTaskInputSchema.parse({ status: "in_progress", version: 3 }),
-    ).toEqual({ status: "in_progress", version: 3 });
+      updateTaskInputSchema.parse({
+        recurrenceEndsOn: null,
+        recurrenceFrequency: "weekly",
+        status: "in_progress",
+        version: 3,
+      }),
+    ).toEqual({
+      recurrenceEndsOn: null,
+      recurrenceFrequency: "weekly",
+      status: "in_progress",
+      version: 3,
+    });
   });
 });

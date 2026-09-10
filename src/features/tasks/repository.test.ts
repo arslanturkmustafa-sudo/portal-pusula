@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 
 import {
+  findTaskGeneratedFromTaskId,
   listTaskRecords,
   updateTaskRecord,
 } from "@/features/tasks/repository";
@@ -29,6 +30,11 @@ const taskRow = {
   project_code: "BYPUSULA",
   project_id: "40000000-0000-4000-8000-000000000001",
   project_name: "ByPusula",
+  recurrence_anchor_day: null,
+  recurrence_ends_on: null,
+  recurrence_frequency: null,
+  recurrence_generated_from_task_id: null,
+  recurrence_series_id: null,
   status: "todo",
   title: "Süreç haritasını tamamla",
   updated_at_utc: "2026-09-02 09:00:00.000000",
@@ -49,6 +55,7 @@ describe("task repository", () => {
         dueOn: "2026-09-05",
         projectCode: "BYPUSULA",
         projectName: "ByPusula",
+        recurrenceFrequency: null,
         status: "todo",
         visitLinked: false,
       }),
@@ -88,6 +95,11 @@ describe("task repository", () => {
       id: taskRow.id,
       priority: "high" as const,
       projectId: taskRow.project_id,
+      recurrenceAnchorDay: null,
+      recurrenceEndsOn: null,
+      recurrenceFrequency: null,
+      recurrenceGeneratedFromTaskId: null,
+      recurrenceSeriesId: null,
       status: "in_progress" as const,
       title: taskRow.title,
       updatedAtUtc: "2026-09-02 10:00:00.000000",
@@ -104,6 +116,22 @@ describe("task repository", () => {
     expect(execute).toHaveBeenCalledWith(
       expect.stringMatching(/WHERE id = \? AND version = \?/u),
       expect.arrayContaining([2, task.id, 1]),
+    );
+  });
+
+  it("locks the generated occurrence identity used by the idempotency fence", async () => {
+    const generatedId = "30000000-0000-4000-8000-000000000002";
+    const execute = vi.fn().mockResolvedValue([[{ id: generatedId }], []]);
+
+    await expect(
+      findTaskGeneratedFromTaskId(
+        { execute } as unknown as PoolConnection,
+        taskRow.id,
+      ),
+    ).resolves.toBe(generatedId);
+    expect(execute).toHaveBeenCalledWith(
+      expect.stringMatching(/recurrence_generated_from_task_id = \?[\s\S]*FOR UPDATE/iu),
+      [taskRow.id],
     );
   });
 });

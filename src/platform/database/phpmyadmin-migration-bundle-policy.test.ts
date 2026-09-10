@@ -117,8 +117,8 @@ describe.sequential("clean-only phpMyAdmin migration bundle policy", () => {
     expect(second.summary).toEqual(first.summary);
     expect(second.sql).toBe(first.sql);
     expect(second.manifestText).toBe(first.manifestText);
-    expect(first.summary.migrationCount).toBe(22);
-    expect(first.summary.statementCount).toBe(216);
+    expect(first.summary.migrationCount).toBe(23);
+    expect(first.summary.statementCount).toBe(233);
     expect(first.summary.sqlBytes).toBe(Buffer.byteLength(first.sql));
     expect(first.summary.sqlSha256).toBe(
       createHash("sha256").update(first.sql).digest("hex"),
@@ -189,6 +189,7 @@ describe.sequential("clean-only phpMyAdmin migration bundle policy", () => {
       "project",
       "receivable",
       "receivable_collection",
+      "recurring_expense",
       "scheduled_job",
       "tax_obligation",
       "user_account",
@@ -238,6 +239,24 @@ describe.sequential("clean-only phpMyAdmin migration bundle policy", () => {
     expect(manifest.schema.tables.monthly_visit_commitment).toContain(
       "location_label",
     );
+    expect(manifest.schema.tables.recurring_expense).toEqual(
+      expect.arrayContaining([
+        "category",
+        "frequency",
+        "next_due_on",
+        "status",
+        "total_amount",
+      ]),
+    );
+    expect(manifest.schema.tables.work_task).toEqual(
+      expect.arrayContaining([
+        "recurrence_frequency",
+        "recurrence_anchor_day",
+        "recurrence_ends_on",
+        "recurrence_series_id",
+        "recurrence_generated_from_task_id",
+      ]),
+    );
     expect(manifest.schema.tables.user_account).toEqual(
       expect.arrayContaining(["display_name", "role"]),
     );
@@ -269,6 +288,14 @@ describe.sequential("clean-only phpMyAdmin migration bundle policy", () => {
     expect(manifest.schema.checks).toContainEqual({
       name: "chk_receivable_collection_entry",
       tableName: "receivable_collection",
+    });
+    expect(manifest.schema.checks).toContainEqual({
+      name: "chk_recurring_expense_schedule",
+      tableName: "recurring_expense",
+    });
+    expect(manifest.schema.checks).toContainEqual({
+      name: "chk_work_task_recurrence",
+      tableName: "work_task",
     });
     expect(manifest.schema.foreignKeys).toEqual([
       {
@@ -388,6 +415,22 @@ describe.sequential("clean-only phpMyAdmin migration bundle policy", () => {
         tableName: "receivable",
       },
       {
+        name: "fk_recurring_expense_category",
+        tableName: "recurring_expense",
+      },
+      {
+        name: "fk_recurring_expense_credit_card",
+        tableName: "recurring_expense",
+      },
+      {
+        name: "fk_recurring_expense_project",
+        tableName: "recurring_expense",
+      },
+      {
+        name: "fk_recurring_expense_source_account",
+        tableName: "recurring_expense",
+      },
+      {
         name: "fk_user_notification_setting_account",
         tableName: "user_notification_setting",
       },
@@ -423,6 +466,10 @@ describe.sequential("clean-only phpMyAdmin migration bundle policy", () => {
         name: "fk_work_task_customer",
         tableName: "work_task",
       },
+      {
+        name: "fk_work_task_recurrence_source",
+        tableName: "work_task",
+      },
     ]);
     expect(manifest.schema.indexes).toContainEqual({
       name: "uq_platform_migration_verification_idempotency",
@@ -456,6 +503,30 @@ describe.sequential("clean-only phpMyAdmin migration bundle policy", () => {
       name: "uq_expense_category_display_name",
       tableName: "expense_category",
     });
+    expect(manifest.schema.indexes).toEqual(
+      expect.arrayContaining([
+        {
+          name: "idx_recurring_expense_status_due",
+          tableName: "recurring_expense",
+        },
+        {
+          name: "idx_recurring_expense_project_due",
+          tableName: "recurring_expense",
+        },
+        {
+          name: "uq_recurring_expense_client_operation",
+          tableName: "recurring_expense",
+        },
+        {
+          name: "uq_work_task_recurrence_source",
+          tableName: "work_task",
+        },
+        {
+          name: "idx_work_task_recurrence_series",
+          tableName: "work_task",
+        },
+      ]),
+    );
     expect(sql).toContain(
       "BINARY TABLE_NAME = BINARY 'expense_category' AND BINARY INDEX_NAME = BINARY 'uq_expense_category_display_name'",
     );
@@ -606,10 +677,16 @@ describe.sequential("clean-only phpMyAdmin migration bundle policy", () => {
         sqlFileName: "0021_user_notification_settings.sql",
         statementCount: 2,
       },
+      {
+        createdAt: 1789060097371,
+        hash: "9aca25ba6a18ee00a0cedb32f8e5a6ea22b2dfdb813302b9a87bffc3f03cbf5f",
+        sqlFileName: "0022_recurring_tasks_expenses.sql",
+        statementCount: 17,
+      },
     ]);
     expect(
       manifest.migrations.flatMap((migration) => migration.statementHashes),
-    ).toHaveLength(216);
+    ).toHaveLength(233);
     expect(
       manifest.migrations
         .flatMap((migration) => migration.statementHashes)

@@ -4,6 +4,11 @@ import Decimal from "decimal.js";
 import type { PoolConnection, RowDataPacket } from "mysql2/promise";
 
 import { assertFinanceLedgerReconciled } from "@/features/finance/account-repository";
+import { buildCardInstallmentPlan } from "@/features/finance/card-plan";
+import {
+  occurrenceDatesInRange,
+  type RecurrenceFrequency,
+} from "@/platform/recurrence/schedule";
 
 export type CashFlowDirection = "inflow" | "outflow";
 export type CashFlowForecastKind =
@@ -127,6 +132,23 @@ type UnclassifiedRow = RowDataPacket & {
   entry_count: number | string;
 };
 
+type RecurringExpenseRow = RowDataPacket & {
+  anchor_day: number | string;
+  category_label: string;
+  credit_card_label: string | null;
+  description: string;
+  ends_on: string | Date | null;
+  frequency: string;
+  id: string;
+  next_due_on: string | Date;
+  payment_due_day: number | string | null;
+  payment_method: string;
+  project_label: string | null;
+  source_account_label: string | null;
+  statement_closing_day: number | string | null;
+  total_amount: string;
+};
+
 function money(value: string): string {
   return new Decimal(value).toFixed(4);
 }
@@ -198,6 +220,83 @@ function dueItemStatus(
     throw new Error("Cash flow due item status is invalid.");
   }
   return value;
+}
+
+function recurringExpenseFrequency(
+  value: string,
+): Extract<RecurrenceFrequency, "monthly" | "weekly"> {
+  if (value !== "monthly" && value !== "weekly") {
+    throw new Error("Recurring expense frequency is invalid.");
+  }
+  return value;
+}
+
+function recurringExpenseAnchorDay(value: number | string): number {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 31) {
+    throw new Error("Recurring expense anchor day is invalid.");
+  }
+  return parsed;
+}
+
+function recurringExpenseCardDay(
+  value: number | string | null,
+  field: "payment due" | "statement closing",
+): number {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 31) {
+    throw new Error(`Recurring expense card ${field} day is invalid.`);
+  }
+  return parsed;
+}
+
+function recurringExpenseCashEventOn(
+  row: RecurringExpenseRow,
+  occurrenceOn: string,
+  totalAmount: string,
+): Readonly<{
+  dueItemKind: CashFlowDueItemKind;
+  eventOn: string;
+  forecastKind: CashFlowForecastKind;
+}> {
+  if (row.payment_method !== "credit_card") {
+    return {
+      dueItemKind: "other_expense",
+      eventOn: occurrenceOn,
+      forecastKind: "direct_expense",
+    };
+  }
+
+  const [installment] = buildCardInstallmentPlan({
+    incurredOn: occurrenceOn,
+    installmentCount: 1,
+    paymentDueDay: recurringExpenseCardDay(
+      row.payment_due_day,
+      "payment due",
+    ),
+    statementClosingDay: recurringExpenseCardDay(
+      row.statement_closing_day,
+      "statement closing",
+    ),
+    totalAmount,
+  });
+  if (!installment) {
+    throw new Error("Recurring expense card installment is missing.");
+  }
+  return {
+    dueItemKind: "card_payment",
+    eventOn: installment.dueOn,
+    forecastKind: "card_installment",
+  };
+}
+
+function recurringExpenseSourceLabel(row: RecurringExpenseRow): string | null {
+  const labels = [
+    row.category_label,
+    row.project_label,
+    row.source_account_label ?? row.credit_card_label,
+  ].filter((label): label is string => label !== null && label.trim() !== "");
+  return labels.length === 0 ? null : labels.join(" · ");
 }
 
 export async function readCashFlowLedger(
@@ -664,6 +763,76 @@ export async function readCashFlowLedger(
   const unclassified = unclassifiedRows[0];
   if (!unclassified) throw new Error("Cash flow unclassified aggregate is missing.");
 
+  const [recurringExpenseRows] = await connection.execute<RecurringExpenseRow[]>(
+    `SELECT recurring.id, recurring.description, recurring.total_amount,
+            recurring.payment_method,
+            recurring.frequency, recurring.anchor_day, recurring.next_due_on,
+            recurring.ends_on,
+            COALESCE(category.display_name, recurring.category) AS category_label,
+            source_account.display_name AS source_account_label,
+            card.display_name AS credit_card_label,
+            card.statement_closing_day, card.payment_due_day,
+            project.display_name AS project_label
+       FROM recurring_expense recurring
+       LEFT JOIN expense_category category ON category.code = recurring.category
+       LEFT JOIN finance_account source_account
+              ON source_account.id = recurring.source_account_id
+       LEFT JOIN credit_card card ON card.id = recurring.credit_card_id
+       LEFT JOIN project project ON project.id = recurring.project_id
+      WHERE BINARY recurring.status = BINARY 'active'
+        AND recurring.next_due_on <= ?
+        AND (recurring.ends_on IS NULL OR recurring.next_due_on <= recurring.ends_on)
+      ORDER BY recurring.next_due_on ASC, recurring.id ASC`,
+    [range.endOn],
+  );
+
+  const recurringForecast: CashFlowForecastAggregate[] = [];
+  const recurringDueItems: CashFlowDueItem[] = [];
+  for (const row of recurringExpenseRows) {
+    const firstOn = canonicalDate(row.next_due_on);
+    const totalAmount = money(row.total_amount);
+    const sourceLabel = recurringExpenseSourceLabel(row);
+    const occurrenceDates = occurrenceDatesInRange({
+      anchorDay: recurringExpenseAnchorDay(row.anchor_day),
+      endsOn: row.ends_on === null ? null : canonicalDate(row.ends_on),
+      firstOn,
+      frequency: recurringExpenseFrequency(row.frequency),
+      from: firstOn,
+      to: range.endOn,
+    });
+
+    for (const occurrenceOn of occurrenceDates) {
+      const projected = recurringExpenseCashEventOn(
+        row,
+        occurrenceOn,
+        totalAmount,
+      );
+      if (projected.eventOn > range.endOn) continue;
+      const isOverdue = projected.eventOn < generatedOn;
+      if (!isOverdue && projected.eventOn < range.startOn) continue;
+      recurringForecast.push({
+        amount: totalAmount,
+        bucket: isOverdue ? "overdue" : "scheduled",
+        direction: "outflow",
+        entryCount: 1,
+        eventOn: projected.eventOn,
+        kind: projected.forecastKind,
+      });
+      recurringDueItems.push({
+        direction: "outflow",
+        dueOn: projected.eventOn,
+        id: `recurring_expense:${row.id}:${occurrenceOn}`,
+        kind: projected.dueItemKind,
+        label: row.description,
+        remainingAmount: totalAmount,
+        settledAmount: "0.0000",
+        sourceLabel,
+        status: isOverdue ? "overdue" : "planned",
+        totalAmount,
+      });
+    }
+  }
+
   return {
     accountOpenings: accountOpeningRows.map((row) => ({
       accountCount: count(row.account_count),
@@ -682,26 +851,32 @@ export async function readCashFlowLedger(
       currentAssetAmount: money(balance.current_asset_amount),
       openingBalanceAmount: money(balance.opening_balance_amount),
     },
-    dueItems: dueItemRows.map((row) => ({
-      direction: direction(row.direction),
-      dueOn: canonicalDate(row.due_on),
-      id: row.id,
-      kind: dueItemKind(row.kind),
-      label: row.label,
-      remainingAmount: money(row.remaining_amount),
-      settledAmount: money(row.settled_amount),
-      sourceLabel: row.source_label,
-      status: dueItemStatus(row.status),
-      totalAmount: money(row.total_amount),
-    })),
-    forecast: forecastRows.map((row) => ({
-      amount: money(row.amount),
-      bucket: bucket(row.bucket),
-      direction: direction(row.direction),
-      entryCount: count(row.entry_count),
-      eventOn: row.event_on === null ? null : canonicalDate(row.event_on),
-      kind: forecastKind(row.kind),
-    })),
+    dueItems: [
+      ...dueItemRows.map((row) => ({
+        direction: direction(row.direction),
+        dueOn: canonicalDate(row.due_on),
+        id: row.id,
+        kind: dueItemKind(row.kind),
+        label: row.label,
+        remainingAmount: money(row.remaining_amount),
+        settledAmount: money(row.settled_amount),
+        sourceLabel: row.source_label,
+        status: dueItemStatus(row.status),
+        totalAmount: money(row.total_amount),
+      })),
+      ...recurringDueItems,
+    ],
+    forecast: [
+      ...forecastRows.map((row) => ({
+        amount: money(row.amount),
+        bucket: bucket(row.bucket),
+        direction: direction(row.direction),
+        entryCount: count(row.entry_count),
+        eventOn: row.event_on === null ? null : canonicalDate(row.event_on),
+        kind: forecastKind(row.kind),
+      })),
+      ...recurringForecast,
+    ],
     unclassifiedExpenseAmount: money(unclassified.amount),
     unclassifiedExpenseCount: count(unclassified.entry_count),
   };
