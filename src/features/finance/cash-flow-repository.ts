@@ -299,6 +299,17 @@ function recurringExpenseSourceLabel(row: RecurringExpenseRow): string | null {
   return labels.length === 0 ? null : labels.join(" · ");
 }
 
+export function recurringExpenseEventBelongsToReport(
+  eventOn: string,
+  range: Readonly<{ endOn: string; startOn: string }>,
+  generatedOn: string,
+): boolean {
+  return (
+    eventOn <= range.endOn &&
+    (eventOn < generatedOn || eventOn >= range.startOn)
+  );
+}
+
 export async function readCashFlowLedger(
   connection: PoolConnection,
   range: Readonly<{ endOn: string; startOn: string }>,
@@ -807,9 +818,16 @@ export async function readCashFlowLedger(
         occurrenceOn,
         totalAmount,
       );
-      if (projected.eventOn > range.endOn) continue;
+      if (
+        !recurringExpenseEventBelongsToReport(
+          projected.eventOn,
+          range,
+          generatedOn,
+        )
+      ) {
+        continue;
+      }
       const isOverdue = projected.eventOn < generatedOn;
-      if (!isOverdue && projected.eventOn < range.startOn) continue;
       recurringForecast.push({
         amount: totalAmount,
         bucket: isOverdue ? "overdue" : "scheduled",
