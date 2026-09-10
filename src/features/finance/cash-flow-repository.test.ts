@@ -5,9 +5,26 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
-import { readCashFlowLedger } from "@/features/finance/cash-flow-repository";
+import {
+  readCashFlowLedger,
+  recurringExpenseEventBelongsToReport,
+} from "@/features/finance/cash-flow-repository";
 
 describe("cash flow repository", () => {
+  it("excludes scheduled recurrences before a future report range but keeps overdue carry-over", () => {
+    const range = { endOn: "2026-10-31", startOn: "2026-10-01" };
+
+    expect(
+      recurringExpenseEventBelongsToReport("2026-09-20", range, "2026-09-15"),
+    ).toBe(false);
+    expect(
+      recurringExpenseEventBelongsToReport("2026-09-10", range, "2026-09-15"),
+    ).toBe(true);
+    expect(
+      recurringExpenseEventBelongsToReport("2026-10-05", range, "2026-09-15"),
+    ).toBe(true);
+  });
+
   it("uses the reconciled account ledger for actual cash and keeps forecast separate", async () => {
     const execute = vi
       .fn()
