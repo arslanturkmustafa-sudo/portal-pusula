@@ -360,6 +360,7 @@ async function resetKnownMigrationArtifacts(pool: Pool): Promise<void> {
   await pool.query(`DROP TABLE IF EXISTS \`${workTaskVisitTable}\``);
   await pool.query(`DROP TABLE IF EXISTS \`${financeLedgerEntryTable}\``);
   await pool.query(`DROP TABLE IF EXISTS \`${creditCardInstallmentTable}\``);
+  await pool.query("DROP TABLE IF EXISTS `receivable_collection`");
   await pool.query(`DROP TABLE IF EXISTS \`${expenseTable}\``);
   await pool.query(`DROP TABLE IF EXISTS \`${financeTransactionTable}\``);
   await pool.query(`DROP TABLE IF EXISTS \`${financeAccountTable}\``);
@@ -373,7 +374,6 @@ async function resetKnownMigrationArtifacts(pool: Pool): Promise<void> {
   await pool.query(`DROP TABLE IF EXISTS \`${creditCardTable}\``);
   await pool.query(`DROP TABLE IF EXISTS \`${workTaskProjectTable}\``);
   await pool.query(`DROP TABLE IF EXISTS \`${workTaskTable}\``);
-  await pool.query("DROP TABLE IF EXISTS `receivable_collection`");
   await pool.query("DROP TABLE IF EXISTS `receivable`");
   await pool.query("DROP TABLE IF EXISTS `monthly_visit_commitment`");
   await pool.query("DROP TABLE IF EXISTS `consulting_contract`");
