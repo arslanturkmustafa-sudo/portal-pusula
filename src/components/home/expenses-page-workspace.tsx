@@ -10,9 +10,13 @@ type ExpensesPageWorkspaceProps = Readonly<{
     canWriteAccounts: boolean;
     canWriteExpenses: boolean;
   }>;
+  initialCreate?: boolean;
 }>;
 
-export function ExpensesPageWorkspace({ capabilities }: ExpensesPageWorkspaceProps) {
+export function ExpensesPageWorkspace({
+  capabilities,
+  initialCreate = false,
+}: ExpensesPageWorkspaceProps) {
   return (
     <>
       <PortalPageHeader
@@ -21,7 +25,11 @@ export function ExpensesPageWorkspace({ capabilities }: ExpensesPageWorkspacePro
         title="Finans"
       />
       <FinanceSubnavigation />
-      <ExpensesWorkspace capabilities={capabilities} />
+      <ExpensesWorkspace
+        capabilities={capabilities}
+        initialCreate={initialCreate}
+        key={initialCreate ? "quick-create" : "workspace"}
+      />
     </>
   );
 }

@@ -281,7 +281,9 @@ function installmentAuditSummary(installment: CardInstallment) {
     amount: installment.amount,
     dueOn: installment.dueOn,
     expenseId: installment.expenseId,
+    financeTransactionId: installment.financeTransactionId,
     paidOn: installment.paidOn,
+    paymentAccountId: installment.paymentAccountId,
     status: installment.status,
     version: installment.version,
   };
@@ -394,6 +396,16 @@ async function selectedSourceAccount(
   return account;
 }
 
+async function selectedCardPaymentAccount(
+  connection: Parameters<typeof findFinanceAccountForUpdate>[0],
+  sourceAccountId: string,
+): Promise<FinanceAccountRecord> {
+  const account = await findFinanceAccountForUpdate(connection, sourceAccountId);
+  if (!account) throw new FinanceAccountNotFoundError();
+  if (account.status !== "active") throw new FinanceAccountInactiveError();
+  return account;
+}
+
 function requireAccountLedgerPermission(context: SpendingWriteContext): void {
   if (context.canMutateAccountLedger !== true) {
     throw new ExpenseAccountPermissionError();
@@ -447,6 +459,52 @@ async function reverseExpenseMovement(
   );
 }
 
+function cardPaymentLedgerDescription(installment: CardInstallment): string {
+  return Array.from(
+    `Kart ödemesi: ${installment.creditCardName} · ${installment.expenseDescription} ${installment.installmentNumber}/${installment.installmentCount}`,
+  )
+    .slice(0, 191)
+    .join("");
+}
+
+async function createCardPaymentMovement(
+  connection: Parameters<typeof findFinanceAccountForUpdate>[0],
+  installment: CardInstallment,
+  paidOn: string,
+  sourceAccountId: string,
+  context: SpendingWriteContext,
+): Promise<string> {
+  const result = await createFinanceTransactionInConnection(
+    connection,
+    {
+      amount: installment.amount,
+      clientOperationKey: randomUUID(),
+      description: cardPaymentLedgerDescription(installment),
+      occurredOn: paidOn,
+      sourceAccountId,
+      targetAccountId: null,
+      transactionType: "expense",
+    },
+    context,
+  );
+  return result.transaction.id;
+}
+
+async function reverseCardPaymentMovement(
+  connection: Parameters<typeof findFinanceAccountForUpdate>[0],
+  transactionId: string,
+  reason: string,
+  context: SpendingWriteContext,
+): Promise<void> {
+  await reverseFinanceTransactionInConnection(
+    connection,
+    transactionId,
+    { clientOperationKey: randomUUID(), reason },
+    context,
+    { allowExpenseManaged: true, preserveOriginalDate: true },
+  );
+}
+
 function generatedInstallments(
   expense: Expense,
   card: CreditCard,
@@ -462,6 +520,7 @@ function generatedInstallments(
     ...planned,
     createdAtUtc: now,
     expenseId: expense.id,
+    financeTransactionId: null,
     id: randomUUID(),
     paidOn: null,
     status: "planned" as const,
@@ -958,6 +1017,7 @@ export async function bulkPayCardInstallments(
   const now = toUtcDateTime6(nowDate);
   const today = istanbulDate(nowDate);
   if (input.paidOn > today) throw new InstallmentPaymentDateInFutureError();
+  requireAccountLedgerPermission(context);
 
   return withUtcTransaction(pool, async (connection) => {
     if (!(await findCreditCardForUpdate(connection, input.cardId))) {
@@ -979,6 +1039,8 @@ export async function bulkPayCardInstallments(
         return (
           installment?.status === "paid" &&
           installment.paidOn === input.paidOn &&
+          installment.paymentAccountId === input.sourceAccountId &&
+          installment.financeTransactionId !== null &&
           installment.version === expected.version + 1
         );
       });
@@ -1002,11 +1064,26 @@ export async function bulkPayCardInstallments(
       throw new CardInstallmentBulkConflictError();
     }
 
+    const paymentAccount = await selectedCardPaymentAccount(
+      connection,
+      input.sourceAccountId,
+    );
     const updated: CardInstallment[] = [];
     for (const before of open) {
+      const financeTransactionId = await createCardPaymentMovement(
+        connection,
+        before,
+        input.paidOn,
+        paymentAccount.id,
+        context,
+      );
       const after: CardInstallment = {
         ...before,
+        financeTransactionId,
         paidOn: input.paidOn,
+        paymentAccountId: paymentAccount.id,
+        paymentAccountName: paymentAccount.displayName,
+        paymentAccountType: paymentAccount.accountType,
         status: "paid",
         updatedAtUtc: now,
         version: before.version + 1,
@@ -1050,6 +1127,7 @@ export async function updateCardInstallment(
   if (input.paidOn !== null && input.paidOn > today) {
     throw new InstallmentPaymentDateInFutureError();
   }
+  requireAccountLedgerPermission(context);
   return withUtcTransaction(pool, async (connection) => {
     const locked = await findCardInstallmentForUpdate(connection, id);
     if (!locked) {
@@ -1058,9 +1136,57 @@ export async function updateCardInstallment(
     const { expenseStatus, ...before } = locked;
     if (expenseStatus !== "active") throw new SpendingResourceNotFoundError();
     if (before.version !== input.version) throw new SpendingVersionConflictError();
+    const movementChanged =
+      input.status === "paid" &&
+      (before.status !== "paid" ||
+        before.financeTransactionId === null ||
+        before.paidOn !== input.paidOn ||
+        before.paymentAccountId !== input.sourceAccountId);
+    const paymentAccount =
+      movementChanged && input.sourceAccountId !== null
+        ? await selectedCardPaymentAccount(connection, input.sourceAccountId)
+        : null;
+    if (
+      before.financeTransactionId !== null &&
+      (input.status === "planned" || movementChanged)
+    ) {
+      await reverseCardPaymentMovement(
+        connection,
+        before.financeTransactionId,
+        input.status === "planned"
+          ? "Kredi kartı taksit ödemesi plana geri alındı."
+          : "Kredi kartı taksit ödemesi güncellendi.",
+        context,
+      );
+    }
+    const financeTransactionId =
+      movementChanged && input.paidOn !== null && paymentAccount !== null
+        ? await createCardPaymentMovement(
+            connection,
+            before,
+            input.paidOn,
+            paymentAccount.id,
+            context,
+          )
+        : input.status === "paid"
+          ? before.financeTransactionId
+          : null;
     const after: CardInstallment = {
       ...before,
+      financeTransactionId,
       paidOn: input.paidOn,
+      paymentAccountId:
+        input.status === "paid"
+          ? paymentAccount?.id ?? before.paymentAccountId
+          : null,
+      paymentAccountName:
+        input.status === "paid"
+          ? paymentAccount?.displayName ?? before.paymentAccountName
+          : null,
+      paymentAccountType:
+        input.status === "paid"
+          ? paymentAccount?.accountType ?? before.paymentAccountType
+          : null,
       status: input.status,
       updatedAtUtc: now,
       version: before.version + 1,

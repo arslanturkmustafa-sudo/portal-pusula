@@ -43,6 +43,8 @@ const EXPENSE_ACCOUNT_LEDGER_MIGRATION_TAG =
   "0020_expense_account_ledger";
 const RECURRING_TASKS_EXPENSES_MIGRATION_TAG =
   "0022_recurring_tasks_expenses";
+const COLLECTION_CARD_ACCOUNTS_MIGRATION_TAG =
+  "0023_collection_card_accounts";
 
 const LEGACY_EXPENSE_CATEGORY_CODES = Object.freeze([
   "rent",
@@ -1013,6 +1015,21 @@ function exactNullableDateColumnPredicate(tableName, columnName) {
                AND EXTRA = '') = 1`;
 }
 
+function exactCreditCardInstallmentStatusPredicate() {
+  return `(SELECT COUNT(*) FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE()
+               AND TABLE_NAME = 'credit_card_installment'
+               AND COLUMN_NAME = 'status'
+               AND DATA_TYPE = 'varchar'
+               AND COLUMN_TYPE = 'varchar(16)'
+               AND CHARACTER_MAXIMUM_LENGTH = 16
+               AND CHARACTER_SET_NAME = 'ascii'
+               AND COLLATION_NAME = 'ascii_bin'
+               AND IS_NULLABLE = 'NO'
+               AND REPLACE(COLUMN_DEFAULT, '''', '') = 'planned'
+               AND EXTRA = '') = 1`;
+}
+
 function planningExpenseCategoriesGlobalPreflightPredicates(statements) {
   const seed = statements.find(
     (item) =>
@@ -1366,6 +1383,19 @@ function prerequisitePredicates(statements, migrationTag) {
     for (const predicate of recurringTasksExpensesGlobalPreflightPredicates()) {
       predicates.add(predicate);
     }
+  }
+
+  if (migrationTag === COLLECTION_CARD_ACCOUNTS_MIGRATION_TAG) {
+    for (const tableName of [
+      "credit_card_installment",
+      "receivable_collection",
+      "finance_transaction",
+    ]) {
+      predicates.add(exactTableStorageAndDefaultPredicate(tableName));
+      predicates.add(exactCanonicalParentIdPredicate(tableName));
+      predicates.add(exactSingleColumnPrimaryKeyPredicate(tableName));
+    }
+    predicates.add(exactCreditCardInstallmentStatusPredicate());
   }
 
   return [...predicates];

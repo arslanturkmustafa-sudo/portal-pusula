@@ -2,14 +2,21 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
 import {
+  CollectionAccountPermissionError,
   CollectionDateInFutureError,
   CollectionExceedsOutstandingError,
   createCollectionInputSchema,
   createReceivableCollection,
+  FinanceAccountInactiveError,
+  FinanceAccountNotFoundError,
   FinanceIdempotencyConflictError,
   FinanceResourceNotFoundError,
+  FinanceTransactionBeforeAccountOpeningError,
+  FinanceTransactionFutureDateError,
+  FinanceTransactionIdempotencyConflictError,
 } from "@/features/finance";
 import { spendingActorId } from "@/features/finance/spending-route-support";
+import { hasPermission } from "@/platform/auth/permissions";
 import { authenticateAdminRequest } from "@/platform/auth/server-auth";
 import { getDatabaseProbeEnvironment } from "@/platform/config/readiness-env";
 import { getPlatformDatabasePool } from "@/platform/database/mysql-platform";
@@ -49,11 +56,18 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const input = createCollectionInputSchema.parse(
       await readJsonWriteBody(request, 16_384),
     );
+    const canMutateAccountLedger =
+      hasPermission(principal, "finance.accounts.read") &&
+      hasPermission(principal, "finance.accounts.write");
+    if (!canMutateAccountLedger) {
+      return json({ status: "forbidden" }, 403);
+    }
     const result = await createReceivableCollection(
       getPlatformDatabasePool(getDatabaseProbeEnvironment()),
       input,
       {
         actorId: spendingActorId(principal),
+        canMutateAccountLedger,
         correlationId: correlationIdFromHeaders(request.headers),
       },
     );
@@ -74,6 +88,24 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
     if (error instanceof CollectionDateInFutureError) {
       return json({ status: "collection_date_in_future" }, 400);
+    }
+    if (error instanceof CollectionAccountPermissionError) {
+      return json({ status: "forbidden" }, 403);
+    }
+    if (error instanceof FinanceAccountNotFoundError) {
+      return json({ status: "finance_account_not_found" }, 404);
+    }
+    if (error instanceof FinanceAccountInactiveError) {
+      return json({ status: "finance_account_inactive" }, 409);
+    }
+    if (error instanceof FinanceTransactionFutureDateError) {
+      return json({ status: "finance_transaction_future_date" }, 409);
+    }
+    if (error instanceof FinanceTransactionBeforeAccountOpeningError) {
+      return json({ status: "finance_transaction_before_account_opening" }, 409);
+    }
+    if (error instanceof FinanceTransactionIdempotencyConflictError) {
+      return json({ status: "idempotency_conflict" }, 409);
     }
     if (error instanceof FinanceIdempotencyConflictError) {
       return json({ status: "idempotency_conflict" }, 409);

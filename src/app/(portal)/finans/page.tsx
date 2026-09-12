@@ -26,7 +26,10 @@ export default async function FinancePage() {
       <FinancePageWorkspace
         capabilities={{
           canReadAudit: can("audit.read"),
+          canReadAccounts: can("finance.accounts.read"),
           canReverseReceivables: can("finance.receivables.reverse"),
+          canWriteAccounts: can("finance.accounts.write"),
+          canWriteReceivables: can("finance.receivables.write"),
         }}
       />
     </PortalPermissionGate>

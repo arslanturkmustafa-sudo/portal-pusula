@@ -481,7 +481,7 @@ export function FinanceAccountsWorkspace({
           payload.status === "already_reversed"
             ? "Bu hareket daha önce ters kayıtla kapatıldı."
             : payload.status === "expense_managed_transaction"
-              ? "Bu hareketi Giderler kaydından düzeltin veya geçersiz kılın."
+              ? "Bu hareketi oluşturan tahsilat, kart ödemesi veya gider kaydından düzeltin."
             : "Ters kayıt oluşturulamadı. Listeyi yenileyip tekrar deneyin.",
         );
         setSaving(false);

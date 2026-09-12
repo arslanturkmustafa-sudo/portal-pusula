@@ -117,8 +117,8 @@ describe.sequential("clean-only phpMyAdmin migration bundle policy", () => {
     expect(second.summary).toEqual(first.summary);
     expect(second.sql).toBe(first.sql);
     expect(second.manifestText).toBe(first.manifestText);
-    expect(first.summary.migrationCount).toBe(23);
-    expect(first.summary.statementCount).toBe(233);
+    expect(first.summary.migrationCount).toBe(24);
+    expect(first.summary.statementCount).toBe(241);
     expect(first.summary.sqlBytes).toBe(Buffer.byteLength(first.sql));
     expect(first.summary.sqlSha256).toBe(
       createHash("sha256").update(first.sql).digest("hex"),
@@ -229,9 +229,13 @@ describe.sequential("clean-only phpMyAdmin migration bundle policy", () => {
     expect(manifest.schema.tables.receivable_collection).toEqual(
       expect.arrayContaining([
         "entry_type",
+        "finance_transaction_id",
         "reversal_of_id",
         "reversal_reason",
       ]),
+    );
+    expect(manifest.schema.tables.credit_card_installment).toContain(
+      "finance_transaction_id",
     );
     expect(manifest.schema.tables.expense_category).toEqual(
       expect.arrayContaining(["code", "display_name", "status"]),
@@ -297,6 +301,14 @@ describe.sequential("clean-only phpMyAdmin migration bundle policy", () => {
       name: "chk_work_task_recurrence",
       tableName: "work_task",
     });
+    expect(manifest.schema.checks).toContainEqual({
+      name: "chk_credit_card_installment_finance_transaction",
+      tableName: "credit_card_installment",
+    });
+    expect(manifest.schema.checks).toContainEqual({
+      name: "chk_receivable_collection_finance_transaction_identity",
+      tableName: "receivable_collection",
+    });
     expect(manifest.schema.foreignKeys).toEqual([
       {
         name: "fk_consulting_contract_archived_by",
@@ -312,6 +324,10 @@ describe.sequential("clean-only phpMyAdmin migration bundle policy", () => {
       },
       {
         name: "fk_credit_card_installment_expense",
+        tableName: "credit_card_installment",
+      },
+      {
+        name: "fk_credit_card_installment_finance_transaction",
         tableName: "credit_card_installment",
       },
       {
@@ -393,6 +409,10 @@ describe.sequential("clean-only phpMyAdmin migration bundle policy", () => {
       {
         name: "fk_project_archived_by",
         tableName: "project",
+      },
+      {
+        name: "fk_receivable_collection_finance_transaction",
+        tableName: "receivable_collection",
       },
       {
         name: "fk_receivable_collection_receivable",
@@ -494,6 +514,14 @@ describe.sequential("clean-only phpMyAdmin migration bundle policy", () => {
     expect(manifest.schema.indexes).toContainEqual({
       name: "uq_receivable_collection_reversal",
       tableName: "receivable_collection",
+    });
+    expect(manifest.schema.indexes).toContainEqual({
+      name: "uq_receivable_collection_finance_transaction",
+      tableName: "receivable_collection",
+    });
+    expect(manifest.schema.indexes).toContainEqual({
+      name: "uq_credit_card_installment_finance_transaction",
+      tableName: "credit_card_installment",
     });
     expect(manifest.schema.indexes).toContainEqual({
       name: "idx_receivable_state_due",
@@ -683,10 +711,16 @@ describe.sequential("clean-only phpMyAdmin migration bundle policy", () => {
         sqlFileName: "0022_recurring_tasks_expenses.sql",
         statementCount: 17,
       },
+      {
+        createdAt: 1789195799696,
+        hash: "e4a5e27b1b6113baa0bafcc52b29c7d1e8a78a293ee326daf5eb086b48bed5e3",
+        sqlFileName: "0023_collection_card_accounts.sql",
+        statementCount: 8,
+      },
     ]);
     expect(
       manifest.migrations.flatMap((migration) => migration.statementHashes),
-    ).toHaveLength(233);
+    ).toHaveLength(241);
     expect(
       manifest.migrations
         .flatMap((migration) => migration.statementHashes)

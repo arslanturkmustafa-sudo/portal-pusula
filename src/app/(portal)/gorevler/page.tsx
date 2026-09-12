@@ -9,13 +9,20 @@ export const metadata: Metadata = {
   title: "Görevler · Portal Pusula",
 };
 
-export default async function TasksPage() {
+type TasksPageProps = Readonly<{
+  searchParams: Promise<{ action?: string | string[] }>;
+}>;
+
+export default async function TasksPage({ searchParams }: TasksPageProps) {
   const principal = await authenticateCurrentPrincipal();
+  const { action } = await searchParams;
   const can = (permission: PermissionCode) =>
     principal ? hasPermission(principal, permission) : false;
   return (
     <PortalPermissionGate anyOf={["tasks.read"]}>
       <TasksWorkspace
+        initialCreate={action === "create"}
+        key={action === "create" ? "quick-create" : "workspace"}
         capabilities={{
           canExportReports: can("tasks.reports.export"),
           canLifecycleTasks: can("tasks.lifecycle"),

@@ -19,10 +19,12 @@ import {
   findFinanceAccountBalanceRecord,
   findFinanceAccountByOperationKeyForUpdate,
   findFinanceAccountForUpdate,
+  findCardInstallmentByFinanceTransactionForUpdate,
   findExpenseByFinanceTransactionForUpdate,
   findFinanceTransactionByOperationKeyForUpdate,
   findFinanceTransactionForUpdate,
   findFinanceTransactionReversalForUpdate,
+  findReceivableCollectionByFinanceTransactionForUpdate,
   insertFinanceAccountRecordIdempotently,
   insertFinanceLedgerEntries,
   insertFinanceTransactionRecordIdempotently,
@@ -118,7 +120,7 @@ export class FinanceTransactionBeforeAccountOpeningError extends Error {
 
 export class FinanceTransactionManagedByExpenseError extends Error {
   constructor() {
-    super("An expense-managed transaction must be corrected from the expense record.");
+    super("A managed transaction must be corrected from its source record.");
     this.name = "FinanceTransactionManagedByExpenseError";
   }
 }
@@ -613,7 +615,15 @@ export async function reverseFinanceTransactionInConnection(
   const now = toUtcDateTime6(nowDate);
   if (
     options.allowExpenseManaged !== true &&
-    (await findExpenseByFinanceTransactionForUpdate(connection, id)) !== null
+    ((await findExpenseByFinanceTransactionForUpdate(connection, id)) !== null ||
+      (await findReceivableCollectionByFinanceTransactionForUpdate(
+        connection,
+        id,
+      )) !== null ||
+      (await findCardInstallmentByFinanceTransactionForUpdate(
+        connection,
+        id,
+      )) !== null)
   ) {
     throw new FinanceTransactionManagedByExpenseError();
   }

@@ -30,6 +30,14 @@ type FinanceProject = Readonly<{
   status: "planned" | "active" | "on_hold" | "completed" | "cancelled";
 }>;
 
+type FinanceAccount = Readonly<{
+  accountType: "bank" | "cash";
+  bankName: string | null;
+  displayName: string;
+  id: string;
+  status: "active" | "inactive";
+}>;
+
 type ContractOption = Readonly<{
   endsOn: string;
   id: string;
@@ -43,11 +51,15 @@ type ReceivableCollection = Readonly<{
   amount: string;
   collectedOn: string;
   entryType: "collection" | "reversal";
+  financeTransactionId?: string | null;
+  hasAccountMovement?: boolean;
   id: string;
   reasonSummary: string | null;
   receivableId: string;
   reversalOfId: string | null;
   reversed: boolean;
+  targetAccountId?: string | null;
+  targetAccountName?: string | null;
 }>;
 
 type Receivable = Readonly<{
@@ -90,9 +102,13 @@ type ReceivablePayload = Readonly<{
 }>;
 
 type FinanceWorkspaceProps = Readonly<{
+  accounts?: readonly FinanceAccount[];
   capabilities?: Readonly<{
     canReadAudit: boolean;
+    canReadAccounts: boolean;
     canReverseReceivables: boolean;
+    canWriteAccounts: boolean;
+    canWriteReceivables: boolean;
   }>;
   customers: readonly FinanceCustomer[];
   live: boolean;
@@ -101,7 +117,10 @@ type FinanceWorkspaceProps = Readonly<{
 
 const fullFinanceCapabilities: NonNullable<FinanceWorkspaceProps["capabilities"]> = {
   canReadAudit: true,
+  canReadAccounts: true,
   canReverseReceivables: true,
+  canWriteAccounts: true,
+  canWriteReceivables: true,
 };
 
 const emptySummary: FinanceSummary = {
@@ -195,6 +214,23 @@ const sampleContractOptions: readonly ContractOption[] = [
   },
 ];
 
+const sampleAccounts: readonly FinanceAccount[] = [
+  {
+    accountType: "bank",
+    bankName: "Örnek Banka",
+    displayName: "Ana TL Hesabı",
+    id: "sample-account-1",
+    status: "active",
+  },
+  {
+    accountType: "cash",
+    bankName: null,
+    displayName: "Merkez Kasa",
+    id: "sample-account-2",
+    status: "active",
+  },
+];
+
 function istanbulToday(): string {
   const parts = new Intl.DateTimeFormat("en-CA", {
     day: "2-digit",
@@ -265,6 +301,10 @@ function financeWriteErrorMessage(status: string | undefined): string {
     contract_not_billable: "Seçilen sözleşme bu ay için tahakkuk oluşturmaya uygun değil.",
     contract_project_missing: "Sözleşmenin proje bağlantısı eksik; önce sözleşmeyi güncelleyin.",
     idempotency_conflict: "Aynı işlem anahtarı farklı bilgilerle kullanılmış. Formu kapatıp yeniden açın.",
+    finance_account_inactive: "Seçilen kasa veya banka hesabı artık aktif değil.",
+    finance_account_not_found: "Seçilen kasa veya banka hesabı bulunamadı.",
+    finance_transaction_before_account_opening: "Tahsilat tarihi hesabın açılış tarihinden önce olamaz.",
+    forbidden: "Kasa veya banka hareketi oluşturmak için hesap yetkiniz bulunmuyor.",
     month_outside_contract: "Seçilen ay sözleşmenin çalışma dönemi dışında.",
     project_unavailable: "Müşteri seçilen projeye artık aktif olarak bağlı değil.",
     resource_not_found: "Seçilen kayıt artık bulunamıyor. Sayfayı yenileyip tekrar deneyin.",
@@ -294,6 +334,7 @@ async function fetchReceivablePayload(
 }
 
 export function FinanceWorkspace({
+  accounts = [],
   capabilities = fullFinanceCapabilities,
   customers,
   live,
@@ -380,6 +421,13 @@ export function FinanceWorkspace({
     () => payload.receivables.filter((item) => item.status !== "paid"),
     [payload.receivables],
   );
+
+  const activeAccounts = useMemo(
+    () => (live ? accounts : sampleAccounts).filter((account) => account.status === "active"),
+    [accounts, live],
+  );
+  const canUseAccountLedger =
+    capabilities.canReadAccounts && capabilities.canWriteAccounts;
 
   const visibleContractOptions = (
     live ? contractOptions : sampleContractOptions
@@ -518,6 +566,7 @@ export function FinanceWorkspace({
       collectedOn: formValue(fields, "collectedOn"),
       note: note === "" ? null : note,
       receivableId: formValue(fields, "receivableId"),
+      targetAccountId: formValue(fields, "targetAccountId"),
     }, true);
   }
 
@@ -550,6 +599,7 @@ export function FinanceWorkspace({
           <button
             aria-expanded={activeAction === "generate"}
             className="primary-action"
+            disabled={!capabilities.canWriteReceivables}
             type="button"
             onClick={() => openAction("generate")}
           >
@@ -558,6 +608,7 @@ export function FinanceWorkspace({
           <button
             aria-expanded={activeAction === "opening"}
             className="text-action"
+            disabled={!capabilities.canWriteReceivables}
             type="button"
             onClick={() => openAction("opening")}
           >
@@ -566,7 +617,12 @@ export function FinanceWorkspace({
           <button
             aria-expanded={activeAction === "collection"}
             className="text-action"
-            disabled={collectableReceivables.length === 0}
+            disabled={
+              !capabilities.canWriteReceivables ||
+              !canUseAccountLedger ||
+              collectableReceivables.length === 0 ||
+              activeAccounts.length === 0
+            }
             type="button"
             onClick={() => openAction("collection")}
           >
@@ -764,6 +820,18 @@ export function FinanceWorkspace({
                 />
               </label>
               <label className="finance-form-wide">
+                <span>Tahsilatın geldiği kasa / banka hesabı</span>
+                <select name="targetAccountId" required>
+                  <option value="">Hesap seçin</option>
+                  {activeAccounts.map((account) => (
+                    <option key={account.id} value={account.id}>
+                      {account.accountType === "cash" ? "Kasa" : "Banka"} · {account.displayName}
+                      {account.bankName === null ? "" : ` · ${account.bankName}`}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="finance-form-wide">
                 <span>Not</span>
                 <input maxLength={500} name="note" placeholder="İsteğe bağlı" />
               </label>
@@ -771,7 +839,17 @@ export function FinanceWorkspace({
                 <button className="text-action" type="button" onClick={() => setActiveAction(null)}>
                   Vazgeç
                 </button>
-                <button className="primary-action" disabled={!live || saveState === "saving"} type="submit">
+                <button
+                  className="primary-action"
+                  disabled={
+                    !live ||
+                    saveState === "saving" ||
+                    !capabilities.canWriteReceivables ||
+                    !canUseAccountLedger ||
+                    activeAccounts.length === 0
+                  }
+                  type="submit"
+                >
                   {!live ? "Önizleme" : saveState === "saving" ? "İşleniyor…" : "Tahsilatı işle"}
                 </button>
               </div>
@@ -852,9 +930,15 @@ export function FinanceWorkspace({
                     <div key={collection.id}>
                       <small>
                         {formatDate(collection.collectedOn)} · {formatMoney(collection.amount)}
+                        {capabilities.canReadAccounts
+                          ? ` · ${collection.targetAccountName ?? "Hesap belirtilmemiş (eski kayıt)"}`
+                          : ""}
                       </small>
                       <RecordLifecycleControls
-                        actions={capabilities.canReverseReceivables && collection.entryType === "collection" && !collection.reversed ? [{
+                        actions={capabilities.canReverseReceivables &&
+                          collection.entryType === "collection" &&
+                          !collection.reversed &&
+                          (collection.hasAccountMovement !== true || canUseAccountLedger) ? [{
                           description: "Tahsilatı silmeden ters kayıtla dengeler ve alacak bakiyesini yeniden açar.",
                           id: "reverse",
                           label: "Tahsilatı ters kaydet",

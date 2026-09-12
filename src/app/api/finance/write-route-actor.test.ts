@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   authenticate: vi.fn(),
   collection: vi.fn(),
   generate: vi.fn(),
+  hasPermission: vi.fn(),
   opening: vi.fn(),
   parseCollection: vi.fn(),
   parseGenerate: vi.fn(),
@@ -18,21 +19,30 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/features/finance", () => ({
   CollectionDateInFutureError: class extends Error {},
   CollectionExceedsOutstandingError: class extends Error {},
+  CollectionAccountPermissionError: class extends Error {},
   ContractNotBillableError: class extends Error {},
   createCollectionInputSchema: { parse: mocks.parseCollection },
   createOpeningBalance: mocks.opening,
   createReceivableCollection: mocks.collection,
+  FinanceAccountInactiveError: class extends Error {},
+  FinanceAccountNotFoundError: class extends Error {},
   FinanceContractProjectMissingError: class extends Error {},
   FinanceCustomerProjectUnavailableError: class extends Error {},
   FinanceIdempotencyConflictError: class extends Error {},
   FinanceMonthOutsideContractError: class extends Error {},
   FinanceResourceNotFoundError: class extends Error {},
+  FinanceTransactionBeforeAccountOpeningError: class extends Error {},
+  FinanceTransactionFutureDateError: class extends Error {},
+  FinanceTransactionIdempotencyConflictError: class extends Error {},
   generateContractMonthReceivable: mocks.generate,
   generateReceivableInputSchema: { parse: mocks.parseGenerate },
   openingBalanceInputSchema: { parse: mocks.parseOpening },
 }));
 vi.mock("@/platform/auth/server-auth", () => ({
   authenticateAdminRequest: mocks.authenticate,
+}));
+vi.mock("@/platform/auth/permissions", () => ({
+  hasPermission: mocks.hasPermission,
 }));
 vi.mock("@/platform/config/readiness-env", () => ({
   getDatabaseProbeEnvironment: () => ({}),
@@ -62,6 +72,7 @@ describe("finance write-route audit actor bridge", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.authenticate.mockResolvedValue({ accountId, kind: "account" });
+    mocks.hasPermission.mockReturnValue(true);
     mocks.parseCollection.mockImplementation((value: unknown) => value);
     mocks.parseGenerate.mockImplementation((value: unknown) => value);
     mocks.parseOpening.mockImplementation((value: unknown) => value);
@@ -91,7 +102,11 @@ describe("finance write-route audit actor bridge", () => {
     expect(service).toHaveBeenCalledWith(
       {},
       { value: "fixture" },
-      expect.objectContaining({ actorId: accountId }),
+      expect.objectContaining(
+        pathname === "/api/finance/collections"
+          ? { actorId: accountId, canMutateAccountLedger: true }
+          : { actorId: accountId },
+      ),
     );
     expect(mocks.authenticate).toHaveBeenCalledWith(
       expect.any(NextRequest),

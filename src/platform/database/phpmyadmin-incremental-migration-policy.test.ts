@@ -70,6 +70,8 @@ const userNotificationSettingsMigrationTag =
   "0021_user_notification_settings";
 const recurringTasksExpensesMigrationTag =
   "0022_recurring_tasks_expenses";
+const collectionCardAccountsMigrationTag =
+  "0023_collection_card_accounts";
 const incremental0011Backfills = untyped0011Backfills as {
   consultingContract: string;
   customerProject: string;
@@ -521,6 +523,17 @@ describe.sequential("phpMyAdmin incremental migration bundle policy", () => {
       },
       statementCount: 17,
     },
+    {
+      expectedJournalCount: 23,
+      expectedPreviousTag: recurringTasksExpensesMigrationTag,
+      migrationTag: collectionCardAccountsMigrationTag,
+      requiredTarget: {
+        name: "finance_transaction_id",
+        tableName: "receivable_collection",
+        type: "add-column",
+      },
+      statementCount: 8,
+    },
   ])(
     "builds deterministic guarded $migrationTag artifact",
     async ({
@@ -823,6 +836,88 @@ describe.sequential("phpMyAdmin incremental migration bundle policy", () => {
         analyzeIncrementalMigrationStatement(
           mutated,
           recurringTasksExpensesMigrationTag,
+        ),
+      ).toThrow();
+    }
+  });
+
+  it("locks the 0023 collection and card account links to ASCII-safe additive DDL", async () => {
+    const migrationSql = await readFile(
+      resolve(projectRoot, "drizzle", `${collectionCardAccountsMigrationTag}.sql`),
+      "utf8",
+    );
+    const migrationStatements = migrationSql
+      .split(/--> statement-breakpoint\s*/gu)
+      .map((statement) => statement.trim().replace(/;$/u, ""));
+    const artifact = await buildCurrentIncremental(
+      collectionCardAccountsMigrationTag,
+      await temporaryOutputDirectory(),
+    );
+    const initialGuard = artifact.sql.slice(
+      0,
+      artifact.sql.indexOf("SET @pp_candidate_sql = 0x"),
+    );
+
+    expect(
+      migrationStatements.map((statement) =>
+        analyzeIncrementalMigrationStatement(
+          statement,
+          collectionCardAccountsMigrationTag,
+        ),
+      ),
+    ).toHaveLength(8);
+    expect(artifact.manifest).toMatchObject({
+      expectedJournalCount: 23,
+      expectedPreviousMigration: { tag: recurringTasksExpensesMigrationTag },
+      migration: {
+        createdAt: 1789195799696,
+        hash: "e4a5e27b1b6113baa0bafcc52b29c7d1e8a78a293ee326daf5eb086b48bed5e3",
+        tag: collectionCardAccountsMigrationTag,
+      },
+    });
+    for (const tableName of [
+      "credit_card_installment",
+      "receivable_collection",
+      "finance_transaction",
+    ]) {
+      expect(initialGuard).toContain(
+        `TABLE_NAME = '${tableName}' AND COLUMN_NAME = 'id' AND DATA_TYPE = 'char' AND COLUMN_TYPE = 'char(36)'`,
+      );
+      expect(initialGuard).toContain(
+        `TABLE_NAME = '${tableName}' AND CONSTRAINT_NAME = 'PRIMARY' AND CONSTRAINT_TYPE = 'PRIMARY KEY') = 1`,
+      );
+    }
+    for (const tableName of ["credit_card_installment", "receivable_collection"]) {
+      expect(initialGuard).toContain(
+        `TABLE_NAME = '${tableName}' AND COLUMN_NAME = 'finance_transaction_id') = 0`,
+      );
+    }
+    expect(initialGuard).toContain(
+      "TABLE_NAME = 'credit_card_installment' AND COLUMN_NAME = 'status' AND DATA_TYPE = 'varchar' AND COLUMN_TYPE = 'varchar(16)'",
+    );
+    expect(initialGuard).toContain(
+      "COLLATION_NAME = 'ascii_bin' AND IS_NULLABLE = 'NO' AND REPLACE(COLUMN_DEFAULT, '''', '') = 'planned'",
+    );
+
+    const addColumn = migrationStatements[0];
+    const check = migrationStatements.find((statement) =>
+      statement.includes("chk_credit_card_installment_finance_transaction"),
+    );
+    const foreignKey = migrationStatements.find((statement) =>
+      statement.includes("fk_receivable_collection_finance_transaction"),
+    );
+    expect(addColumn).toContain("CHARACTER SET ascii COLLATE ascii_bin");
+    expect(check).toBeDefined();
+    expect(foreignKey).toBeDefined();
+    for (const mutated of [
+      addColumn.replace("ascii_bin", "utf8mb4_unicode_ci"),
+      check!.replace("BINARY 'paid'", "BINARY 'planned'"),
+      foreignKey!.replace("`finance_transaction`", "`finance_account`"),
+    ]) {
+      expect(() =>
+        analyzeIncrementalMigrationStatement(
+          mutated,
+          collectionCardAccountsMigrationTag,
         ),
       ).toThrow();
     }

@@ -3,8 +3,9 @@ import { FinanceSubnavigation } from "@/components/home/finance-subnavigation";
 import { PortalPageHeader } from "@/components/portal/portal-page-header";
 
 export function CardPlanPageWorkspace({
+  canManagePayments,
   canWrite,
-}: Readonly<{ canWrite: boolean }>) {
+}: Readonly<{ canManagePayments: boolean; canWrite: boolean }>) {
   return (
     <>
       <PortalPageHeader
@@ -13,7 +14,10 @@ export function CardPlanPageWorkspace({
         title="Finans"
       />
       <FinanceSubnavigation />
-      <CardPlanWorkspace canWrite={canWrite} />
+      <CardPlanWorkspace
+        canManagePayments={canManagePayments}
+        canWrite={canWrite}
+      />
     </>
   );
 }

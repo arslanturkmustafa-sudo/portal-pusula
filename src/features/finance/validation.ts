@@ -108,6 +108,7 @@ export const createCollectionInputSchema = z
     collectedOn: isoDateSchema,
     note: optionalNoteSchema,
     receivableId: canonicalUuidSchema,
+    targetAccountId: canonicalUuidSchema,
   })
   .strict();
 

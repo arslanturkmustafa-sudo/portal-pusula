@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   useEffect,
   useMemo,
@@ -417,6 +418,7 @@ type TasksWorkspaceProps = Readonly<{
     canReadProjects: boolean;
     canWriteTasks: boolean;
   }>;
+  initialCreate?: boolean;
 }>;
 
 const fullTaskCapabilities: NonNullable<TasksWorkspaceProps["capabilities"]> = {
@@ -430,7 +432,9 @@ const fullTaskCapabilities: NonNullable<TasksWorkspaceProps["capabilities"]> = {
 
 export function TasksWorkspace({
   capabilities = fullTaskCapabilities,
+  initialCreate = false,
 }: TasksWorkspaceProps) {
+  const router = useRouter();
   const [tasks, setTasks] = useState<readonly TaskDto[]>([]);
   const [customers, setCustomers] = useState<readonly CustomerDto[]>([]);
   const [projects, setProjects] = useState<readonly ProjectDto[]>([]);
@@ -441,7 +445,9 @@ export function TasksWorkspace({
   const [customerFilter, setCustomerFilter] = useState("all");
   const [projectFilter, setProjectFilter] = useState("all");
   const [mobileStatus, setMobileStatus] = useState<TaskStatus>("todo");
-  const [editorOpen, setEditorOpen] = useState(false);
+  const [editorOpen, setEditorOpen] = useState(
+    initialCreate && capabilities.canWriteTasks,
+  );
   const [editingTask, setEditingTask] = useState<TaskDto | null>(null);
   const [draft, setDraft] = useState<TaskDraft>(() => emptyDraft());
   const [saveState, setSaveState] = useState<SaveState>("idle");
@@ -669,6 +675,7 @@ export function TasksWorkspace({
     setEditingTask(null);
     setFormError(null);
     setSaveState("idle");
+    if (initialCreate) router.replace("/gorevler", { scroll: false });
     if (!returnFocus) return;
     if (editedId === null) createButtonRef.current?.focus();
     else setFocusTaskId(editedId);

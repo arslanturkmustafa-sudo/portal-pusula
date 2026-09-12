@@ -10,7 +10,9 @@ const mocks = vi.hoisted(() => ({
   findAccountBalance: vi.fn(),
   findAccountByOperation: vi.fn(),
   findAccountForUpdate: vi.fn(),
+  findCardInstallmentByTransaction: vi.fn(),
   findExpenseByTransaction: vi.fn(),
+  findReceivableCollectionByTransaction: vi.fn(),
   findReversal: vi.fn(),
   findTransaction: vi.fn(),
   findTransactionByOperation: vi.fn(),
@@ -27,10 +29,14 @@ vi.mock("@/features/finance/account-repository", () => ({
   findFinanceAccountBalanceRecord: mocks.findAccountBalance,
   findFinanceAccountByOperationKeyForUpdate: mocks.findAccountByOperation,
   findFinanceAccountForUpdate: mocks.findAccountForUpdate,
+  findCardInstallmentByFinanceTransactionForUpdate:
+    mocks.findCardInstallmentByTransaction,
   findExpenseByFinanceTransactionForUpdate: mocks.findExpenseByTransaction,
   findFinanceTransactionByOperationKeyForUpdate: mocks.findTransactionByOperation,
   findFinanceTransactionForUpdate: mocks.findTransaction,
   findFinanceTransactionReversalForUpdate: mocks.findReversal,
+  findReceivableCollectionByFinanceTransactionForUpdate:
+    mocks.findReceivableCollectionByTransaction,
   insertFinanceAccountRecordIdempotently: mocks.insertAccount,
   insertFinanceLedgerEntries: mocks.insertLedger,
   insertFinanceTransactionRecordIdempotently: mocks.insertTransaction,
@@ -92,7 +98,9 @@ describe("finance account service", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.findTransactionByOperation.mockResolvedValue(null);
+    mocks.findCardInstallmentByTransaction.mockResolvedValue(null);
     mocks.findExpenseByTransaction.mockResolvedValue(null);
+    mocks.findReceivableCollectionByTransaction.mockResolvedValue(null);
     mocks.findReversal.mockResolvedValue(null);
     mocks.lockAccounts.mockImplementation(async (_connection, ids: string[]) =>
       ids.map((id) => (id === bankId ? bank : cash)),
@@ -285,10 +293,12 @@ describe("finance account service", () => {
     ]);
   });
 
-  it("blocks a generic reversal for an expense-managed movement", async () => {
-    mocks.findExpenseByTransaction.mockResolvedValue(
-      "50000000-0000-4000-8000-000000000001",
-    );
+  it.each([
+    ["expense", mocks.findExpenseByTransaction],
+    ["collection", mocks.findReceivableCollectionByTransaction],
+    ["card installment", mocks.findCardInstallmentByTransaction],
+  ])("blocks a generic reversal for a %s-managed movement", async (_label, finder) => {
+    finder.mockResolvedValue("50000000-0000-4000-8000-000000000001");
     await expect(
       reverseFinanceTransaction(
         {} as Pool,

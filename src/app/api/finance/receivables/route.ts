@@ -5,7 +5,8 @@ import {
   financeReceivableListFilterSchema,
   listFinanceReceivables,
 } from "@/features/finance";
-import { isAdminAuthenticated } from "@/platform/auth/server-auth";
+import { hasPermission } from "@/platform/auth/permissions";
+import { authenticateAdminRequest } from "@/platform/auth/server-auth";
 import { getDatabaseProbeEnvironment } from "@/platform/config/readiness-env";
 import { getPlatformDatabasePool } from "@/platform/database/mysql-platform";
 
@@ -24,7 +25,11 @@ function json(body: unknown, status = 200): NextResponse {
 }
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  if (!(await isAdminAuthenticated(request, "finance.receivables.read"))) {
+  const principal = await authenticateAdminRequest(
+    request,
+    "finance.receivables.read",
+  );
+  if (!principal) {
     return json({ status: "unauthorized" }, 401);
   }
 
@@ -44,7 +49,19 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       getPlatformDatabasePool(getDatabaseProbeEnvironment()),
       filters,
     );
-    return json(result);
+    if (hasPermission(principal, "finance.accounts.read")) return json(result);
+    return json({
+      ...result,
+      receivables: result.receivables.map((receivable) => ({
+        ...receivable,
+        collections: receivable.collections.map((collection) => ({
+          ...collection,
+          financeTransactionId: null,
+          targetAccountId: null,
+          targetAccountName: null,
+        })),
+      })),
+    });
   } catch (error) {
     if (error instanceof z.ZodError) {
       return json({ status: "validation_error" }, 400);

@@ -15,6 +15,7 @@ type PortalIconName =
   | "customers"
   | "finance"
   | "more"
+  | "plus"
   | "projects"
   | "settings"
   | "tasks"
@@ -26,6 +27,13 @@ type PortalNavigationItem = Readonly<{
   label: string;
   permissions?: readonly PermissionCode[];
   shortLabel: string;
+}>;
+
+type PortalQuickAction = Readonly<{
+  href: string;
+  icon: PortalIconName;
+  label: string;
+  permissions: readonly PermissionCode[];
 }>;
 
 export const portalNavigationItems: readonly PortalNavigationItem[] = [
@@ -94,6 +102,32 @@ export const portalNavigationItems: readonly PortalNavigationItem[] = [
   },
 ];
 
+const portalQuickActions: readonly PortalQuickAction[] = [
+  {
+    href: "/gunluk-plan",
+    icon: "calendar",
+    label: "Takvim",
+    permissions: ["daily-plan.read"],
+  },
+  {
+    href: "/finans/giderler?action=create",
+    icon: "finance",
+    label: "Gider ekle",
+    permissions: ["finance.expenses.read", "finance.expenses.write"],
+  },
+  {
+    href: "/gorevler?action=create",
+    icon: "tasks",
+    label: "Görev oluştur",
+    permissions: [
+      "tasks.read",
+      "tasks.write",
+      "customers.read",
+      "projects.read",
+    ],
+  },
+];
+
 function PortalNavIcon({ name }: Readonly<{ name: PortalIconName }>) {
   const paths: Record<PortalIconName, React.ReactNode> = {
     customers: (
@@ -156,6 +190,7 @@ function PortalNavIcon({ name }: Readonly<{ name: PortalIconName }>) {
         <circle cx="19" cy="12" r="1" fill="currentColor" stroke="none" />
       </>
     ),
+    plus: <path d="M12 5v14M5 12h14" />,
   };
 
   return (
@@ -185,6 +220,24 @@ function canSeeItem(
   return (
     item.permissions === undefined ||
     item.permissions.some((permission) => hasPermission(principal, permission))
+  );
+}
+
+function canSeeQuickAction(
+  principal: PermissionPrincipal,
+  action: PortalQuickAction,
+): boolean {
+  return action.permissions.every((permission) =>
+    hasPermission(principal, permission),
+  );
+}
+
+function QuickActionLink({ action }: Readonly<{ action: PortalQuickAction }>) {
+  return (
+    <Link className="portal-quick-link" href={action.href}>
+      <PortalNavIcon name={action.icon} />
+      <span>{action.label}</span>
+    </Link>
   );
 }
 
@@ -237,6 +290,9 @@ export function PortalNavigation({
   const items = portalNavigationItems
     .filter((item) => canSeeItem(principal, item))
     .map((item) => destinationForPrincipal(principal, item));
+  const quickActions = portalQuickActions.filter((action) =>
+    canSeeQuickAction(principal, action),
+  );
   const primaryItems = items.filter(
     (item) => item.icon !== "account" && item.icon !== "users",
   ).slice(0, 4);
@@ -248,6 +304,20 @@ export function PortalNavigation({
 
   return (
     <>
+      {quickActions.length > 0 ? (
+        <nav
+          className="portal-quick-access portal-quick-access-desktop"
+          aria-label="Hızlı ulaşım"
+        >
+          <p>Hızlı ulaşım</p>
+          <div>
+            {quickActions.map((action) => (
+              <QuickActionLink action={action} key={action.href} />
+            ))}
+          </div>
+        </nav>
+      ) : null}
+
       <nav className="ledger-nav ledger-nav-desktop" aria-label="Ana navigasyon">
         {items.map((item) => (
           <NavigationLink item={item} key={item.href} pathname={pathname} />
@@ -259,14 +329,32 @@ export function PortalNavigation({
           <NavigationLink item={item} key={item.href} pathname={pathname} />
         ))}
         <details className="mobile-nav-more">
-          <summary className={overflowActive ? "is-active" : undefined}>
-            <PortalNavIcon name="more" />
-            <span>Diğer</span>
+          <summary
+            aria-label={
+              quickActions.length > 0 ? "Hızlı ulaşım ve diğer sayfalar" : "Diğer sayfalar"
+            }
+            className={overflowActive ? "is-active" : undefined}
+          >
+            <PortalNavIcon name={quickActions.length > 0 ? "plus" : "more"} />
+            <span>{quickActions.length > 0 ? "Hızlı" : "Diğer"}</span>
           </summary>
           <div className="mobile-nav-menu">
-            {overflowItems.map((item) => (
-              <NavigationLink item={item} key={item.href} pathname={pathname} />
-            ))}
+            {quickActions.length > 0 ? (
+              <div className="mobile-nav-menu-section">
+                <p>Hızlı ulaşım</p>
+                {quickActions.map((action) => (
+                  <QuickActionLink action={action} key={action.href} />
+                ))}
+              </div>
+            ) : null}
+            {overflowItems.length > 0 ? (
+              <div className="mobile-nav-menu-section">
+                <p>Diğer sayfalar</p>
+                {overflowItems.map((item) => (
+                  <NavigationLink item={item} key={item.href} pathname={pathname} />
+                ))}
+              </div>
+            ) : null}
           </div>
         </details>
       </nav>

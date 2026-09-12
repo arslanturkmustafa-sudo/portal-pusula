@@ -105,7 +105,7 @@ type TransactionOverviewRow = TransactionRow & {
 };
 
 type LedgerMismatchRow = RowDataPacket & { transaction_id: string };
-type ExpenseMovementRow = RowDataPacket & { expense_id: string };
+type ManagedMovementRow = RowDataPacket & { id: string };
 
 function canonicalDate(value: string | Date): string {
   return value instanceof Date ? value.toISOString().slice(0, 10) : value.slice(0, 10);
@@ -494,14 +494,42 @@ export async function findExpenseByFinanceTransactionForUpdate(
   connection: PoolConnection,
   financeTransactionId: string,
 ): Promise<string | null> {
-  const [rows] = await connection.execute<ExpenseMovementRow[]>(
-    `SELECT id AS expense_id
+  const [rows] = await connection.execute<ManagedMovementRow[]>(
+    `SELECT id
        FROM expense
       WHERE finance_transaction_id = ?
       FOR UPDATE`,
     [financeTransactionId],
   );
-  return rows[0]?.expense_id ?? null;
+  return rows[0]?.id ?? null;
+}
+
+export async function findReceivableCollectionByFinanceTransactionForUpdate(
+  connection: PoolConnection,
+  financeTransactionId: string,
+): Promise<string | null> {
+  const [rows] = await connection.execute<ManagedMovementRow[]>(
+    `SELECT id
+       FROM receivable_collection
+      WHERE finance_transaction_id = ?
+      FOR UPDATE`,
+    [financeTransactionId],
+  );
+  return rows[0]?.id ?? null;
+}
+
+export async function findCardInstallmentByFinanceTransactionForUpdate(
+  connection: PoolConnection,
+  financeTransactionId: string,
+): Promise<string | null> {
+  const [rows] = await connection.execute<ManagedMovementRow[]>(
+    `SELECT id
+       FROM credit_card_installment
+      WHERE finance_transaction_id = ?
+      FOR UPDATE`,
+    [financeTransactionId],
+  );
+  return rows[0]?.id ?? null;
 }
 
 export async function findFinanceTransactionByOperationKeyForUpdate(

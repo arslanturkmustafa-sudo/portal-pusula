@@ -39,13 +39,25 @@ type CardInstallmentDto = Readonly<{
   expenseDescription: string;
   dueOn: string;
   expenseId: string;
+  financeTransactionId: string | null;
   id: string;
   installmentCount: number;
   installmentNumber: number;
   paidOn: string | null;
+  paymentAccountId: string | null;
+  paymentAccountName: string | null;
+  paymentAccountType: "bank" | "cash" | null;
   statementMonth: string;
   status: InstallmentStatus;
   version: number;
+}>;
+
+type FinanceAccountDto = Readonly<{
+  accountType: "bank" | "cash";
+  balanceAmount: string;
+  displayName: string;
+  id: string;
+  status: "active" | "inactive";
 }>;
 
 type CardDraft = {
@@ -62,11 +74,13 @@ type CardDraft = {
 type PaymentDraft = Readonly<{
   installmentId: string;
   paidOn: string;
+  sourceAccountId: string;
 }>;
 
 type BulkPaymentDraft = Readonly<{
   cardId: string;
   paidOn: string;
+  sourceAccountId: string;
 }>;
 
 type CardPlanGroup = Readonly<{
@@ -132,6 +146,11 @@ function sumMoney(values: readonly string[]): string {
   return values
     .reduce((sum, value) => sum.plus(value), new Decimal(0))
     .toFixed(4);
+}
+
+function paymentAccountLabel(account: FinanceAccountDto): string {
+  const type = account.accountType === "bank" ? "Banka" : "Kasa";
+  return `${account.displayName} · ${type} · ${formatMoney(account.balanceAmount)}`;
 }
 
 function nullable(value: string): string | null {
@@ -247,11 +266,17 @@ function buildCardPlanGroups(
 }
 
 export function CardPlanWorkspace({
+  canManagePayments,
   canWrite,
-}: Readonly<{ canWrite: boolean }>) {
+}: Readonly<{ canManagePayments: boolean; canWrite: boolean }>) {
   const [cards, setCards] = useState<readonly CreditCardDto[]>([]);
   const [installments, setInstallments] = useState<readonly CardInstallmentDto[]>([]);
+  const [paymentAccounts, setPaymentAccounts] = useState<
+    readonly FinanceAccountDto[]
+  >([]);
   const [cardLoadState, setCardLoadState] = useState<LoadState>("loading");
+  const [accountLoadState, setAccountLoadState] =
+    useState<LoadState>("loading");
   const [planLoadState, setPlanLoadState] = useState<LoadState>("loading");
   const [requestRevision, setRequestRevision] = useState(0);
   const [planRequestRevision, setPlanRequestRevision] = useState(0);
@@ -263,6 +288,7 @@ export function CardPlanWorkspace({
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [formError, setFormError] = useState<string | null>(null);
   const [cardActionError, setCardActionError] = useState<string | null>(null);
+  const [accountError, setAccountError] = useState<string | null>(null);
   const [planError, setPlanError] = useState<string | null>(null);
   const [planRefreshRequired, setPlanRefreshRequired] = useState(false);
   const [paymentDraft, setPaymentDraft] = useState<PaymentDraft | null>(null);
@@ -327,6 +353,23 @@ export function CardPlanWorkspace({
     [cardFilter, month],
   );
 
+  const loadPaymentAccounts = useCallback(async (signal?: AbortSignal) => {
+    const response = await fetch("/api/finance/accounts", {
+      cache: "no-store",
+      credentials: "same-origin",
+      signal,
+    });
+    if (response.status === 401) return redirectToLogin();
+    if (!response.ok) throw new Error("Finance accounts are unavailable.");
+    const payload = (await response.json()) as { accounts?: FinanceAccountDto[] };
+    if (!Array.isArray(payload.accounts)) {
+      throw new Error("Finance account response is invalid.");
+    }
+    setPaymentAccounts(payload.accounts);
+    setAccountError(null);
+    setAccountLoadState("ready");
+  }, []);
+
   useEffect(() => {
     const controller = new AbortController();
     void Promise.resolve()
@@ -355,6 +398,22 @@ export function CardPlanWorkspace({
       });
     return () => controller.abort();
   }, [cardLoadState, loadInstallments, planRequestRevision]);
+
+  useEffect(() => {
+    if (!canManagePayments) return;
+    const controller = new AbortController();
+    void Promise.resolve()
+      .then(() => loadPaymentAccounts(controller.signal))
+      .catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        setPaymentAccounts([]);
+        setAccountError(
+          "Ödeme hesaplarına ulaşılamadı. Hesaplar sayfasını kontrol edin.",
+        );
+        setAccountLoadState("error");
+      });
+    return () => controller.abort();
+  }, [canManagePayments, loadPaymentAccounts, requestRevision]);
 
   useEffect(() => {
     if (!editorOpen) return;
@@ -405,6 +464,10 @@ export function CardPlanWorkspace({
   const cardPlanGroups = useMemo(
     () => buildCardPlanGroups(installments),
     [installments],
+  );
+  const activePaymentAccounts = useMemo(
+    () => paymentAccounts.filter((account) => account.status === "active"),
+    [paymentAccounts],
   );
 
   function updateDraft(next: Partial<CardDraft>): void {
@@ -541,6 +604,7 @@ export function CardPlanWorkspace({
     installment: CardInstallmentDto,
     status: "paid" | "planned",
     paidOn: string | null,
+    sourceAccountId: string | null,
   ): Promise<void> {
     if (updatingInstallmentId !== null) return;
     setUpdatingInstallmentId(installment.id);
@@ -549,6 +613,7 @@ export function CardPlanWorkspace({
       const response = await fetch(`/api/finance/card-installments/${installment.id}`, {
         body: JSON.stringify({
           paidOn,
+          sourceAccountId,
           status,
           version: installment.version,
         }),
@@ -584,9 +649,10 @@ export function CardPlanWorkspace({
       (installment) => installment.status !== "paid",
     );
     if (
-      !canWrite ||
+      !canManagePayments ||
       month === "" ||
       draft?.cardId !== group.cardId ||
+      draft.sourceAccountId === "" ||
       openInstallments.length === 0 ||
       bulkPayingCardId !== null
     ) {
@@ -604,6 +670,7 @@ export function CardPlanWorkspace({
           })),
           month,
           paidOn: draft.paidOn,
+          sourceAccountId: draft.sourceAccountId,
         }),
         credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
@@ -663,7 +730,18 @@ export function CardPlanWorkspace({
   }
 
   function beginPayment(installment: CardInstallmentDto): void {
-    setPaymentDraft({ installmentId: installment.id, paidOn: istanbulToday() });
+    const sourceAccountId = activePaymentAccounts[0]?.id;
+    if (!canManagePayments || sourceAccountId === undefined) {
+      setPlanError(
+        "Ödeme kaydı için önce aktif bir banka hesabı veya kasa oluşturun.",
+      );
+      return;
+    }
+    setPaymentDraft({
+      installmentId: installment.id,
+      paidOn: istanbulToday(),
+      sourceAccountId,
+    });
     setPlanError(null);
   }
 
@@ -984,6 +1062,30 @@ export function CardPlanWorkspace({
           </div>
         )}
 
+        {canManagePayments && accountError !== null ? (
+          <div className="finance-workspace-message is-error" role="alert">
+            <span>{accountError}</span>
+            <button
+              type="button"
+              onClick={() => {
+                setAccountError(null);
+                setAccountLoadState("loading");
+                setRequestRevision((current) => current + 1);
+              }}
+            >
+              Yeniden dene
+            </button>
+          </div>
+        ) : null}
+
+        {canManagePayments &&
+        accountLoadState === "ready" &&
+        activePaymentAccounts.length === 0 ? (
+          <p className="finance-workspace-message">
+            Ödeme kaydı için önce aktif bir banka hesabı veya kasa oluşturun.
+          </p>
+        ) : null}
+
         {planLoadState === "error" ? null : planLoadState === "loading" ? (
           <p className="finance-workspace-message" role="status">
             Ödeme planı yükleniyor…
@@ -1018,7 +1120,10 @@ export function CardPlanWorkspace({
                       </h4>
                       <p>{group.installments.length} taksit · {openCount} açık</p>
                     </div>
-                    {canWrite && !planRefreshRequired && month !== "" && openCount > 0 ? (
+                    {canManagePayments &&
+                    !planRefreshRequired &&
+                    month !== "" &&
+                    openCount > 0 ? (
                       bulkEditorOpen ? (
                         <form
                           className="card-bulk-payment-editor"
@@ -1051,16 +1156,41 @@ export function CardPlanWorkspace({
                                 setBulkPaymentDraft({
                                   cardId: group.cardId,
                                   paidOn: event.target.value,
+                                  sourceAccountId:
+                                    bulkPaymentDraft.sourceAccountId,
                                 })
                               }
                             />
+                          </label>
+                          <label>
+                            <span>Ödeme hesabı / kasa</span>
+                            <select
+                              aria-label={`${group.creditCardName} toplu ödeme hesabı veya kasa`}
+                              required
+                              value={bulkPaymentDraft.sourceAccountId}
+                              onChange={(event) =>
+                                setBulkPaymentDraft({
+                                  cardId: group.cardId,
+                                  paidOn: bulkPaymentDraft.paidOn,
+                                  sourceAccountId: event.target.value,
+                                })
+                              }
+                            >
+                              {activePaymentAccounts.map((account) => (
+                                <option key={account.id} value={account.id}>
+                                  {paymentAccountLabel(account)}
+                                </option>
+                              ))}
+                            </select>
                           </label>
                           <div>
                             <button
                               className="card-payment-toggle"
                               disabled={
                                 bulkPayingCardId !== null ||
-                                updatingInstallmentId !== null
+                                updatingInstallmentId !== null ||
+                                accountLoadState !== "ready" ||
+                                activePaymentAccounts.length === 0
                               }
                               type="submit"
                             >
@@ -1083,7 +1213,9 @@ export function CardPlanWorkspace({
                           className="card-bulk-payment-trigger"
                           disabled={
                             bulkPayingCardId !== null ||
-                            updatingInstallmentId !== null
+                            updatingInstallmentId !== null ||
+                            accountLoadState !== "ready" ||
+                            activePaymentAccounts.length === 0
                           }
                           ref={(node) => {
                             if (node === null) bulkTriggerRefs.current.delete(group.cardId);
@@ -1095,6 +1227,8 @@ export function CardPlanWorkspace({
                             setBulkPaymentDraft({
                               cardId: group.cardId,
                               paidOn: istanbulToday(),
+                              sourceAccountId:
+                                activePaymentAccounts[0]?.id ?? "",
                             });
                           }}
                         >
@@ -1145,7 +1279,8 @@ export function CardPlanWorkspace({
                           <th scope="col">Tutar</th>
                           <th scope="col">Durum</th>
                           <th scope="col">Ödeme tarihi</th>
-                          {canWrite ? <th scope="col">İşlem</th> : null}
+                          <th scope="col">Ödeme hesabı</th>
+                          {canManagePayments ? <th scope="col">İşlem</th> : null}
                         </tr>
                       </thead>
                       <tbody>
@@ -1161,14 +1296,24 @@ export function CardPlanWorkspace({
                             <td data-label="Ödeme tarihi">
                               {installment.paidOn === null ? "—" : formatDate(installment.paidOn)}
                             </td>
-                            {canWrite ? (
+                            <td data-label="Ödeme hesabı">
+                              {installment.status === "paid"
+                                ? installment.paymentAccountName ?? "Belirtilmemiş"
+                                : "—"}
+                            </td>
+                            {canManagePayments ? (
                               <td data-label="İşlem">
                                 {paymentDraft?.installmentId === installment.id ? (
                                   <form
                                     className="card-payment-editor"
                                     onSubmit={(event) => {
                                       event.preventDefault();
-                                      void updateInstallment(installment, "paid", paymentDraft.paidOn);
+                                      void updateInstallment(
+                                        installment,
+                                        "paid",
+                                        paymentDraft.paidOn,
+                                        paymentDraft.sourceAccountId,
+                                      );
                                     }}
                                   >
                                     <label>
@@ -1182,8 +1327,29 @@ export function CardPlanWorkspace({
                                         onChange={(event) => setPaymentDraft({
                                           installmentId: installment.id,
                                           paidOn: event.target.value,
+                                          sourceAccountId:
+                                            paymentDraft.sourceAccountId,
                                         })}
                                       />
+                                    </label>
+                                    <label>
+                                      <span>Ödeme hesabı / kasa</span>
+                                      <select
+                                        aria-label={`${installment.expenseDescription} ${installment.installmentNumber}. taksit ödeme hesabı veya kasa`}
+                                        required
+                                        value={paymentDraft.sourceAccountId}
+                                        onChange={(event) => setPaymentDraft({
+                                          installmentId: installment.id,
+                                          paidOn: paymentDraft.paidOn,
+                                          sourceAccountId: event.target.value,
+                                        })}
+                                      >
+                                        {activePaymentAccounts.map((account) => (
+                                          <option key={account.id} value={account.id}>
+                                            {paymentAccountLabel(account)}
+                                          </option>
+                                        ))}
+                                      </select>
                                     </label>
                                     <div>
                                       <button
@@ -1220,7 +1386,12 @@ export function CardPlanWorkspace({
                                     type="button"
                                     onClick={() => {
                                       if (installment.status === "paid") {
-                                        void updateInstallment(installment, "planned", null);
+                                        void updateInstallment(
+                                          installment,
+                                          "planned",
+                                          null,
+                                          null,
+                                        );
                                       } else {
                                         beginPayment(installment);
                                       }

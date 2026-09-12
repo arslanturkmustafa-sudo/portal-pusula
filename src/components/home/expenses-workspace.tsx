@@ -1,6 +1,7 @@
 "use client";
 
 import Decimal from "decimal.js";
+import { useRouter } from "next/navigation";
 import {
   useCallback,
   useEffect,
@@ -382,6 +383,7 @@ type ExpensesWorkspaceProps = Readonly<{
     canWriteAccounts?: boolean;
     canWriteExpenses: boolean;
   }>;
+  initialCreate?: boolean;
 }>;
 
 const fullExpenseCapabilities: NonNullable<ExpensesWorkspaceProps["capabilities"]> = {
@@ -394,7 +396,9 @@ const fullExpenseCapabilities: NonNullable<ExpensesWorkspaceProps["capabilities"
 
 export function ExpensesWorkspace({
   capabilities = fullExpenseCapabilities,
+  initialCreate = false,
 }: ExpensesWorkspaceProps = {}) {
+  const router = useRouter();
   const [projects, setProjects] = useState<readonly ProjectDto[]>([]);
   const [cards, setCards] = useState<readonly CreditCardDto[]>([]);
   const [accounts, setAccounts] = useState<readonly FinanceAccountDto[]>([]);
@@ -407,7 +411,9 @@ export function ExpensesWorkspace({
   >([]);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [requestRevision, setRequestRevision] = useState(0);
-  const [editorMode, setEditorMode] = useState<EditorMode>(null);
+  const [editorMode, setEditorMode] = useState<EditorMode>(
+    initialCreate && capabilities.canWriteExpenses ? "create" : null,
+  );
   const [editingExpense, setEditingExpense] = useState<ExpenseDto | null>(null);
   const [editingPlan, setEditingPlan] = useState<RecurringExpensePlanDto | null>(
     null,
@@ -708,6 +714,9 @@ export function ExpensesWorkspace({
     setSaveState("idle");
     setFormError(null);
     operationRef.current = null;
+    if (initialCreate) {
+      router.replace("/finans/giderler", { scroll: false });
+    }
   }
 
   function closeCategoryEditor(restoreFocus: boolean): void {

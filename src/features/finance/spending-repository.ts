@@ -80,10 +80,14 @@ export type CardInstallment = Readonly<{
   dueOn: string;
   expenseDescription: string;
   expenseId: string;
+  financeTransactionId: string | null;
   id: string;
   installmentCount: number;
   installmentNumber: number;
   paidOn: string | null;
+  paymentAccountId: string | null;
+  paymentAccountName: string | null;
+  paymentAccountType: "bank" | "cash" | null;
   statementMonth: string;
   status: InstallmentStoredStatus;
   updatedAtUtc: string;
@@ -96,6 +100,9 @@ export type NewCardInstallment = Omit<
   | "creditCardId"
   | "creditCardName"
   | "expenseDescription"
+  | "paymentAccountId"
+  | "paymentAccountName"
+  | "paymentAccountType"
   | "updatedAtUtc"
 > &
   Readonly<{ createdAtUtc: string; updatedAtUtc: string }>;
@@ -157,10 +164,14 @@ type InstallmentRow = RowDataPacket & {
   due_on: string | Date;
   expense_description: string;
   expense_id: string;
+  finance_transaction_id: string | null;
   id: string;
   installment_count: number;
   installment_number: number;
   paid_on: string | Date | null;
+  payment_account_id: string | null;
+  payment_account_name: string | null;
+  payment_account_type: string | null;
   statement_month: string | Date;
   status: string;
   updated_at_utc: string | Date;
@@ -306,6 +317,14 @@ function mapExpense(row: ExpenseRow): Expense {
 }
 
 function mapInstallment(row: InstallmentRow): CardInstallment {
+  const paymentAccountType = row.payment_account_type;
+  if (
+    paymentAccountType !== null &&
+    paymentAccountType !== "bank" &&
+    paymentAccountType !== "cash"
+  ) {
+    throw new Error("Card installment payment account type is invalid.");
+  }
   return {
     amount: row.amount,
     createdAtUtc: canonicalDateTime(row.created_at_utc),
@@ -314,10 +333,14 @@ function mapInstallment(row: InstallmentRow): CardInstallment {
     dueOn: canonicalDate(row.due_on),
     expenseDescription: row.expense_description,
     expenseId: row.expense_id,
+    financeTransactionId: row.finance_transaction_id,
     id: row.id,
     installmentCount: row.installment_count,
     installmentNumber: row.installment_number,
     paidOn: row.paid_on === null ? null : canonicalDate(row.paid_on),
+    paymentAccountId: row.payment_account_id,
+    paymentAccountName: row.payment_account_name,
+    paymentAccountType,
     statementMonth: canonicalMonth(row.statement_month),
     status: mapInstallmentStatus(row.status),
     updatedAtUtc: canonicalDateTime(row.updated_at_utc),
@@ -345,8 +368,17 @@ const INSTALLMENT_COLUMNS = `
   ci.id, ci.expense_id, e.credit_card_id,
   cc.display_name AS credit_card_name, e.description AS expense_description,
   ci.installment_number, ci.installment_count, ci.statement_month, ci.due_on,
-  ci.amount, ci.status, ci.paid_on, ci.version, ci.created_at_utc,
-  ci.updated_at_utc`;
+  ci.amount, ci.status, ci.paid_on, ci.finance_transaction_id,
+  payment_transaction.source_account_id AS payment_account_id,
+  payment_account.display_name AS payment_account_name,
+  payment_account.account_type AS payment_account_type,
+  ci.version, ci.created_at_utc, ci.updated_at_utc`;
+
+const INSTALLMENT_PAYMENT_JOINS = `
+       LEFT JOIN finance_transaction payment_transaction
+         ON payment_transaction.id = ci.finance_transaction_id
+       LEFT JOIN finance_account payment_account
+         ON payment_account.id = payment_transaction.source_account_id`;
 
 export async function listCreditCardRecords(
   connection: PoolConnection,
@@ -624,6 +656,7 @@ export async function listExpenseInstallmentsForUpdate(
        FROM credit_card_installment ci
        JOIN expense e ON e.id = ci.expense_id
        JOIN credit_card cc ON cc.id = e.credit_card_id
+       ${INSTALLMENT_PAYMENT_JOINS}
       WHERE ci.expense_id = ?
       ORDER BY ci.installment_number ASC
       FOR UPDATE`,
@@ -651,9 +684,9 @@ export async function insertCardInstallmentRecords(
     const [result] = await connection.execute<ResultSetHeader>(
       `INSERT INTO credit_card_installment
          (id, expense_id, installment_number, installment_count,
-          statement_month, due_on, amount, status, paid_on, version,
-          created_at_utc, updated_at_utc)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          statement_month, due_on, amount, status, paid_on,
+          finance_transaction_id, version, created_at_utc, updated_at_utc)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         installment.id,
         installment.expenseId,
@@ -664,6 +697,7 @@ export async function insertCardInstallmentRecords(
         installment.amount,
         installment.status,
         installment.paidOn,
+        installment.financeTransactionId,
         installment.version,
         installment.createdAtUtc,
         installment.updatedAtUtc,
@@ -698,6 +732,7 @@ export async function listCardInstallmentRecords(
        FROM credit_card_installment ci
        JOIN expense e ON e.id = ci.expense_id
        JOIN credit_card cc ON cc.id = e.credit_card_id
+       ${INSTALLMENT_PAYMENT_JOINS}
       WHERE ${clauses.join(" AND ")}
       ORDER BY ci.due_on ASC, cc.display_name ASC, ci.id ASC`,
     values,
@@ -716,6 +751,7 @@ export async function listCardInstallmentsForBulkUpdate(
        FROM credit_card_installment ci
        JOIN expense e ON e.id = ci.expense_id
        JOIN credit_card cc ON cc.id = e.credit_card_id
+       ${INSTALLMENT_PAYMENT_JOINS}
       WHERE e.status = 'active'
         AND e.credit_card_id = ?
         AND ci.due_on >= ?
@@ -738,6 +774,7 @@ export async function findCardInstallmentForUpdate(
        FROM credit_card_installment ci
        JOIN expense e ON e.id = ci.expense_id
        JOIN credit_card cc ON cc.id = e.credit_card_id
+       ${INSTALLMENT_PAYMENT_JOINS}
       WHERE ci.id = ?
       FOR UPDATE`,
     [id],
@@ -755,11 +792,13 @@ export async function updateCardInstallmentRecord(
 ): Promise<boolean> {
   const [result] = await connection.execute<ResultSetHeader>(
     `UPDATE credit_card_installment
-        SET status = ?, paid_on = ?, version = ?, updated_at_utc = ?
+        SET status = ?, paid_on = ?, finance_transaction_id = ?,
+            version = ?, updated_at_utc = ?
       WHERE id = ? AND version = ?`,
     [
       installment.status,
       installment.paidOn,
+      installment.financeTransactionId,
       installment.version,
       installment.updatedAtUtc,
       installment.id,

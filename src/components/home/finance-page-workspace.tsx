@@ -29,14 +29,26 @@ type FinanceCustomer = Readonly<{
 
 type FinanceProject = NonNullable<FinanceCustomer["projects"]>[number];
 
+type FinanceAccount = Readonly<{
+  accountType: "bank" | "cash";
+  bankName: string | null;
+  displayName: string;
+  id: string;
+  status: "active" | "inactive";
+}>;
+
 type FinancePageWorkspaceProps = Readonly<{
   capabilities: Readonly<{
     canReadAudit: boolean;
+    canReadAccounts: boolean;
     canReverseReceivables: boolean;
+    canWriteAccounts: boolean;
+    canWriteReceivables: boolean;
   }>;
 }>;
 
 export function FinancePageWorkspace({ capabilities }: FinancePageWorkspaceProps) {
+  const [accounts, setAccounts] = useState<readonly FinanceAccount[]>([]);
   const [customers, setCustomers] = useState<readonly FinanceCustomer[]>([]);
   const [projects, setProjects] = useState<readonly FinanceProject[]>([]);
   const [loadState, setLoadState] = useState<"error" | "loading" | "ready">(
@@ -79,6 +91,35 @@ export function FinancePageWorkspace({ capabilities }: FinancePageWorkspaceProps
   }, []);
 
   useEffect(() => {
+    if (!capabilities.canReadAccounts) return;
+    const controller = new AbortController();
+
+    void fetch("/api/finance/accounts", {
+      cache: "no-store",
+      credentials: "same-origin",
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (response.status === 401) {
+          redirectToLogin();
+          return null;
+        }
+        if (!response.ok) throw new Error("Finance account list is unavailable.");
+        return (await response.json()) as { accounts?: FinanceAccount[] };
+      })
+      .then((payload) => {
+        if (!payload) return;
+        setAccounts(payload.accounts ?? []);
+      })
+      .catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        setAccounts([]);
+      });
+
+    return () => controller.abort();
+  }, [capabilities.canReadAccounts]);
+
+  useEffect(() => {
     const controller = new AbortController();
 
     void fetch("/api/projects", {
@@ -114,7 +155,13 @@ export function FinancePageWorkspace({ capabilities }: FinancePageWorkspaceProps
           müşteri seçilerek işlem yapılamayabilir.
         </p>
       ) : null}
-      <FinanceWorkspace capabilities={capabilities} customers={customers} live projects={projects} />
+      <FinanceWorkspace
+        accounts={accounts}
+        capabilities={capabilities}
+        customers={customers}
+        live
+        projects={projects}
+      />
     </>
   );
 }

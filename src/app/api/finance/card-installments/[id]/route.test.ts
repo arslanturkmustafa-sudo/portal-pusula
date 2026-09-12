@@ -9,6 +9,12 @@ const mocks = vi.hoisted(() => {
   return { authenticate: vi.fn(), InstallmentPaymentDateInFutureError, parse: vi.fn(), requestLogger: vi.fn(), update: vi.fn() };
 });
 vi.mock("@/features/finance", () => ({
+  ExpenseAccountPermissionError: class extends Error {},
+  FinanceAccountInactiveError: class extends Error {},
+  FinanceAccountNotFoundError: class extends Error {},
+  FinanceTransactionAlreadyReversedError: class extends Error {},
+  FinanceTransactionBeforeAccountOpeningError: class extends Error {},
+  FinanceTransactionFutureDateError: class extends Error {},
   InstallmentPaymentDateInFutureError: mocks.InstallmentPaymentDateInFutureError,
   SpendingResourceNotFoundError: class extends Error {},
   SpendingVersionConflictError: class extends Error {},
@@ -28,7 +34,12 @@ describe("card installment item API", () => {
     mocks.authenticate.mockResolvedValue({
       accountId: "10000000-0000-4000-8000-000000000001",
       kind: "account",
-      permissions: ["finance.cards.read", "finance.cards.write"],
+      permissions: [
+        "finance.accounts.read",
+        "finance.accounts.write",
+        "finance.cards.read",
+        "finance.cards.write",
+      ],
       role: "member",
     });
     mocks.parse.mockImplementation((value: unknown) => value);
@@ -39,7 +50,12 @@ describe("card installment item API", () => {
     mocks.update.mockRejectedValue(new mocks.InstallmentPaymentDateInFutureError());
     const response = await PATCH(
       new NextRequest("https://portal.example/api/finance/card-installments/id", {
-        body: JSON.stringify({ paidOn: "2099-01-01", status: "paid", version: 1 }),
+        body: JSON.stringify({
+          paidOn: "2099-01-01",
+          sourceAccountId: "70000000-0000-4000-8000-000000000001",
+          status: "paid",
+          version: 1,
+        }),
         headers: { "content-type": "application/json", origin: "https://portal.example" },
         method: "PATCH",
       }),
@@ -49,11 +65,11 @@ describe("card installment item API", () => {
     await expect(response.json()).resolves.toEqual({ status: "payment_date_in_future" });
   });
 
-  it("rejects write-only access before reading an installment body", async () => {
+  it("requires account permissions before reading an installment body", async () => {
     mocks.authenticate.mockResolvedValue({
       accountId: "10000000-0000-4000-8000-000000000001",
       kind: "account",
-      permissions: ["finance.cards.write"],
+      permissions: ["finance.cards.read", "finance.cards.write"],
       role: "member",
     });
     const response = await PATCH(
