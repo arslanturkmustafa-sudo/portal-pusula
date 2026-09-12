@@ -7,6 +7,7 @@ vi.mock("server-only", () => ({}));
 
 const mocks = vi.hoisted(() => ({
   authenticate: vi.fn(),
+  hasPermission: vi.fn(),
   list: vi.fn(),
   parseFilters: vi.fn(),
 }));
@@ -16,7 +17,10 @@ vi.mock("@/features/finance", () => ({
   listFinanceReceivables: mocks.list,
 }));
 vi.mock("@/platform/auth/server-auth", () => ({
-  isAdminAuthenticated: mocks.authenticate,
+  authenticateAdminRequest: mocks.authenticate,
+}));
+vi.mock("@/platform/auth/permissions", () => ({
+  hasPermission: mocks.hasPermission,
 }));
 vi.mock("@/platform/config/readiness-env", () => ({
   getDatabaseProbeEnvironment: () => ({}),
@@ -30,7 +34,8 @@ import { GET } from "@/app/api/finance/receivables/route";
 describe("finance receivable collection API", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.authenticate.mockResolvedValue(true);
+    mocks.authenticate.mockResolvedValue({ accountId: "account", kind: "account" });
+    mocks.hasPermission.mockReturnValue(true);
     mocks.parseFilters.mockImplementation((value: unknown) => value);
     mocks.list.mockResolvedValue({ receivables: [], summary: {} });
   });
@@ -100,5 +105,33 @@ describe("finance receivable collection API", () => {
     expect(payload.receivables[0].collections[0]).not.toHaveProperty(
       "clientOperationKey",
     );
+  });
+
+  it("redacts collection account details without account read permission", async () => {
+    mocks.hasPermission.mockReturnValue(false);
+    mocks.list.mockResolvedValue({
+      receivables: [{
+        collections: [{
+          financeTransactionId: "b0000000-0000-4000-8000-000000000001",
+          hasAccountMovement: true,
+          targetAccountId: "60000000-0000-4000-8000-000000000001",
+          targetAccountName: "Ana TL Hesabı",
+        }],
+        id: "30000000-0000-4000-8000-000000000001",
+      }],
+      summary: {},
+    });
+
+    const response = await GET(
+      new NextRequest("https://portal.example/api/finance/receivables"),
+    );
+    const movement = (await response.json()).receivables[0].collections[0];
+
+    expect(movement).toMatchObject({
+      financeTransactionId: null,
+      hasAccountMovement: true,
+      targetAccountId: null,
+      targetAccountName: null,
+    });
   });
 });

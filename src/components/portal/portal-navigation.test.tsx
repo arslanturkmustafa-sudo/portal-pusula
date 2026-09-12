@@ -52,6 +52,56 @@ describe("PortalNavigation", () => {
     expect(within(navigation).queryByRole("link", { name: "Ayarlar" })).toBeNull();
   });
 
+  it("shows quick actions only when the member can use their destinations", () => {
+    render(
+      <PortalNavigation
+        principal={{
+          permissions: [
+            "daily-plan.read",
+            "finance.expenses.read",
+            "finance.expenses.write",
+            "tasks.read",
+            "tasks.write",
+            "customers.read",
+            "projects.read",
+          ],
+          role: "member",
+        }}
+      />,
+    );
+    const quickAccess = screen.getByRole("navigation", { name: "Hızlı ulaşım" });
+    expect(within(quickAccess).getByRole("link", { name: "Takvim" })).toHaveAttribute(
+      "href",
+      "/gunluk-plan",
+    );
+    expect(within(quickAccess).getByRole("link", { name: "Gider ekle" })).toHaveAttribute(
+      "href",
+      "/finans/giderler?action=create",
+    );
+    expect(
+      within(quickAccess).getByRole("link", { name: "Görev oluştur" }),
+    ).toHaveAttribute("href", "/gorevler?action=create");
+
+    cleanup();
+    render(
+      <PortalNavigation
+        principal={{ permissions: ["daily-plan.read", "tasks.read"], role: "member" }}
+      />,
+    );
+    const restrictedQuickAccess = screen.getByRole("navigation", {
+      name: "Hızlı ulaşım",
+    });
+    expect(
+      within(restrictedQuickAccess).getByRole("link", { name: "Takvim" }),
+    ).toBeVisible();
+    expect(
+      within(restrictedQuickAccess).queryByRole("link", { name: "Gider ekle" }),
+    ).toBeNull();
+    expect(
+      within(restrictedQuickAccess).queryByRole("link", { name: "Görev oluştur" }),
+    ).toBeNull();
+  });
+
   it("routes an accounts-only finance member directly to the protected accounts workspace", () => {
     render(
       <PortalNavigation

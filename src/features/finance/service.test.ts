@@ -7,6 +7,7 @@ vi.mock("server-only", () => ({}));
 
 const mocks = vi.hoisted(() => ({
   appendAuditEvent: vi.fn(),
+  createFinanceTransactionInConnection: vi.fn(),
   findActiveCustomerProjectForUpdate: vi.fn(),
   findCollectionByClientOperationKeyForUpdate: vi.fn(),
   findCollectionForUpdate: vi.fn(),
@@ -20,7 +21,15 @@ const mocks = vi.hoisted(() => ({
   insertReceivableRecord: vi.fn(),
   listReceivableCollectionMovements: vi.fn(),
   listReceivableRecords: vi.fn(),
+  reverseFinanceTransactionInConnection: vi.fn(),
   updateReceivableLifecycleRecord: vi.fn(),
+}));
+
+vi.mock("@/features/finance/account-service", () => ({
+  createFinanceTransactionInConnection:
+    mocks.createFinanceTransactionInConnection,
+  reverseFinanceTransactionInConnection:
+    mocks.reverseFinanceTransactionInConnection,
 }));
 
 vi.mock("@/features/customers/repository", () => ({
@@ -102,16 +111,35 @@ const receivable = {
 
 const context = {
   actorId: "80000000-0000-4000-8000-000000000001",
+  canMutateAccountLedger: true,
   correlationId: "correlation-1",
   now: new Date("2026-09-01T09:00:00.000Z"),
 };
 const clientOperationKey = "40000000-0000-4000-8000-000000000001";
+const targetAccountId = "60000000-0000-4000-8000-000000000001";
+const financeTransactionId = "b0000000-0000-4000-8000-000000000001";
 
 describe("finance write service", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.findCollectionByClientOperationKeyForUpdate.mockResolvedValue(null);
     mocks.findCollectionReversalForUpdate.mockResolvedValue(null);
+    mocks.createFinanceTransactionInConnection.mockResolvedValue({
+      created: true,
+      transaction: {
+        id: financeTransactionId,
+        sourceAccount: null,
+        targetAccount: { id: targetAccountId, name: "Ana TL Hesabı" },
+      },
+    });
+    mocks.reverseFinanceTransactionInConnection.mockResolvedValue({
+      created: true,
+      transaction: {
+        id: "c0000000-0000-4000-8000-000000000001",
+        sourceAccount: { id: targetAccountId, name: "Ana TL Hesabı" },
+        targetAccount: null,
+      },
+    });
     mocks.listReceivableCollectionMovements.mockResolvedValue([]);
     mocks.updateReceivableLifecycleRecord.mockResolvedValue(true);
     mocks.findActiveCustomerProjectForUpdate.mockResolvedValue({
@@ -340,6 +368,7 @@ describe("finance write service", () => {
         collectedOn: "2026-09-01",
         note: null,
         receivableId: receivable.id,
+        targetAccountId,
       },
       context,
     );
@@ -349,6 +378,20 @@ describe("finance write service", () => {
     expect(result.receivable.outstandingAmount).toBe("70.0000");
     expect(result.receivable.status).toBe("partial");
     expect(result.created).toBe(true);
+    expect(mocks.createFinanceTransactionInConnection).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        amount: "25.0000",
+        sourceAccountId: null,
+        targetAccountId,
+        transactionType: "income",
+      }),
+      context,
+    );
+    expect(mocks.insertCollectionRecordIdempotently).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ financeTransactionId, targetAccountId }),
+    );
     expect(mocks.insertCollectionRecordIdempotently).toHaveBeenCalledOnce();
     expect(mocks.appendAuditEvent).toHaveBeenCalledOnce();
   });
@@ -368,11 +411,13 @@ describe("finance write service", () => {
           collectedOn: "2026-09-01",
           note: null,
           receivableId: receivable.id,
+          targetAccountId,
         },
         context,
       ),
     ).rejects.toBeInstanceOf(CollectionExceedsOutstandingError);
     expect(mocks.insertCollectionRecordIdempotently).not.toHaveBeenCalled();
+    expect(mocks.createFinanceTransactionInConnection).not.toHaveBeenCalled();
     expect(mocks.appendAuditEvent).not.toHaveBeenCalled();
   });
 
@@ -386,6 +431,7 @@ describe("finance write service", () => {
           collectedOn: "2026-09-02",
           note: null,
           receivableId: receivable.id,
+          targetAccountId,
         },
         context,
       ),
@@ -401,11 +447,14 @@ describe("finance write service", () => {
       collectedOn: "2026-09-01",
       createdAtUtc: "2026-09-01 09:00:00.000000",
       entryType: "collection" as const,
+      financeTransactionId,
       id: "50000000-0000-4000-8000-000000000001",
       note: null,
       receivableId: receivable.id,
       reversalOfId: null,
       reversalReason: null,
+      targetAccountId,
+      targetAccountName: "Ana TL Hesabı",
     };
     mocks.findCollectionByClientOperationKeyForUpdate.mockResolvedValueOnce(
       persistedCollection,
@@ -423,6 +472,7 @@ describe("finance write service", () => {
         collectedOn: "2026-09-01",
         note: null,
         receivableId: receivable.id,
+        targetAccountId,
       },
       context,
     );
@@ -439,11 +489,14 @@ describe("finance write service", () => {
       collectedOn: "2026-09-01",
       createdAtUtc: "2026-09-01 09:00:00.000000",
       entryType: "collection",
+      financeTransactionId,
       id: "50000000-0000-4000-8000-000000000001",
       note: null,
       receivableId: receivable.id,
       reversalOfId: null,
       reversalReason: null,
+      targetAccountId,
+      targetAccountName: "Ana TL Hesabı",
     });
 
     await expect(
@@ -455,6 +508,7 @@ describe("finance write service", () => {
           collectedOn: "2026-09-01",
           note: null,
           receivableId: receivable.id,
+          targetAccountId,
         },
         context,
       ),
@@ -612,11 +666,14 @@ describe("finance write service", () => {
       collectedOn: "2026-09-01",
       createdAtUtc: "2026-09-01 09:00:00.000000",
       entryType: "collection" as const,
+      financeTransactionId: null,
       id: "50000000-0000-4000-8000-000000000001",
       note: null,
       receivableId: receivable.id,
       reversalOfId: null,
       reversalReason: null,
+      targetAccountId: null,
+      targetAccountName: null,
     };
     mocks.findCollectionForUpdate.mockResolvedValue(original);
     mocks.findReceivableForUpdate.mockResolvedValue(receivable);
@@ -652,6 +709,60 @@ describe("finance write service", () => {
       expect.objectContaining({
         action: "receivable.collection_reversed",
         actorId: context.actorId,
+      }),
+    );
+    expect(mocks.reverseFinanceTransactionInConnection).not.toHaveBeenCalled();
+  });
+
+  it("reverses a linked collection account movement in the same transaction", async () => {
+    const original = {
+      amount: "25.0000",
+      clientOperationKey,
+      collectedOn: "2026-09-01",
+      createdAtUtc: "2026-09-01 09:00:00.000000",
+      entryType: "collection" as const,
+      financeTransactionId,
+      id: "50000000-0000-4000-8000-000000000001",
+      note: null,
+      receivableId: receivable.id,
+      reversalOfId: null,
+      reversalReason: null,
+      targetAccountId,
+      targetAccountName: "Ana TL Hesabı",
+    };
+    const reversalOperationKey = "90000000-0000-4000-8000-000000000001";
+    mocks.findCollectionForUpdate.mockResolvedValue(original);
+    mocks.findReceivableForUpdate.mockResolvedValue(receivable);
+    mocks.insertCollectionRecordIdempotently.mockImplementation(
+      async (_connection, collection) => collection,
+    );
+
+    await reverseReceivableCollection(
+      {} as Pool,
+      original.id,
+      {
+        clientOperationKey: reversalOperationKey,
+        reason: "Banka işlemi iade edildi",
+      },
+      context,
+    );
+
+    expect(mocks.reverseFinanceTransactionInConnection).toHaveBeenCalledWith(
+      expect.anything(),
+      financeTransactionId,
+      {
+        clientOperationKey: reversalOperationKey,
+        reason: "Banka işlemi iade edildi",
+      },
+      context,
+      { allowExpenseManaged: true },
+    );
+    expect(mocks.insertCollectionRecordIdempotently).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        financeTransactionId: "c0000000-0000-4000-8000-000000000001",
+        targetAccountId,
+        targetAccountName: "Ana TL Hesabı",
       }),
     );
   });

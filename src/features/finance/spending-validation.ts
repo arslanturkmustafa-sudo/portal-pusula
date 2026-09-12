@@ -257,6 +257,7 @@ export const installmentListFilterSchema = z
 export const updateCardInstallmentInputSchema = z
   .object({
     paidOn: nullableIsoDateSchema.default(null),
+    sourceAccountId: nullableUuidSchema.default(null),
     status: installmentStoredStatusSchema,
     version: z.number().int().min(1).max(4_294_967_294),
   })
@@ -269,11 +270,25 @@ export const updateCardInstallmentInputSchema = z
         path: ["paidOn"],
       });
     }
+    if (value.status === "paid" && value.sourceAccountId === null) {
+      context.addIssue({
+        code: "custom",
+        message: "Ödeme hesabı veya kasa seçimi zorunludur.",
+        path: ["sourceAccountId"],
+      });
+    }
     if (value.status === "planned" && value.paidOn !== null) {
       context.addIssue({
         code: "custom",
         message: "Planlanan taksitte ödeme tarihi kullanılamaz.",
         path: ["paidOn"],
+      });
+    }
+    if (value.status === "planned" && value.sourceAccountId !== null) {
+      context.addIssue({
+        code: "custom",
+        message: "Planlanan taksitte ödeme hesabı kullanılamaz.",
+        path: ["sourceAccountId"],
       });
     }
   });
@@ -294,6 +309,7 @@ export const bulkPayCardInstallmentsInputSchema = z
       .max(250),
     month: z.string().refine(isRealMonth, "Geçerli bir dönem seçin."),
     paidOn: isoDateSchema,
+    sourceAccountId: canonicalUuidSchema,
   })
   .strict()
   .superRefine((value, context) => {

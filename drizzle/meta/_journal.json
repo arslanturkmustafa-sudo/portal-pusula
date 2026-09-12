@@ -162,6 +162,13 @@
       "when": 1789060097371,
       "tag": "0022_recurring_tasks_expenses",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "5",
+      "when": 1789195799696,
+      "tag": "0023_collection_card_accounts",
+      "breakpoints": true
     }
   ]
 }

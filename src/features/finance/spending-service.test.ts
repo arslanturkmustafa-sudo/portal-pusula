@@ -174,10 +174,14 @@ const installment = {
   dueOn: "2026-09-01",
   expenseDescription: expense.description,
   expenseId,
+  financeTransactionId: null,
   id: "60000000-0000-4000-8000-000000000001",
   installmentCount: 3,
   installmentNumber: 1,
   paidOn: null,
+  paymentAccountId: null,
+  paymentAccountName: null,
+  paymentAccountType: null,
   statementMonth: "2026-08",
   status: "planned" as const,
   updatedAtUtc: nowSql,
@@ -797,8 +801,9 @@ describe("spending service", () => {
         ],
         month: "2026-09",
         paidOn: "2026-09-03",
+        sourceAccountId: cashAccountId,
       },
-      context,
+      { ...context, canMutateAccountLedger: true },
     );
 
     expect(mocks.findCreditCardForUpdate).toHaveBeenCalledBefore(
@@ -810,6 +815,17 @@ describe("spending service", () => {
       "2026-09",
     );
     expect(mocks.updateCardInstallmentRecord).toHaveBeenCalledTimes(2);
+    expect(mocks.createFinanceTransactionInConnection).toHaveBeenCalledTimes(2);
+    expect(mocks.createFinanceTransactionInConnection).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        amount: "40.0000",
+        occurredOn: "2026-09-03",
+        sourceAccountId: cashAccountId,
+        transactionType: "expense",
+      }),
+      expect.objectContaining({ canMutateAccountLedger: true }),
+    );
     expect(mocks.updateCardInstallmentRecord.mock.calls.map((call) => call[1].id)).toEqual([
       installment.id,
       second.id,
@@ -837,8 +853,9 @@ describe("spending service", () => {
           installments: [{ id: installment.id, version: 1 }],
           month: "2026-09",
           paidOn: "2026-09-03",
+          sourceAccountId: cashAccountId,
         },
-        context,
+        { ...context, canMutateAccountLedger: true },
       ),
     ).rejects.toBeInstanceOf(CardInstallmentBulkConflictError);
     expect(mocks.updateCardInstallmentRecord).not.toHaveBeenCalled();
@@ -849,7 +866,11 @@ describe("spending service", () => {
     mocks.listCardInstallmentsForBulkUpdate.mockResolvedValue([
       {
         ...installment,
+        financeTransactionId,
         paidOn: "2026-09-03",
+        paymentAccountId: cashAccountId,
+        paymentAccountName: cashAccount.displayName,
+        paymentAccountType: cashAccount.accountType,
         status: "paid",
         version: 2,
       },
@@ -862,13 +883,59 @@ describe("spending service", () => {
         installments: [{ id: installment.id, version: 1 }],
         month: "2026-09",
         paidOn: "2026-09-03",
+        sourceAccountId: cashAccountId,
       },
-      context,
+      { ...context, canMutateAccountLedger: true },
     );
 
     expect(result).toMatchObject({ replayed: true, updatedCount: 0 });
     expect(mocks.updateCardInstallmentRecord).not.toHaveBeenCalled();
     expect(mocks.appendAuditEvent).not.toHaveBeenCalled();
+  });
+
+  it("pays one installment from the selected account", async () => {
+    mocks.findCardInstallmentForUpdate.mockResolvedValue({
+      ...installment,
+      expenseStatus: "active",
+    });
+
+    const result = await updateCardInstallment(
+      {} as Pool,
+      installment.id,
+      {
+        paidOn: "2026-09-03",
+        sourceAccountId: cashAccountId,
+        status: "paid",
+        version: 1,
+      },
+      { ...context, canMutateAccountLedger: true },
+    );
+
+    expect(mocks.createFinanceTransactionInConnection).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        amount: installment.amount,
+        occurredOn: "2026-09-03",
+        sourceAccountId: cashAccountId,
+        targetAccountId: null,
+        transactionType: "expense",
+      }),
+      expect.objectContaining({ canMutateAccountLedger: true }),
+    );
+    expect(mocks.updateCardInstallmentRecord).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        financeTransactionId,
+        paymentAccountId: cashAccountId,
+        status: "paid",
+      }),
+      1,
+    );
+    expect(result).toMatchObject({
+      financeTransactionId,
+      paymentAccountId: cashAccountId,
+      status: "paid",
+    });
   });
 
   it("returns an overdue view when a past-due installment is reopened", async () => {
@@ -881,10 +948,14 @@ describe("spending service", () => {
       expenseDescription: expense.description,
       expenseId,
       expenseStatus: "active",
+      financeTransactionId,
       id: "60000000-0000-4000-8000-000000000001",
       installmentCount: 3,
       installmentNumber: 1,
       paidOn: "2026-09-02",
+      paymentAccountId: cashAccountId,
+      paymentAccountName: cashAccount.displayName,
+      paymentAccountType: cashAccount.accountType,
       statementMonth: "2026-08",
       status: "paid",
       updatedAtUtc: nowSql,
@@ -895,11 +966,25 @@ describe("spending service", () => {
     const result = await updateCardInstallment(
       {} as Pool,
       "60000000-0000-4000-8000-000000000001",
-      { paidOn: null, status: "planned", version: 1 },
-      context,
+      {
+        paidOn: null,
+        sourceAccountId: null,
+        status: "planned",
+        version: 1,
+      },
+      { ...context, canMutateAccountLedger: true },
     );
 
     expect(result).toMatchObject({ paidOn: null, status: "overdue", version: 2 });
+    expect(mocks.reverseFinanceTransactionInConnection).toHaveBeenCalledWith(
+      expect.anything(),
+      financeTransactionId,
+      expect.objectContaining({
+        reason: "Kredi kartı taksit ödemesi plana geri alındı.",
+      }),
+      expect.objectContaining({ canMutateAccountLedger: true }),
+      { allowExpenseManaged: true, preserveOriginalDate: true },
+    );
     expect(mocks.updateCardInstallmentRecord).toHaveBeenCalledOnce();
   });
 });

@@ -47,6 +47,8 @@ const EXPENSE_ACCOUNT_LEDGER_MIGRATION_TAG =
   "0020_expense_account_ledger";
 const RECURRING_TASKS_EXPENSES_MIGRATION_TAG =
   "0022_recurring_tasks_expenses";
+const COLLECTION_CARD_ACCOUNTS_MIGRATION_TAG =
+  "0023_collection_card_accounts";
 
 // 0020 alters an existing financial table, so keep every accepted statement
 // byte-independent but semantically exact after whitespace normalization.
@@ -82,6 +84,19 @@ const RECURRING_TASKS_EXPENSES_STATEMENT_HASHES = new Set([
   "6d0eb245960126eb24f9780dffd5b29f7c48463b1f770248f656f46306b91cc3",
   "3bbe91f4f1433ab303a4ad37d1958c390d9c38701641dde088ff7ed194d5cfa0",
   "5a538e7be29a38250f7382e3cae4b9b46cdb9c11bfdcf61f0d9d61dc9e2afc72",
+]);
+
+// 0023 links collections and card-installment payments to immutable ledger
+// movements. Accept only the exact additive DDL emitted for this release.
+const COLLECTION_CARD_ACCOUNTS_STATEMENT_HASHES = new Set([
+  "a30df770b131a0f92a2cd4ab388ddef8ffbc893972f6867b334e705f70d21e25",
+  "bf0f646f5cfed8defb5b381d4ee17eecc7c3b7d90635be974e0862b0d1a1603b",
+  "114057796b5f1df56eb334ee7dd0b5265b323036a015f252efa3dfef64a73617",
+  "e741794c6595b95bd78c220b7953b3c5ecacb4e8ed416fb57d90c8e8ad53d138",
+  "c5189168a3bb1ca570f89767d3f1f3ff562227e336f301f6d34deaabcd3f47bd",
+  "b5c526eec8b4fa3a1575b027fa3f8ce7e8c85f914db6865c448d932eb212d74e",
+  "671072d3c8677b4223568d6ee337863d7293d92348b4aa47bd4a04c14a22762e",
+  "21d9bc1304b5f9a244e584bef6489bde1488de361db90966fd4066dbde4a96c9",
 ]);
 
 const EXPENSE_CATEGORY_SEED_ROWS = Object.freeze([
@@ -163,6 +178,13 @@ const managedForwardColumns = new Map([
     `${RECURRING_TASKS_EXPENSES_MIGRATION_TAG}:${tableName}:${columnName}`,
     { columnName, definition, tableName },
   ]),
+  ...[
+    ["credit_card_installment", "finance_transaction_id", "char(36) CHARACTER SET ascii COLLATE ascii_bin"],
+    ["receivable_collection", "finance_transaction_id", "char(36) CHARACTER SET ascii COLLATE ascii_bin"],
+  ].map(([tableName, columnName, definition]) => [
+    `${COLLECTION_CARD_ACCOUNTS_MIGRATION_TAG}:${tableName}:${columnName}`,
+    { columnName, definition, tableName },
+  ]),
 ]);
 
 const managedDroppedChecks = new Set([
@@ -206,6 +228,8 @@ const managedUniqueConstraints = new Set([
   `${FINANCIAL_REVERSALS_MIGRATION_TAG}:receivable_collection:uq_receivable_collection_reversal:reversal_of_id`,
   `${EXPENSE_ACCOUNT_LEDGER_MIGRATION_TAG}:expense:uq_expense_finance_transaction:finance_transaction_id`,
   `${RECURRING_TASKS_EXPENSES_MIGRATION_TAG}:work_task:uq_work_task_recurrence_source:recurrence_generated_from_task_id`,
+  `${COLLECTION_CARD_ACCOUNTS_MIGRATION_TAG}:credit_card_installment:uq_credit_card_installment_finance_transaction:finance_transaction_id`,
+  `${COLLECTION_CARD_ACCOUNTS_MIGRATION_TAG}:receivable_collection:uq_receivable_collection_finance_transaction:finance_transaction_id`,
 ]);
 const CUSTOMER_PROJECT_BACKFILL_SQL = `INSERT INTO \`customer_project\` (\`customer_id\`, \`project_id\`, \`status\`, \`version\`, \`created_at_utc\`, \`updated_at_utc\`) SELECT \`seed\`.\`customer_id\`, \`seed\`.\`project_id\`, 'active', 1, CURRENT_TIMESTAMP(6), CURRENT_TIMESTAMP(6) FROM (SELECT \`customer\`.\`id\` AS \`customer_id\`, \`project\`.\`id\` AS \`project_id\` FROM \`customer\` CROSS JOIN \`project\` WHERE BINARY \`project\`.\`short_code\` = BINARY 'MUHENDIS_KAFASI' UNION DISTINCT SELECT \`work_task\`.\`customer_id\` AS \`customer_id\`, \`work_task_project\`.\`project_id\` AS \`project_id\` FROM \`work_task\` JOIN \`work_task_project\` ON \`work_task_project\`.\`task_id\` = \`work_task\`.\`id\` WHERE \`work_task\`.\`customer_id\` IS NOT NULL) AS \`seed\``;
 const CONSULTING_CONTRACT_BACKFILL_SQL = `UPDATE \`consulting_contract\` JOIN \`project\` ON BINARY \`project\`.\`short_code\` = BINARY 'MUHENDIS_KAFASI' SET \`consulting_contract\`.\`project_id\` = \`project\`.\`id\` WHERE \`consulting_contract\`.\`project_id\` IS NULL`;
@@ -228,12 +252,14 @@ function sha256(value) {
 }
 
 function assertExactManagedMigrationStatement(statement, migrationTag) {
-  const acceptedHashes =
-    migrationTag === EXPENSE_ACCOUNT_LEDGER_MIGRATION_TAG
-      ? EXPENSE_ACCOUNT_LEDGER_STATEMENT_HASHES
-      : migrationTag === RECURRING_TASKS_EXPENSES_MIGRATION_TAG
-        ? RECURRING_TASKS_EXPENSES_STATEMENT_HASHES
-        : null;
+  let acceptedHashes = null;
+  if (migrationTag === EXPENSE_ACCOUNT_LEDGER_MIGRATION_TAG) {
+    acceptedHashes = EXPENSE_ACCOUNT_LEDGER_STATEMENT_HASHES;
+  } else if (migrationTag === RECURRING_TASKS_EXPENSES_MIGRATION_TAG) {
+    acceptedHashes = RECURRING_TASKS_EXPENSES_STATEMENT_HASHES;
+  } else if (migrationTag === COLLECTION_CARD_ACCOUNTS_MIGRATION_TAG) {
+    acceptedHashes = COLLECTION_CARD_ACCOUNTS_STATEMENT_HASHES;
+  }
   if (acceptedHashes === null) return;
 
   const normalized = statement.replaceAll(/\s+/gu, " ").trim();
@@ -682,7 +708,8 @@ function parseManagedForwardStatement(statement, migrationTag) {
     migrationTag !== PLANNING_EXPENSE_CATEGORIES_MIGRATION_TAG &&
     migrationTag !== TAX_OBLIGATIONS_MIGRATION_TAG &&
     migrationTag !== EXPENSE_ACCOUNT_LEDGER_MIGRATION_TAG &&
-    migrationTag !== RECURRING_TASKS_EXPENSES_MIGRATION_TAG
+    migrationTag !== RECURRING_TASKS_EXPENSES_MIGRATION_TAG &&
+    migrationTag !== COLLECTION_CARD_ACCOUNTS_MIGRATION_TAG
   ) {
     return null;
   }

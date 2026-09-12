@@ -10,6 +10,10 @@ import {
   findCustomerForUpdate,
 } from "@/features/customers/repository";
 import {
+  createFinanceTransactionInConnection,
+  reverseFinanceTransactionInConnection,
+} from "@/features/finance/account-service";
+import {
   addMoney,
   contractMoneySnapshot,
   openingBalanceMoneySnapshot,
@@ -110,6 +114,13 @@ export class CollectionDateInFutureError extends Error {
   }
 }
 
+export class CollectionAccountPermissionError extends Error {
+  constructor() {
+    super("Collection account movements require finance account permissions.");
+    this.name = "CollectionAccountPermissionError";
+  }
+}
+
 export class FinanceIdempotencyConflictError extends Error {
   constructor() {
     super("The client operation key is already bound to another request.");
@@ -154,6 +165,7 @@ export class CollectionAlreadyReversedError extends Error {
 
 export type FinanceWriteContext = Readonly<{
   actorId?: string;
+  canMutateAccountLedger?: boolean;
   correlationId: string;
   now?: Date;
 }>;
@@ -253,7 +265,9 @@ function collectionMatches(
     persisted.note === input.note &&
     persisted.receivableId === input.receivableId &&
     persisted.reversalOfId === null &&
-    persisted.reversalReason === null
+    persisted.reversalReason === null &&
+    persisted.financeTransactionId !== null &&
+    persisted.targetAccountId === input.targetAccountId
   );
 }
 
@@ -519,6 +533,9 @@ export async function createReceivableCollection(
 > {
   const input = createCollectionInputSchema.parse(rawInput);
   if (context.actorId !== undefined) assertCanonicalUuid(context.actorId);
+  if (context.canMutateAccountLedger !== true) {
+    throw new CollectionAccountPermissionError();
+  }
   const nowDate = context.now ?? new Date();
   const now = toUtcDateTime6(nowDate);
   const today = istanbulDate(nowDate);
@@ -576,17 +593,40 @@ export async function createReceivableCollection(
       throw new CollectionExceedsOutstandingError();
     }
 
+    const accountMovement = await createFinanceTransactionInConnection(
+      connection,
+      {
+        amount: input.amount,
+        clientOperationKey: input.clientOperationKey,
+        description: `Tahsilat: ${before.customerName} · ${before.description}`.slice(
+          0,
+          191,
+        ),
+        occurredOn: input.collectedOn,
+        sourceAccountId: null,
+        targetAccountId: input.targetAccountId,
+        transactionType: "income",
+      },
+      context,
+    );
+    if (accountMovement.transaction.targetAccount === null) {
+      throw new Error("Collection account movement has no target account.");
+    }
+
     const collection: ReceivableCollection = {
       amount: input.amount,
       clientOperationKey: input.clientOperationKey,
       collectedOn: input.collectedOn,
       createdAtUtc: now,
       entryType: "collection",
+      financeTransactionId: accountMovement.transaction.id,
       id: randomUUID(),
       note: input.note,
       receivableId: before.id,
       reversalOfId: null,
       reversalReason: null,
+      targetAccountId: accountMovement.transaction.targetAccount.id,
+      targetAccountName: accountMovement.transaction.targetAccount.name,
     };
     const persisted = await insertCollectionRecordIdempotently(
       connection,
@@ -745,17 +785,44 @@ export async function reverseReceivableCollection(
     if (afterCollected.isNegative()) {
       throw new Error("Collection reversal would make the aggregate negative.");
     }
+    let reversalFinanceTransactionId: string | null = null;
+    let targetAccountId: string | null = null;
+    let targetAccountName: string | null = null;
+    if (original.financeTransactionId !== null) {
+      if (context.canMutateAccountLedger !== true) {
+        throw new CollectionAccountPermissionError();
+      }
+      const accountMovement = await reverseFinanceTransactionInConnection(
+        connection,
+        original.financeTransactionId,
+        {
+          clientOperationKey: input.clientOperationKey,
+          reason: input.reason,
+        },
+        context,
+        { allowExpenseManaged: true },
+      );
+      if (accountMovement.transaction.sourceAccount === null) {
+        throw new Error("Collection reversal has no source account.");
+      }
+      reversalFinanceTransactionId = accountMovement.transaction.id;
+      targetAccountId = accountMovement.transaction.sourceAccount.id;
+      targetAccountName = accountMovement.transaction.sourceAccount.name;
+    }
     const pending: ReceivableCollection = {
       amount: original.amount,
       clientOperationKey: input.clientOperationKey,
       collectedOn: today,
       createdAtUtc: now,
       entryType: "reversal",
+      financeTransactionId: reversalFinanceTransactionId,
       id: randomUUID(),
       note: null,
       receivableId: original.receivableId,
       reversalOfId: original.id,
       reversalReason: input.reason,
+      targetAccountId,
+      targetAccountName,
     };
     const reversal = await insertCollectionRecordIdempotently(
       connection,

@@ -14,6 +14,13 @@ export default async function CardsPage() {
   return (
     <PortalPermissionGate anyOf={["finance.cards.read"]}>
       <CardPlanPageWorkspace
+        canManagePayments={
+          principal
+            ? hasPermission(principal, "finance.cards.write") &&
+              hasPermission(principal, "finance.accounts.read") &&
+              hasPermission(principal, "finance.accounts.write")
+            : false
+        }
         canWrite={
           principal ? hasPermission(principal, "finance.cards.write") : false
         }

@@ -2,11 +2,21 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+const navigationMocks = vi.hoisted(() => {
+  const replace = vi.fn();
+  return { replace, router: { replace } };
+});
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => navigationMocks.router,
+}));
+
 import { TasksWorkspace } from "@/components/home/tasks-workspace";
 
 type TaskStatus = "backlog" | "todo" | "in_progress" | "blocked" | "done" | "cancelled";
 
 afterEach(() => {
+  navigationMocks.replace.mockReset();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -71,6 +81,36 @@ const project = {
 };
 
 describe("TasksWorkspace", () => {
+  it("opens the create form from the quick-access action and consumes the URL action", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async (input) => {
+        if (String(input) === "/api/tasks") return jsonResponse({ tasks: [] });
+        if (String(input) === "/api/customers") {
+          return jsonResponse({ customers: [customer] });
+        }
+        if (String(input) === "/api/projects") {
+          return jsonResponse({ projects: [project] });
+        }
+        throw new Error(`Unexpected request: ${String(input)}`);
+      }),
+    );
+    const user = userEvent.setup();
+
+    render(<TasksWorkspace initialCreate />);
+
+    expect(
+      await screen.findByRole("heading", { level: 2, name: "Görev ekle" }),
+    ).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByRole("textbox", { name: "Görev başlığı" })).toHaveFocus(),
+    );
+    await user.click(screen.getByRole("button", { name: "Vazgeç" }));
+    expect(navigationMocks.replace).toHaveBeenCalledWith("/gorevler", {
+      scroll: false,
+    });
+  });
+
   it("loads tasks and customers into six accessible Kanban columns", async () => {
     const statuses: TaskStatus[] = [
       "backlog",

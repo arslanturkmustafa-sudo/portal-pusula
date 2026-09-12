@@ -116,17 +116,35 @@ describe("spending validation", () => {
     ).toBe(true);
   });
 
-  it("keeps installment payment date consistent with status", () => {
+  it("keeps installment payment date and account consistent with status", () => {
     expect(
       updateCardInstallmentInputSchema.safeParse({
         paidOn: null,
+        sourceAccountId: recordId,
         status: "paid",
         version: 1,
       }).success,
     ).toBe(false);
     expect(
       updateCardInstallmentInputSchema.safeParse({
+        paidOn: "2026-09-03",
+        sourceAccountId: null,
+        status: "paid",
+        version: 1,
+      }).success,
+    ).toBe(false);
+    expect(
+      updateCardInstallmentInputSchema.safeParse({
+        paidOn: "2026-09-03",
+        sourceAccountId: recordId,
+        status: "paid",
+        version: 1,
+      }).success,
+    ).toBe(true);
+    expect(
+      updateCardInstallmentInputSchema.safeParse({
         paidOn: null,
+        sourceAccountId: null,
         status: "planned",
         version: 1,
       }).success,
@@ -153,12 +171,14 @@ describe("spending validation", () => {
         installments: [installment],
         month: "2026-09",
         paidOn: "2026-09-03",
+        sourceAccountId: recordId,
       }),
     ).toEqual({
       cardId: recordId,
       installments: [installment],
       month: "2026-09",
       paidOn: "2026-09-03",
+      sourceAccountId: recordId,
     });
     expect(
       bulkPayCardInstallmentsInputSchema.safeParse({
@@ -167,6 +187,7 @@ describe("spending validation", () => {
         installments: [installment],
         month: "2026-09",
         paidOn: "2026-09-03",
+        sourceAccountId: recordId,
       }).success,
     ).toBe(false);
     expect(
@@ -175,6 +196,7 @@ describe("spending validation", () => {
         installments: [installment, installment],
         month: "2026-09",
         paidOn: "2026-09-03",
+        sourceAccountId: recordId,
       }).success,
     ).toBe(false);
   });

@@ -392,6 +392,7 @@ export const creditCardInstallment = mysqlTable(
     statementMonth: date("statement_month", { mode: "string" }).notNull(),
     dueOn: date("due_on", { mode: "string" }).notNull(),
     amount: decimal("amount", { precision: 19, scale: 4 }).notNull(),
+    financeTransactionId: char("finance_transaction_id", { length: 36 }),
     status: varchar("status", { length: 16 }).default("planned").notNull(),
     paidOn: date("paid_on", { mode: "string" }),
     version: int("version", { unsigned: true }).default(1).notNull(),
@@ -437,6 +438,14 @@ export const creditCardInstallment = mysqlTable(
           AND ${table.paidOn} IS NOT NULL
         )`,
     ),
+    check(
+      "chk_credit_card_installment_finance_transaction",
+      sql`${table.financeTransactionId} IS NULL OR (
+        OCTET_LENGTH(${table.financeTransactionId}) = 36
+        AND BINARY ${table.financeTransactionId} REGEXP '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+        AND BINARY ${table.status} = BINARY 'paid'
+      )`,
+    ),
     check("chk_credit_card_installment_version", sql`${table.version} >= 1`),
     check(
       "chk_credit_card_installment_timeline",
@@ -449,9 +458,19 @@ export const creditCardInstallment = mysqlTable(
     })
       .onDelete("restrict")
       .onUpdate("restrict"),
+    foreignKey({
+      name: "fk_credit_card_installment_finance_transaction",
+      columns: [table.financeTransactionId],
+      foreignColumns: [financeTransaction.id],
+    })
+      .onDelete("restrict")
+      .onUpdate("restrict"),
     uniqueIndex("uq_credit_card_installment_expense_no").on(
       table.expenseId,
       table.installmentNumber,
+    ),
+    uniqueIndex("uq_credit_card_installment_finance_transaction").on(
+      table.financeTransactionId,
     ),
     index("idx_credit_card_installment_due_status").on(
       table.status,

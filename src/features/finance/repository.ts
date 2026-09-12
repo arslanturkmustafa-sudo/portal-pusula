@@ -57,22 +57,29 @@ export type ReceivableCollection = Readonly<{
   collectedOn: string;
   createdAtUtc: string;
   entryType: ReceivableCollectionEntryType;
+  financeTransactionId: string | null;
   id: string;
   note: string | null;
   receivableId: string;
   reversalOfId: string | null;
   reversalReason: string | null;
+  targetAccountId: string | null;
+  targetAccountName: string | null;
 }>;
 
 export type ReceivableCollectionMovement = Readonly<{
   amount: string;
   collectedOn: string;
   entryType: ReceivableCollectionEntryType;
+  financeTransactionId: string | null;
+  hasAccountMovement: boolean;
   id: string;
   reasonSummary: string | null;
   receivableId: string;
   reversalOfId: string | null;
   reversed: boolean;
+  targetAccountId: string | null;
+  targetAccountName: string | null;
 }>;
 
 export type FinanceReceivableSnapshot = Readonly<{
@@ -128,22 +135,28 @@ type CollectionRow = RowDataPacket & {
   collected_on: string | Date;
   created_at_utc: string | Date;
   entry_type: string;
+  finance_transaction_id: string | null;
   id: string;
   note: string | null;
   receivable_id: string;
   reversal_of_id: string | null;
   reversal_reason: string | null;
+  target_account_id: string | null;
+  target_account_name: string | null;
 };
 
 type CollectionMovementRow = RowDataPacket & {
   amount: string;
   collected_on: string | Date;
   entry_type: string;
+  finance_transaction_id: string | null;
   id: string;
   reason_summary: string | null;
   receivable_id: string;
   reversal_of_id: string | null;
   reversed_flag: number | string;
+  target_account_id: string | null;
+  target_account_name: string | null;
 };
 
 type ContractTermsRow = RowDataPacket & {
@@ -241,11 +254,14 @@ function mapCollection(row: CollectionRow): ReceivableCollection {
     collectedOn: canonicalDate(row.collected_on),
     createdAtUtc: canonicalDateTime(row.created_at_utc),
     entryType: collectionEntryType(row.entry_type),
+    financeTransactionId: row.finance_transaction_id,
     id: row.id,
     note: row.note,
     receivableId: row.receivable_id,
     reversalOfId: row.reversal_of_id,
     reversalReason: row.reversal_reason,
+    targetAccountId: row.target_account_id,
+    targetAccountName: row.target_account_name,
   };
 }
 
@@ -262,13 +278,30 @@ function mapCollectionMovement(
     amount: row.amount,
     collectedOn: canonicalDate(row.collected_on),
     entryType: collectionEntryType(row.entry_type),
+    financeTransactionId: row.finance_transaction_id,
+    hasAccountMovement: row.finance_transaction_id !== null,
     id: row.id,
     reasonSummary: row.reason_summary,
     receivableId: row.receivable_id,
     reversalOfId: row.reversal_of_id,
     reversed: booleanFlag(row.reversed_flag),
+    targetAccountId: row.target_account_id,
+    targetAccountName: row.target_account_name,
   };
 }
+
+const COLLECTION_COLUMNS = `
+  rc.id, rc.client_operation_key, rc.receivable_id, rc.finance_transaction_id,
+  rc.amount, rc.collected_on, rc.note, rc.entry_type, rc.reversal_of_id,
+  rc.reversal_reason, rc.created_at_utc,
+  COALESCE(ft.target_account_id, ft.source_account_id) AS target_account_id,
+  fa.display_name AS target_account_name`;
+
+const COLLECTION_JOINS = `
+  FROM receivable_collection rc
+  LEFT JOIN finance_transaction ft ON ft.id = rc.finance_transaction_id
+  LEFT JOIN finance_account fa
+    ON fa.id = COALESCE(ft.target_account_id, ft.source_account_id)`;
 
 const RECEIVABLE_COLUMNS = `
   r.id, r.customer_id, c.display_name AS customer_name, r.project_id,
@@ -349,7 +382,9 @@ export async function listReceivableCollectionMovements(
   const projectFilter = projectId === undefined ? "" : "\n      WHERE r.project_id = ?";
   const [rows] = await connection.execute<CollectionMovementRow[]>(
     `SELECT rc.id, rc.receivable_id, rc.amount, rc.collected_on,
-            rc.entry_type, rc.reversal_of_id,
+            rc.entry_type, rc.reversal_of_id, rc.finance_transaction_id,
+            COALESCE(ft.target_account_id, ft.source_account_id) AS target_account_id,
+            fa.display_name AS target_account_name,
             EXISTS(
               SELECT 1
                 FROM receivable_collection reversal
@@ -361,6 +396,9 @@ export async function listReceivableCollectionMovements(
               ELSE 'Ters kayıt gerekçesi kaydedildi.'
             END AS reason_summary
        FROM receivable_collection rc
+       LEFT JOIN finance_transaction ft ON ft.id = rc.finance_transaction_id
+       LEFT JOIN finance_account fa
+         ON fa.id = COALESCE(ft.target_account_id, ft.source_account_id)
        JOIN receivable r ON r.id = rc.receivable_id${projectFilter}
       ORDER BY rc.collected_on ASC, rc.created_at_utc ASC, rc.id ASC`,
     projectId === undefined ? [] : [projectId],
@@ -409,10 +447,9 @@ export async function findCollectionByClientOperationKeyForUpdate(
   clientOperationKey: string,
 ): Promise<ReceivableCollection | null> {
   const [rows] = await connection.execute<CollectionRow[]>(
-    `SELECT id, client_operation_key, receivable_id, amount, collected_on,
-            note, entry_type, reversal_of_id, reversal_reason, created_at_utc
-       FROM receivable_collection
-      WHERE client_operation_key = ?
+    `SELECT ${COLLECTION_COLUMNS}
+       ${COLLECTION_JOINS}
+      WHERE rc.client_operation_key = ?
       FOR UPDATE`,
     [clientOperationKey],
   );
@@ -424,10 +461,9 @@ export async function findCollectionForUpdate(
   id: string,
 ): Promise<ReceivableCollection | null> {
   const [rows] = await connection.execute<CollectionRow[]>(
-    `SELECT id, client_operation_key, receivable_id, amount, collected_on,
-            note, entry_type, reversal_of_id, reversal_reason, created_at_utc
-       FROM receivable_collection
-      WHERE id = ?
+    `SELECT ${COLLECTION_COLUMNS}
+       ${COLLECTION_JOINS}
+      WHERE rc.id = ?
       FOR UPDATE`,
     [id],
   );
@@ -439,10 +475,9 @@ export async function findCollectionReversalForUpdate(
   originalCollectionId: string,
 ): Promise<ReceivableCollection | null> {
   const [rows] = await connection.execute<CollectionRow[]>(
-    `SELECT id, client_operation_key, receivable_id, amount, collected_on,
-            note, entry_type, reversal_of_id, reversal_reason, created_at_utc
-       FROM receivable_collection
-      WHERE entry_type = 'reversal' AND reversal_of_id = ?
+    `SELECT ${COLLECTION_COLUMNS}
+       ${COLLECTION_JOINS}
+      WHERE rc.entry_type = 'reversal' AND rc.reversal_of_id = ?
       FOR UPDATE`,
     [originalCollectionId],
   );
@@ -573,14 +608,16 @@ export async function insertCollectionRecordIdempotently(
 ): Promise<ReceivableCollection> {
   await connection.execute<ResultSetHeader>(
     `INSERT INTO receivable_collection
-       (id, client_operation_key, receivable_id, amount, collected_on, note,
-        entry_type, reversal_of_id, reversal_reason, created_at_utc)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       (id, client_operation_key, receivable_id, finance_transaction_id,
+        amount, collected_on, note, entry_type, reversal_of_id,
+        reversal_reason, created_at_utc)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON DUPLICATE KEY UPDATE id = id`,
     [
       collection.id,
       collection.clientOperationKey,
       collection.receivableId,
+      collection.financeTransactionId,
       collection.amount,
       collection.collectedOn,
       collection.note,

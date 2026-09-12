@@ -9,13 +9,19 @@ export const metadata: Metadata = {
   title: "Giderler · Portal Pusula",
 };
 
-export default async function ExpensesPage() {
+type ExpensesPageProps = Readonly<{
+  searchParams: Promise<{ action?: string | string[] }>;
+}>;
+
+export default async function ExpensesPage({ searchParams }: ExpensesPageProps) {
   const principal = await authenticateCurrentPrincipal();
+  const { action } = await searchParams;
   const can = (permission: PermissionCode) =>
     principal ? hasPermission(principal, permission) : false;
   return (
     <PortalPermissionGate anyOf={["finance.expenses.read"]}>
       <ExpensesPageWorkspace
+        initialCreate={action === "create"}
         capabilities={{
           canReadAudit: can("audit.read"),
           canReadAccounts: can("finance.accounts.read"),

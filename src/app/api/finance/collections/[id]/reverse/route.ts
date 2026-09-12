@@ -2,10 +2,16 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
 import {
+  CollectionAccountPermissionError,
   CollectionAlreadyReversedError,
   CollectionNotReversibleError,
+  FinanceAccountNotFoundError,
   FinanceIdempotencyConflictError,
   FinanceResourceNotFoundError,
+  FinanceTransactionAlreadyReversedError,
+  FinanceTransactionIdempotencyConflictError,
+  FinanceTransactionNotFoundError,
+  FinanceTransactionReversalNotAllowedError,
   ReceivableAlreadyVoidedError,
   reverseCollectionInputSchema,
   reverseReceivableCollection,
@@ -18,6 +24,7 @@ import {
   spendingDatabasePool,
   spendingJson,
 } from "@/features/finance/spending-route-support";
+import { hasPermission } from "@/platform/auth/permissions";
 import { authenticateAdminRequest } from "@/platform/auth/server-auth";
 import { correlationIdFromHeaders } from "@/platform/http/correlation-id";
 import { requestLogger } from "@/platform/logging/logger";
@@ -48,13 +55,33 @@ export async function POST(
     const input = reverseCollectionInputSchema.parse(
       await readSpendingBody(request),
     );
+    const canReadAccounts = hasPermission(principal, "finance.accounts.read");
+    const canMutateAccountLedger =
+      canReadAccounts && hasPermission(principal, "finance.accounts.write");
     const result = await reverseReceivableCollection(
       spendingDatabasePool(),
       id,
       input,
-      { actorId: spendingActorId(principal), correlationId },
+      {
+        actorId: spendingActorId(principal),
+        canMutateAccountLedger,
+        correlationId,
+      },
     );
-    return spendingJson(result, result.created ? 201 : 200);
+    return spendingJson(
+      canReadAccounts
+        ? result
+        : {
+            ...result,
+            reversal: {
+              ...result.reversal,
+              financeTransactionId: null,
+              targetAccountId: null,
+              targetAccountName: null,
+            },
+          },
+      result.created ? 201 : 200,
+    );
   } catch (error) {
     if (
       error instanceof z.ZodError ||
@@ -75,6 +102,24 @@ export async function POST(
     }
     if (error instanceof ReceivableAlreadyVoidedError) {
       return spendingJson({ status: "receivable_voided" }, 409);
+    }
+    if (error instanceof CollectionAccountPermissionError) {
+      return spendingJson({ status: "forbidden" }, 403);
+    }
+    if (
+      error instanceof FinanceTransactionNotFoundError ||
+      error instanceof FinanceAccountNotFoundError
+    ) {
+      return spendingJson({ status: "finance_account_movement_not_found" }, 404);
+    }
+    if (
+      error instanceof FinanceTransactionAlreadyReversedError ||
+      error instanceof FinanceTransactionReversalNotAllowedError
+    ) {
+      return spendingJson({ status: "finance_account_movement_not_reversible" }, 409);
+    }
+    if (error instanceof FinanceTransactionIdempotencyConflictError) {
+      return spendingJson({ status: "idempotency_conflict" }, 409);
     }
     if (error instanceof FinanceIdempotencyConflictError) {
       return spendingJson({ status: "idempotency_conflict" }, 409);

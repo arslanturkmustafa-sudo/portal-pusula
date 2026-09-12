@@ -2,6 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
 import {
+  ExpenseAccountPermissionError,
+  FinanceAccountInactiveError,
+  FinanceAccountNotFoundError,
+  FinanceTransactionAlreadyReversedError,
+  FinanceTransactionBeforeAccountOpeningError,
+  FinanceTransactionFutureDateError,
   InstallmentPaymentDateInFutureError,
   SpendingResourceNotFoundError,
   SpendingVersionConflictError,
@@ -34,7 +40,11 @@ export async function PATCH(
 ): Promise<NextResponse> {
   const principal = await authenticateAdminRequest(request, "finance.cards.write");
   if (!principal) return spendingJson({ status: "unauthorized" }, 401);
-  if (!hasPermission(principal, "finance.cards.read")) {
+  if (
+    !hasPermission(principal, "finance.cards.read") ||
+    !hasPermission(principal, "finance.accounts.read") ||
+    !hasPermission(principal, "finance.accounts.write")
+  ) {
     return spendingJson({ status: "forbidden" }, 403);
   }
   if (!isSameOrigin(request)) return spendingJson({ status: "forbidden" }, 403);
@@ -51,7 +61,11 @@ export async function PATCH(
       spendingDatabasePool(),
       id,
       input,
-      { actorId: spendingActorId(principal), correlationId },
+      {
+        actorId: spendingActorId(principal),
+        canMutateAccountLedger: true,
+        correlationId,
+      },
     );
     return spendingJson({ installment });
   } catch (error) {
@@ -67,6 +81,27 @@ export async function PATCH(
     }
     if (error instanceof InstallmentPaymentDateInFutureError) {
       return spendingJson({ status: "payment_date_in_future" }, 400);
+    }
+    if (error instanceof ExpenseAccountPermissionError) {
+      return spendingJson({ status: "forbidden" }, 403);
+    }
+    if (error instanceof FinanceAccountNotFoundError) {
+      return spendingJson({ status: "finance_account_not_found" }, 404);
+    }
+    if (error instanceof FinanceAccountInactiveError) {
+      return spendingJson({ status: "finance_account_inactive" }, 409);
+    }
+    if (error instanceof FinanceTransactionFutureDateError) {
+      return spendingJson({ status: "finance_transaction_future_date" }, 409);
+    }
+    if (error instanceof FinanceTransactionBeforeAccountOpeningError) {
+      return spendingJson(
+        { status: "finance_transaction_before_account_opening" },
+        409,
+      );
+    }
+    if (error instanceof FinanceTransactionAlreadyReversedError) {
+      return spendingJson({ status: "finance_transaction_already_reversed" }, 409);
     }
     if (error instanceof SpendingVersionConflictError) {
       return spendingJson({ status: "version_conflict" }, 409);

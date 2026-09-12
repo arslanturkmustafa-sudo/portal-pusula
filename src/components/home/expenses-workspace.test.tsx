@@ -2,6 +2,15 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+const navigationMocks = vi.hoisted(() => {
+  const replace = vi.fn();
+  return { replace, router: { replace } };
+});
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => navigationMocks.router,
+}));
+
 import { ExpensesWorkspace } from "@/components/home/expenses-workspace";
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -80,11 +89,47 @@ const expense = {
 };
 
 afterEach(() => {
+  navigationMocks.replace.mockReset();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
 describe("ExpensesWorkspace", () => {
+  it("opens the create form from the quick-access action and consumes the URL action", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async (input) => {
+        const url = String(input);
+        if (url === "/api/projects") return jsonResponse({ projects: [] });
+        if (url === "/api/finance/cards") return jsonResponse({ cards: [] });
+        if (url === "/api/finance/accounts") return jsonResponse({ accounts: [] });
+        if (url === "/api/finance/expense-categories") {
+          return jsonResponse({ categories });
+        }
+        if (url === "/api/finance/expenses") {
+          return jsonResponse({ expenses: [], summary: {} });
+        }
+        if (url === "/api/finance/recurring-expenses") {
+          return jsonResponse({ plans: [] });
+        }
+        throw new Error(`Unexpected request: ${url}`);
+      }),
+    );
+    const user = userEvent.setup();
+
+    render(<ExpensesWorkspace initialCreate />);
+
+    const heading = await screen.findByRole("heading", {
+      level: 3,
+      name: "Gider ekle",
+    });
+    await waitFor(() => expect(heading).toHaveFocus());
+    await user.click(screen.getByRole("button", { name: "Vazgeç" }));
+    expect(navigationMocks.replace).toHaveBeenCalledWith("/finans/giderler", {
+      scroll: false,
+    });
+  });
+
   it("loads projects, cards and expenses sequentially without showing sample data", async () => {
     const requestOrder: string[] = [];
     vi.stubGlobal(

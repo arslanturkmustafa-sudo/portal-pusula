@@ -32,6 +32,7 @@ describe("finance input validation", () => {
         collectedOn: "2026-09-01",
         note: "",
         receivableId: id,
+        targetAccountId: projectId,
       }),
     ).toMatchObject({ amount: "123.4500", note: null });
   });
@@ -52,6 +53,16 @@ describe("finance input validation", () => {
     expect(
       createCollectionInputSchema.safeParse({
         amount: "0",
+        clientOperationKey: operationKey,
+        collectedOn: "2026-09-01",
+        note: null,
+        receivableId: id,
+        targetAccountId: projectId,
+      }).success,
+    ).toBe(false);
+    expect(
+      createCollectionInputSchema.safeParse({
+        amount: "1",
         clientOperationKey: operationKey,
         collectedOn: "2026-09-01",
         note: null,

@@ -18,7 +18,11 @@ import { GET } from "@/app/api/finance/card-installments/route";
 describe("card installment collection API", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.authenticate.mockResolvedValue({ kind: "account" });
+    mocks.authenticate.mockResolvedValue({
+      kind: "account",
+      permissions: ["finance.cards.read"],
+      role: "member",
+    });
     mocks.parse.mockImplementation((value: unknown) => value);
     mocks.list.mockResolvedValue({ installments: [], summary: {} });
   });
@@ -42,5 +46,35 @@ describe("card installment collection API", () => {
     expect(response.status).toBe(200);
     expect(mocks.parse).toHaveBeenCalledWith({ status: "open" });
     expect(mocks.list).toHaveBeenCalledWith({}, { status: "open" });
+  });
+
+  it("redacts payment-account details without account read permission", async () => {
+    mocks.list.mockResolvedValue({
+      installments: [
+        {
+          financeTransactionId: "80000000-0000-4000-8000-000000000001",
+          id: "60000000-0000-4000-8000-000000000001",
+          paymentAccountId: "70000000-0000-4000-8000-000000000001",
+          paymentAccountName: "Merkez kasa",
+          paymentAccountType: "cash",
+        },
+      ],
+      summary: {},
+    });
+
+    const response = await GET(
+      new NextRequest("https://portal.example/api/finance/card-installments"),
+    );
+
+    await expect(response.json()).resolves.toMatchObject({
+      installments: [
+        {
+          financeTransactionId: null,
+          paymentAccountId: null,
+          paymentAccountName: null,
+          paymentAccountType: null,
+        },
+      ],
+    });
   });
 });

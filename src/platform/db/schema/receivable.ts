@@ -17,6 +17,7 @@ import {
 import { consultingContract } from "./consulting-contract";
 import { customer } from "./customer";
 import { customerProject } from "./customer-project";
+import { financeTransaction } from "./finance-account";
 
 export const receivable = mysqlTable(
   "receivable",
@@ -187,6 +188,7 @@ export const receivableCollection = mysqlTable(
     id: char("id", { length: 36 }).primaryKey(),
     clientOperationKey: char("client_operation_key", { length: 36 }).notNull(),
     receivableId: char("receivable_id", { length: 36 }).notNull(),
+    financeTransactionId: char("finance_transaction_id", { length: 36 }),
     amount: decimal("amount", { precision: 19, scale: 4 }).notNull(),
     collectedOn: date("collected_on", { mode: "string" }).notNull(),
     entryType: varchar("entry_type", { length: 16 })
@@ -221,6 +223,13 @@ export const receivableCollection = mysqlTable(
       sql`${table.amount} > 0`,
     ),
     check(
+      "chk_receivable_collection_finance_transaction_identity",
+      sql`${table.financeTransactionId} IS NULL OR (
+        OCTET_LENGTH(${table.financeTransactionId}) = 36
+        AND BINARY ${table.financeTransactionId} REGEXP '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+      )`,
+    ),
+    check(
       "chk_receivable_collection_optional_fields",
       sql`${table.note} IS NULL OR CHAR_LENGTH(${table.note}) BETWEEN 1 AND 2000`,
     ),
@@ -252,10 +261,20 @@ export const receivableCollection = mysqlTable(
     })
       .onDelete("restrict")
       .onUpdate("restrict"),
+    foreignKey({
+      name: "fk_receivable_collection_finance_transaction",
+      columns: [table.financeTransactionId],
+      foreignColumns: [financeTransaction.id],
+    })
+      .onDelete("restrict")
+      .onUpdate("restrict"),
     uniqueIndex("uq_receivable_collection_operation").on(
       table.clientOperationKey,
     ),
     uniqueIndex("uq_receivable_collection_reversal").on(table.reversalOfId),
+    uniqueIndex("uq_receivable_collection_finance_transaction").on(
+      table.financeTransactionId,
+    ),
     index("idx_receivable_collection_receivable_date").on(
       table.receivableId,
       table.collectedOn,

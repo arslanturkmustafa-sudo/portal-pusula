@@ -19,6 +19,11 @@ vi.mock("@/features/finance", () => ({
   bulkPayCardInstallments: mocks.bulkPay,
   bulkPayCardInstallmentsInputSchema: { parse: mocks.parse },
   CardInstallmentBulkConflictError: mocks.CardInstallmentBulkConflictError,
+  ExpenseAccountPermissionError: class extends Error {},
+  FinanceAccountInactiveError: class extends Error {},
+  FinanceAccountNotFoundError: class extends Error {},
+  FinanceTransactionBeforeAccountOpeningError: class extends Error {},
+  FinanceTransactionFutureDateError: class extends Error {},
   InstallmentPaymentDateInFutureError: class extends Error {},
   SpendingResourceNotFoundError: class extends Error {},
 }));
@@ -44,6 +49,7 @@ const input = {
   installments: [{ id: installmentId, version: 1 }],
   month: "2026-09",
   paidOn: "2026-09-03",
+  sourceAccountId: "70000000-0000-4000-8000-000000000001",
 };
 
 function request(body: unknown = input): NextRequest {
@@ -66,7 +72,12 @@ describe("card installment bulk-payment API", () => {
     mocks.authenticate.mockResolvedValue({
       accountId: "10000000-0000-4000-8000-000000000001",
       kind: "account",
-      permissions: ["finance.cards.read", "finance.cards.write"],
+      permissions: [
+        "finance.accounts.read",
+        "finance.accounts.write",
+        "finance.cards.read",
+        "finance.cards.write",
+      ],
       role: "member",
     });
     mocks.parse.mockImplementation((value: unknown) => value);
@@ -79,11 +90,11 @@ describe("card installment bulk-payment API", () => {
     mocks.requestLogger.mockReturnValue({ error: vi.fn() });
   });
 
-  it("requires read in addition to write before parsing or opening the pool", async () => {
+  it("requires account permissions before parsing or opening the pool", async () => {
     mocks.authenticate.mockResolvedValue({
       accountId: "10000000-0000-4000-8000-000000000001",
       kind: "account",
-      permissions: ["finance.cards.write"],
+      permissions: ["finance.cards.read", "finance.cards.write"],
       role: "member",
     });
 
@@ -105,6 +116,7 @@ describe("card installment bulk-payment API", () => {
       input,
       expect.objectContaining({
         actorId: "10000000-0000-4000-8000-000000000001",
+        canMutateAccountLedger: true,
       }),
     );
     expect(response.headers.get("cache-control")).toContain("no-store");

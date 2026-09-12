@@ -3562,9 +3562,9 @@ button, a { color: inherit; }
 }
 .card-bulk-payment-trigger:disabled { cursor: not-allowed; opacity: 0.5; }
 .card-bulk-payment-editor {
-  width: min(430px, 100%);
+  width: min(680px, 100%);
   display: grid;
-  grid-template-columns: minmax(145px, 1fr) auto;
+  grid-template-columns: minmax(145px, 0.8fr) minmax(210px, 1.2fr) auto;
   align-items: end;
   gap: 0.55rem;
 }
@@ -3592,7 +3592,8 @@ button, a { color: inherit; }
   font-size: 0.68rem;
   font-weight: 700;
 }
-.card-bulk-payment-editor input {
+.card-bulk-payment-editor input,
+.card-bulk-payment-editor select {
   width: 100%;
   min-height: 44px;
   padding: 0.4rem 0.5rem;
@@ -3619,7 +3620,8 @@ button, a { color: inherit; }
   font-size: 0.68rem;
   font-weight: 700;
 }
-.card-payment-editor input {
+.card-payment-editor input,
+.card-payment-editor select {
   width: 100%;
   min-height: 44px;
   padding: 0.4rem 0.5rem;
@@ -4751,5 +4753,105 @@ select {
   .finance-subnav {
     display: flex;
     overflow-x: auto;
+  }
+}
+
+/* Ortak hızlı ulaşım */
+.portal-quick-access {
+  margin: 5px 0 8px;
+  padding: 10px;
+  border: 1px solid rgb(255 255 255 / 9%);
+  border-radius: 12px;
+  background: rgb(255 255 255 / 4%);
+}
+
+.ledger-nav-desktop {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-y: auto;
+}
+
+.portal-quick-access > p,
+.mobile-nav-menu-section > p {
+  margin: 0;
+  color: #8f9bb3;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 0.58rem;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.portal-quick-access > div {
+  display: grid;
+  gap: 4px;
+  margin-top: 7px;
+}
+
+.portal-quick-link {
+  min-height: 38px;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+  border-radius: 9px;
+  color: #dce4f4;
+  font-size: 0.72rem;
+  font-weight: 560;
+  text-decoration: none;
+}
+
+.portal-quick-link:hover {
+  background: rgb(255 255 255 / 7%);
+  color: #fff;
+}
+
+.portal-quick-link .ledger-nav-icon {
+  width: 17px;
+  height: 17px;
+}
+
+.mobile-nav-menu-section {
+  display: grid;
+  gap: 4px;
+}
+
+.mobile-nav-menu-section + .mobile-nav-menu-section {
+  margin-top: 7px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.mobile-nav-menu-section > p {
+  padding: 3px 10px 2px;
+  color: #758199;
+}
+
+@media (max-width: 760px) {
+  .portal-quick-access-desktop {
+    display: none;
+  }
+
+  .ledger-nav .mobile-nav-menu .portal-quick-link {
+    min-height: 48px;
+    display: grid;
+    grid-template-columns: 22px minmax(0, 1fr);
+    justify-content: start;
+    padding: 0 12px;
+    border-radius: 9px;
+    color: var(--ink);
+    font-size: 0.72rem;
+    text-align: left;
+  }
+
+  .ledger-nav .mobile-nav-menu .portal-quick-link:hover {
+    background: var(--sheet-soft);
+  }
+
+  .mobile-nav-menu {
+    max-height: min(70vh, 430px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
   }
 }

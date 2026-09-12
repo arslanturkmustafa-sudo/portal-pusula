@@ -9,6 +9,16 @@ const customers = [
   { id: "sample-2", name: "Vega Endüstri" },
 ] as const;
 
+const accounts = [
+  {
+    accountType: "bank" as const,
+    bankName: "Örnek Banka",
+    displayName: "Ana TL Hesabı",
+    id: "60000000-0000-4000-8000-000000000001",
+    status: "active" as const,
+  },
+];
+
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
@@ -117,6 +127,75 @@ describe("FinanceWorkspace", () => {
     await waitFor(() => expect(postBodies).toHaveLength(2));
     expect(postBodies[0]?.clientOperationKey).toBe(operationKey);
     expect(postBodies[1]?.clientOperationKey).toBe(operationKey);
+  });
+
+  it("posts the selected destination account with a collection", async () => {
+    const postedBodies: Array<Record<string, unknown>> = [];
+    const receivablePayload = {
+      receivables: [{
+        collectedAmount: "0.0000",
+        collections: [],
+        contractId: null,
+        createdAtUtc: "2026-09-01T08:00:00.000Z",
+        customerId: "sample-1",
+        customerName: "Atlas Makina",
+        description: "Eylül danışmanlığı",
+        dueOn: "2026-09-10",
+        id: "30000000-0000-4000-8000-000000000001",
+        netAmount: "1000.0000",
+        outstandingAmount: "1000.0000",
+        periodMonth: "2026-09",
+        projectId: null,
+        projectName: null,
+        projectShortCode: null,
+        recordState: "active",
+        sourceType: "opening_balance",
+        status: "open",
+        totalAmount: "1000.0000",
+        vatAmount: "0.0000",
+        version: 1,
+      }],
+      summary: {
+        collectedThisMonth: "0.0000",
+        dueThisMonth: "1000.0000",
+        overdue: "0.0000",
+        outstanding: "1000.0000",
+      },
+    };
+    vi.stubGlobal("fetch", vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "POST") {
+        postedBodies.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+        return jsonResponse({ created: true });
+      }
+      return jsonResponse(receivablePayload);
+    }));
+    const user = userEvent.setup();
+
+    render(
+      <FinanceWorkspace accounts={accounts} customers={customers} live />,
+    );
+    const collectionButton = await screen.findByRole("button", {
+      name: "Tahsilat gir",
+    });
+    await waitFor(() => expect(collectionButton).toBeEnabled());
+    await user.click(collectionButton);
+    await user.selectOptions(
+      screen.getByLabelText("Alacak kaydı"),
+      "30000000-0000-4000-8000-000000000001",
+    );
+    await user.type(screen.getByLabelText("Tahsil edilen tutar"), "250");
+    await user.selectOptions(
+      screen.getByLabelText("Tahsilatın geldiği kasa / banka hesabı"),
+      accounts[0].id,
+    );
+    await user.click(screen.getByRole("button", { name: "Tahsilatı işle" }));
+
+    await waitFor(() => expect(postedBodies).toHaveLength(1));
+    expect(postedBodies[0]).toMatchObject({
+      amount: "250",
+      receivableId: "30000000-0000-4000-8000-000000000001",
+      targetAccountId: accounts[0].id,
+    });
   });
 
   it("offers collection reversal only for an unreversed original movement", async () => {
