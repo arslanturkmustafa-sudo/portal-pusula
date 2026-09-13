@@ -28,6 +28,7 @@ export type UserAccount = Readonly<{
 }>;
 
 export type OwnerEmailRecipient = Readonly<{
+  canReadFinanceReports: boolean;
   displayName: string;
   email: string;
   id: string;
@@ -55,6 +56,7 @@ type UserPermissionWithAccountRow = UserPermissionRow & {
 };
 
 type OwnerEmailRecipientRow = RowDataPacket & {
+  can_read_finance_reports: number | string;
   display_name: string;
   email: string;
   id: string;
@@ -148,7 +150,12 @@ export async function listUserAccounts(
 function mapOwnerEmailRecipient(
   row: OwnerEmailRecipientRow,
 ): OwnerEmailRecipient {
+  const canReadFinanceReports = Number(row.can_read_finance_reports);
+  if (canReadFinanceReports !== 0 && canReadFinanceReports !== 1) {
+    throw new Error("Email recipient finance permission is invalid.");
+  }
   return {
+    canReadFinanceReports: canReadFinanceReports === 1,
     displayName: row.display_name,
     email: row.email,
     id: row.id,
@@ -161,7 +168,18 @@ export async function listActiveOwnerEmailRecipients(
   const [rows] = await connection.execute<OwnerEmailRecipientRow[]>(
     `SELECT account.id,
             COALESCE(setting.recipient_email, account.email) AS email,
-            account.display_name
+            account.display_name,
+            CASE
+              WHEN BINARY account.role = BINARY 'owner' THEN 1
+              WHEN EXISTS (
+                SELECT 1
+                  FROM user_permission permission
+                 WHERE permission.user_account_id = account.id
+                   AND BINARY permission.permission_code =
+                       BINARY 'finance.reports.read'
+              ) THEN 1
+              ELSE 0
+            END AS can_read_finance_reports
        FROM user_account AS account
        LEFT JOIN user_notification_setting AS setting
          ON setting.user_account_id = account.id
@@ -179,7 +197,18 @@ export async function findActiveOwnerEmailRecipientById(
   const [rows] = await connection.execute<OwnerEmailRecipientRow[]>(
     `SELECT account.id,
             COALESCE(setting.recipient_email, account.email) AS email,
-            account.display_name
+            account.display_name,
+            CASE
+              WHEN BINARY account.role = BINARY 'owner' THEN 1
+              WHEN EXISTS (
+                SELECT 1
+                  FROM user_permission permission
+                 WHERE permission.user_account_id = account.id
+                   AND BINARY permission.permission_code =
+                       BINARY 'finance.reports.read'
+              ) THEN 1
+              ELSE 0
+            END AS can_read_finance_reports
        FROM user_account AS account
        LEFT JOIN user_notification_setting AS setting
          ON setting.user_account_id = account.id
