@@ -245,6 +245,7 @@ export function composeCashFlowReport(
     actual: actualTotals(snapshot.actual),
     assumptions: [
       "Hesap defteri özeti ve bakiye hesabı yalnız hesap hareketleri defterinden alınır; iç transferler brüt giriş veya çıkışı şişirmez.",
+      "Ters kayıtla tamamen nötrlenen özgün hareket ve karşı kaydı dönemsel nakit akışından çıkarılır; değişmez işlem geçmişi Hesaplar bölümünde korunur.",
       "Vade planı hesap defteri ayrıntılarını tekrarlamaz; alacaklar ve ortak katkıları kayıt bazında, kredi kartlarını kart ve vade günü bazında toplar.",
       "Kart planında harcama açıklamaları gösterilmez; toplam, ödenen ve kalan tutar aynı vade satırında sunulur.",
       "Vergi yükümlülükleri KDV, gelir vergisi veya geçici vergi olarak kendi vade gününde gösterilir; yalnız açık tutarlar nakit tahminine eklenir.",

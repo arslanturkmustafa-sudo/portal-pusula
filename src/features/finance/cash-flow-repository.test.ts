@@ -433,6 +433,13 @@ describe("cash flow repository", () => {
     ]);
     expect(balanceSql).toContain("AS current_asset_amount");
     expect(balanceSql.match(/\?/gu)).toHaveLength(12);
+    expect(balanceSql.match(/t\.reversal_of_id IS NULL/gu)).toHaveLength(3);
+    expect(
+      balanceSql.match(/FROM finance_transaction reversal/gu),
+    ).toHaveLength(3);
+    expect(
+      balanceSql.match(/reversal\.reversal_of_id = t\.id/gu),
+    ).toHaveLength(3);
 
     const accountOpeningSql = String(execute.mock.calls[3]?.[0]);
     expect(accountOpeningSql).toMatch(
@@ -450,6 +457,9 @@ describe("cash flow repository", () => {
     expect(actualSql).toMatch(/transaction_type = BINARY 'income'/u);
     expect(actualSql).toMatch(/transaction_type = BINARY 'expense'/u);
     expect(actualSql).not.toMatch(/transaction_type = BINARY 'transfer'[\s\S]*THEN le\.amount/u);
+    expect(actualSql).toContain("t.reversal_of_id IS NULL");
+    expect(actualSql).toContain("FROM finance_transaction reversal");
+    expect(actualSql).toContain("reversal.reversal_of_id = t.id");
     expect(execute.mock.calls[4]?.[1]).toEqual([
       "2026-09-01",
       "2026-09-30",

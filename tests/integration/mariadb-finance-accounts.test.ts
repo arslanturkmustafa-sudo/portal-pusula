@@ -8,6 +8,7 @@ vi.mock("server-only", () => ({}));
 
 import { FinanceLedgerIntegrityError } from "../../src/features/finance/account-repository";
 import { listFinanceAccountsOverview } from "../../src/features/finance/account-service";
+import { getCashFlowReport } from "../../src/features/finance/cash-flow-service";
 import { registerMySqlPoolDatabase } from "../../src/platform/database/mysql-session-contract";
 
 const enabled = process.env.PORTAL_PUSULA_DISPOSABLE_MARIADB === "1";
@@ -112,6 +113,7 @@ async function insertAccount(
 type FixtureTransaction = Readonly<{
   amount?: string;
   id: string;
+  occurredOn?: string;
   operationId: string;
   reversalOfId?: string | null;
   reversalReason?: string | null;
@@ -127,13 +129,14 @@ async function insertTransaction(
   await pool.execute(
     `INSERT INTO finance_transaction
        (id, client_operation_key, transaction_type, occurred_on, description,
-        amount, source_account_id, target_account_id, reversal_of_id,
-        reversal_reason)
-     VALUES (?, ?, ?, '2026-09-07', 'MariaDB doğrulama fixture', ?, ?, ?, ?, ?)`,
+         amount, source_account_id, target_account_id, reversal_of_id,
+         reversal_reason)
+      VALUES (?, ?, ?, ?, 'MariaDB doğrulama fixture', ?, ?, ?, ?, ?)`,
     [
       transaction.id,
       transaction.operationId,
       transaction.type,
+      transaction.occurredOn ?? "2026-09-07",
       transaction.amount ?? "10.0000",
       transaction.sourceAccountId ?? null,
       transaction.targetAccountId ?? null,
@@ -310,6 +313,100 @@ describe.skipIf(!enabled).sequential("finance account reconciliation on real Mar
       balanceAmount: "100.0000",
       id: bankId,
     });
+  });
+
+  it("hides a reversed pair from cash-flow periods across the report boundary", async () => {
+    await insertAccount(
+      pool,
+      bankId,
+      "20000000-0000-4000-8000-000000000001",
+      "bank",
+      "İşletme hesabı",
+      "100.0000",
+    );
+    await pool.execute(
+      "UPDATE finance_account SET created_at_utc = '2026-09-01 00:00:00.000000' WHERE id = ?",
+      [bankId],
+    );
+
+    const originalId = "30000000-0000-4000-8000-000000000001";
+    const reversalId = "30000000-0000-4000-8000-000000000002";
+    const controlId = "30000000-0000-4000-8000-000000000003";
+    await insertTransaction(pool, {
+      id: originalId,
+      occurredOn: "2026-09-06",
+      operationId: "40000000-0000-4000-8000-000000000001",
+      targetAccountId: bankId,
+      type: "income",
+    });
+    await insertLedgerEntry(pool, {
+      accountId: bankId,
+      id: "50000000-0000-4000-8000-000000000001",
+      side: "inflow",
+      transactionId: originalId,
+    });
+    await insertTransaction(pool, {
+      id: reversalId,
+      occurredOn: "2026-09-14",
+      operationId: "40000000-0000-4000-8000-000000000002",
+      reversalOfId: originalId,
+      reversalReason: "Hatalı gelir kaydı",
+      sourceAccountId: bankId,
+      type: "expense",
+    });
+    await insertLedgerEntry(pool, {
+      accountId: bankId,
+      id: "50000000-0000-4000-8000-000000000002",
+      side: "outflow",
+      transactionId: reversalId,
+    });
+    await insertTransaction(pool, {
+      amount: "25.0000",
+      id: controlId,
+      occurredOn: "2026-09-08",
+      operationId: "40000000-0000-4000-8000-000000000003",
+      targetAccountId: bankId,
+      type: "income",
+    });
+    await insertLedgerEntry(pool, {
+      accountId: bankId,
+      amount: "25.0000",
+      id: "50000000-0000-4000-8000-000000000003",
+      side: "inflow",
+      transactionId: controlId,
+    });
+
+    const report = await getCashFlowReport(
+      pool,
+      { from: "2026-09-07", granularity: "weekly", to: "2026-09-20" },
+      new Date("2026-09-20T09:00:00.000Z"),
+    );
+
+    expect(report.actual).toEqual({
+      entryCount: 1,
+      inflowAmount: "25.0000",
+      netAmount: "25.0000",
+      outflowAmount: "0.0000",
+    });
+    expect(report.balance).toMatchObject({
+      closingBalanceAmount: "125.0000",
+      currentAssetAmount: "125.0000",
+      openingBalanceAmount: "100.0000",
+    });
+    expect(report.periods.map((period) => period.actual)).toEqual([
+      {
+        entryCount: 1,
+        inflowAmount: "25.0000",
+        netAmount: "25.0000",
+        outflowAmount: "0.0000",
+      },
+      {
+        entryCount: 0,
+        inflowAmount: "0.0000",
+        netAmount: "0.0000",
+        outflowAmount: "0.0000",
+      },
+    ]);
   });
 
   it("fails closed when a reversal is cross-linked to a different account", async () => {
