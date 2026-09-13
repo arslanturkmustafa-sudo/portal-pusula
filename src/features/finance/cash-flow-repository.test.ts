@@ -25,7 +25,7 @@ describe("cash flow repository", () => {
     ).toBe(true);
   });
 
-  it("uses the reconciled account ledger for actual cash and keeps forecast separate", async () => {
+  it("uses one due-item query for both the vade plan and remaining forecast", async () => {
     const execute = vi
       .fn()
       .mockResolvedValueOnce([[], []])
@@ -58,35 +58,6 @@ describe("cash flow repository", () => {
             event_on: "2026-09-07",
             inflow_amount: "400.2500",
             outflow_amount: "75.0000",
-          },
-        ],
-        [],
-      ])
-      .mockResolvedValueOnce([
-        [
-          {
-            amount: "600.0000",
-            bucket: "scheduled",
-            direction: "inflow",
-            entry_count: 1,
-            event_on: "2026-09-20",
-            kind: "customer_receivable",
-          },
-          {
-            amount: "35.0000",
-            bucket: "undated",
-            direction: "inflow",
-            entry_count: "1",
-            event_on: null,
-            kind: "commission_receivable",
-          },
-          {
-            amount: "80.0000",
-            bucket: "scheduled",
-            direction: "outflow",
-            entry_count: "1",
-            event_on: "2026-09-27",
-            kind: "tax_payment",
           },
         ],
         [],
@@ -168,7 +139,17 @@ describe("cash flow repository", () => {
         ],
         [],
       ])
-      .mockResolvedValueOnce([[{ amount: "50.0000", entry_count: 1 }], []])
+      .mockResolvedValueOnce([
+        [
+          {
+            amount: "50.0000",
+            entry_count: 1,
+            undated_inflow_amount: "35.0000",
+            undated_inflow_count: 1,
+          },
+        ],
+        [],
+      ])
       .mockResolvedValueOnce([
         [
           {
@@ -347,7 +328,31 @@ describe("cash flow repository", () => {
       ],
       forecast: [
         {
-          amount: "600.0000",
+          amount: "800.0000",
+          bucket: "overdue",
+          direction: "inflow",
+          entryCount: 1,
+          eventOn: "2026-08-31",
+          kind: "partner_contribution",
+        },
+        {
+          amount: "16500.0000",
+          bucket: "overdue",
+          direction: "outflow",
+          entryCount: 1,
+          eventOn: "2026-08-31",
+          kind: "direct_expense",
+        },
+        {
+          amount: "1200.0000",
+          bucket: "overdue",
+          direction: "outflow",
+          entryCount: 1,
+          eventOn: "2026-09-05",
+          kind: "card_installment",
+        },
+        {
+          amount: "400.0000",
           bucket: "scheduled",
           direction: "inflow",
           entryCount: 1,
@@ -355,12 +360,20 @@ describe("cash flow repository", () => {
           kind: "customer_receivable",
         },
         {
-          amount: "35.0000",
-          bucket: "undated",
-          direction: "inflow",
+          amount: "250.0000",
+          bucket: "scheduled",
+          direction: "outflow",
           entryCount: 1,
-          eventOn: null,
-          kind: "commission_receivable",
+          eventOn: "2026-09-22",
+          kind: "direct_expense",
+        },
+        {
+          amount: "600.0000",
+          bucket: "scheduled",
+          direction: "outflow",
+          entryCount: 1,
+          eventOn: "2026-09-25",
+          kind: "card_installment",
         },
         {
           amount: "80.0000",
@@ -372,14 +385,6 @@ describe("cash flow repository", () => {
         },
         {
           amount: "16500.0000",
-          bucket: "overdue",
-          direction: "outflow",
-          entryCount: 1,
-          eventOn: "2026-08-31",
-          kind: "direct_expense",
-        },
-        {
-          amount: "16500.0000",
           bucket: "scheduled",
           direction: "outflow",
           entryCount: 1,
@@ -387,19 +392,19 @@ describe("cash flow repository", () => {
           kind: "direct_expense",
         },
         {
-          amount: "1200.0000",
-          bucket: "overdue",
-          direction: "outflow",
+          amount: "35.0000",
+          bucket: "undated",
+          direction: "inflow",
           entryCount: 1,
-          eventOn: "2026-09-05",
-          kind: "card_installment",
+          eventOn: null,
+          kind: "commission_receivable",
         },
       ],
       unclassifiedExpenseAmount: "50.0000",
       unclassifiedExpenseCount: 1,
     });
 
-    expect(execute).toHaveBeenCalledTimes(9);
+    expect(execute).toHaveBeenCalledTimes(8);
     expect(String(execute.mock.calls[0]?.[0])).toContain("finance_transaction");
 
     const balanceSql = String(execute.mock.calls[2]?.[0]);
@@ -451,57 +456,11 @@ describe("cash flow repository", () => {
       "2026-09-15",
     ]);
 
-    const forecastSql = String(execute.mock.calls[5]?.[0]);
-    expect(forecastSql).toMatch(/total_amount - COALESCE\(rc\.collected_amount/iu);
-    expect(forecastSql).toContain("r.record_state = 'active'");
-    expect(forecastSql).toMatch(/cci\.status = 'planned'/iu);
-    expect(forecastSql).toMatch(/pc\.status = 'agency_collected'/iu);
-    expect(forecastSql).toContain("e.finance_transaction_id IS NULL");
-    expect(forecastSql).toMatch(
-      /r\.due_on < \? OR \(r\.due_on >= \? AND r\.due_on <= \?\)/u,
+    expect(execute.mock.calls.map((call) => String(call[0])).join("\n")).not.toContain(
+      "SELECT forecast.event_on",
     );
-    expect(forecastSql).toMatch(
-      /pc\.due_on < \? OR \(pc\.due_on >= \? AND pc\.due_on <= \?\)/u,
-    );
-    expect(forecastSql).toMatch(
-      /cci\.due_on < \? OR \(cci\.due_on >= \? AND cci\.due_on <= \?\)/u,
-    );
-    const taxForecastSql = forecastSql.slice(
-      forecastSql.indexOf("SELECT tax_forecast.due_on"),
-      forecastSql.indexOf("UNION ALL", forecastSql.indexOf("SELECT tax_forecast.due_on")),
-    );
-    expect(taxForecastSql).toContain("'tax_payment', 'outflow'");
-    expect(taxForecastSql).toContain(
-      "BINARY tax_forecast.status = BINARY 'planned'",
-    );
-    expect(taxForecastSql).toContain("tax_forecast.payable_amount > 0");
-    expect(taxForecastSql).toMatch(
-      /tax_forecast\.due_on < \?[\s\S]*tax_forecast\.due_on >= \?[\s\S]*tax_forecast\.due_on <= \?/u,
-    );
-    expect(forecastSql.match(/\?/gu)).toHaveLength(19);
-    expect(execute.mock.calls[5]?.[1]).toEqual([
-      "2026-09-15",
-      "2026-09-15",
-      "2026-09-01",
-      "2026-09-30",
-      "2026-09-15",
-      "2026-09-15",
-      "2026-09-01",
-      "2026-09-30",
-      "2026-09-15",
-      "2026-09-15",
-      "2026-09-01",
-      "2026-09-30",
-      "2026-09-15",
-      "2026-09-15",
-      "2026-09-01",
-      "2026-09-30",
-      "2026-09-01",
-      "2026-09-30",
-      "2026-09-15",
-    ]);
 
-    const dueItemSql = String(execute.mock.calls[6]?.[0]);
+    const dueItemSql = String(execute.mock.calls[5]?.[0]);
     expect(dueItemSql).toContain("receivable.total_amount");
     expect(dueItemSql).toContain("collection.collected_amount");
     expect(dueItemSql).toContain("contribution.expected_amount");
@@ -541,7 +500,7 @@ describe("cash flow repository", () => {
     expect(taxDueSql).toContain("tax_due.payable_amount > 0");
     expect(taxDueSql).not.toContain("paid_on");
     expect(dueItemSql.match(/\?/gu)).toHaveLength(26);
-    expect(execute.mock.calls[6]?.[1]).toEqual([
+    expect(execute.mock.calls[5]?.[1]).toEqual([
       // Customer receivable.
       "2026-09-15",
       "2026-09-15",
@@ -575,7 +534,13 @@ describe("cash flow repository", () => {
       "2026-09-15",
     ]);
 
-    const recurringExpenseSql = String(execute.mock.calls[8]?.[0]);
+    const unclassifiedSql = String(execute.mock.calls[6]?.[0]);
+    expect(unclassifiedSql).toContain("FROM partnership_commission commission");
+    expect(unclassifiedSql).toContain(
+      "BINARY commission.status = BINARY 'agency_collected'",
+    );
+
+    const recurringExpenseSql = String(execute.mock.calls[7]?.[0]);
     expect(recurringExpenseSql).toContain("FROM recurring_expense recurring");
     expect(recurringExpenseSql).toContain(
       "BINARY recurring.status = BINARY 'active'",
@@ -591,6 +556,6 @@ describe("cash flow repository", () => {
     expect(recurringExpenseSql).toContain("recurring.payment_method");
     expect(recurringExpenseSql).toContain("card.statement_closing_day");
     expect(recurringExpenseSql).toContain("card.payment_due_day");
-    expect(execute.mock.calls[8]?.[1]).toEqual(["2026-09-30"]);
+    expect(execute.mock.calls[7]?.[1]).toEqual(["2026-09-30"]);
   });
 });

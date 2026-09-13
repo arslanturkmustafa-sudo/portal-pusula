@@ -105,15 +105,6 @@ type AccountOpeningRow = RowDataPacket & {
   event_on: string | Date;
 };
 
-type ForecastRow = RowDataPacket & {
-  amount: string;
-  bucket: string;
-  direction: string;
-  entry_count: number | string;
-  event_on: string | Date | null;
-  kind: string;
-};
-
 type DueItemRow = RowDataPacket & {
   direction: string;
   due_on: string | Date;
@@ -130,6 +121,8 @@ type DueItemRow = RowDataPacket & {
 type UnclassifiedRow = RowDataPacket & {
   amount: string;
   entry_count: number | string;
+  undated_inflow_amount: string;
+  undated_inflow_count: number | string;
 };
 
 type RecurringExpenseRow = RowDataPacket & {
@@ -172,27 +165,6 @@ function direction(value: string): CashFlowDirection {
   return value;
 }
 
-function forecastKind(value: string): CashFlowForecastKind {
-  if (
-    value !== "card_installment" &&
-    value !== "commission_receivable" &&
-    value !== "customer_receivable" &&
-    value !== "direct_expense" &&
-    value !== "partner_contribution" &&
-    value !== "tax_payment"
-  ) {
-    throw new Error("Cash flow forecast kind is invalid.");
-  }
-  return value;
-}
-
-function bucket(value: string): CashFlowForecastBucket {
-  if (value !== "overdue" && value !== "scheduled" && value !== "undated") {
-    throw new Error("Cash flow forecast bucket is invalid.");
-  }
-  return value;
-}
-
 function dueItemKind(value: string): CashFlowDueItemKind {
   if (
     value !== "card_payment" &&
@@ -220,6 +192,75 @@ function dueItemStatus(
     throw new Error("Cash flow due item status is invalid.");
   }
   return value;
+}
+
+function forecastKindFromDueItem(
+  value: CashFlowDueItemKind,
+): Exclude<CashFlowForecastKind, "commission_receivable"> {
+  switch (value) {
+    case "card_payment":
+      return "card_installment";
+    case "customer_receivable":
+      return "customer_receivable";
+    case "other_expense":
+      return "direct_expense";
+    case "partner_contribution":
+      return "partner_contribution";
+    case "tax_payment":
+      return "tax_payment";
+  }
+}
+
+function forecastFromDueItems(
+  items: readonly CashFlowDueItem[],
+  generatedOn: string,
+): CashFlowForecastAggregate[] {
+  const aggregates = new Map<
+    string,
+    {
+      amount: Decimal;
+      bucket: Exclude<CashFlowForecastBucket, "undated">;
+      direction: CashFlowDirection;
+      entryCount: number;
+      eventOn: string;
+      kind: Exclude<CashFlowForecastKind, "commission_receivable">;
+    }
+  >();
+
+  for (const item of items) {
+    const amount = new Decimal(item.remainingAmount);
+    if (!amount.greaterThan(0)) continue;
+
+    const itemBucket = item.dueOn < generatedOn ? "overdue" : "scheduled";
+    const itemKind = forecastKindFromDueItem(item.kind);
+    const key = [item.dueOn, itemKind, item.direction, itemBucket].join("|");
+    const aggregate = aggregates.get(key);
+    if (aggregate) {
+      aggregate.amount = aggregate.amount.plus(amount);
+      aggregate.entryCount += 1;
+      continue;
+    }
+    aggregates.set(key, {
+      amount,
+      bucket: itemBucket,
+      direction: item.direction,
+      entryCount: 1,
+      eventOn: item.dueOn,
+      kind: itemKind,
+    });
+  }
+
+  return [...aggregates.values()]
+    .sort(
+      (left, right) =>
+        left.eventOn.localeCompare(right.eventOn) ||
+        left.direction.localeCompare(right.direction) ||
+        left.kind.localeCompare(right.kind),
+    )
+    .map((aggregate) => ({
+      ...aggregate,
+      amount: aggregate.amount.toFixed(4),
+    }));
 }
 
 function recurringExpenseFrequency(
@@ -257,13 +298,11 @@ function recurringExpenseCashEventOn(
 ): Readonly<{
   dueItemKind: CashFlowDueItemKind;
   eventOn: string;
-  forecastKind: CashFlowForecastKind;
 }> {
   if (row.payment_method !== "credit_card") {
     return {
       dueItemKind: "other_expense",
       eventOn: occurrenceOn,
-      forecastKind: "direct_expense",
     };
   }
 
@@ -286,7 +325,6 @@ function recurringExpenseCashEventOn(
   return {
     dueItemKind: "card_payment",
     eventOn: installment.dueOn,
-    forecastKind: "card_installment",
   };
 }
 
@@ -446,94 +484,6 @@ export async function readCashFlowLedger(
      HAVING inflow_amount <> 0.0000 OR outflow_amount <> 0.0000
       ORDER BY t.occurred_on ASC`,
     [range.startOn, range.endOn, generatedOn],
-  );
-
-  const [forecastRows] = await connection.execute<ForecastRow[]>(
-    `SELECT forecast.event_on, forecast.kind, forecast.direction, forecast.bucket,
-            COUNT(*) AS entry_count,
-            COALESCE(SUM(forecast.amount), 0.0000) AS amount
-       FROM (
-         SELECT r.due_on AS event_on,
-                'customer_receivable' AS kind, 'inflow' AS direction,
-                CASE WHEN r.due_on < ? THEN 'overdue' ELSE 'scheduled' END AS bucket,
-                GREATEST(r.total_amount - COALESCE(rc.collected_amount, 0.0000), 0.0000) AS amount
-           FROM receivable r
-           LEFT JOIN (
-             SELECT receivable_id,
-                    SUM(CASE WHEN entry_type = 'reversal' THEN -amount ELSE amount END) AS collected_amount
-               FROM receivable_collection
-              GROUP BY receivable_id
-           ) rc ON rc.receivable_id = r.id
-          WHERE r.record_state = 'active'
-            AND (r.due_on < ? OR (r.due_on >= ? AND r.due_on <= ?))
-            AND r.total_amount - COALESCE(rc.collected_amount, 0.0000) > 0
-         UNION ALL
-         SELECT pc.due_on, 'partner_contribution', 'inflow',
-                CASE WHEN pc.due_on < ? THEN 'overdue' ELSE 'scheduled' END,
-                pc.expected_amount - pc.received_amount
-          FROM partnership_contribution pc
-          WHERE pc.status IN ('expected', 'partial')
-            AND (pc.due_on < ? OR (pc.due_on >= ? AND pc.due_on <= ?))
-            AND pc.expected_amount - pc.received_amount > 0
-         UNION ALL
-         SELECT cci.due_on, 'card_installment', 'outflow',
-                 CASE WHEN cci.due_on < ? THEN 'overdue' ELSE 'scheduled' END,
-                 cci.amount
-           FROM credit_card_installment cci
-           JOIN expense e ON e.id = cci.expense_id
-           WHERE e.status = 'active' AND cci.status = 'planned'
-             AND (cci.due_on < ? OR (cci.due_on >= ? AND cci.due_on <= ?))
-         UNION ALL
-         SELECT tax_forecast.due_on, 'tax_payment', 'outflow',
-                CASE
-                  WHEN tax_forecast.due_on < ? THEN 'overdue'
-                  ELSE 'scheduled'
-                END,
-                tax_forecast.payable_amount
-           FROM tax_obligation tax_forecast
-          WHERE BINARY tax_forecast.status = BINARY 'planned'
-            AND tax_forecast.payable_amount > 0
-            AND (
-              tax_forecast.due_on < ?
-              OR (tax_forecast.due_on >= ? AND tax_forecast.due_on <= ?)
-            )
-         UNION ALL
-         SELECT e.incurred_on, 'direct_expense', 'outflow', 'scheduled', e.total_amount
-           FROM expense e
-          WHERE e.status = 'active'
-            AND e.payment_method IN ('cash', 'bank_transfer', 'other')
-            AND e.finance_transaction_id IS NULL
-            AND e.incurred_on >= ? AND e.incurred_on <= ?
-            AND e.incurred_on > ?
-         UNION ALL
-         SELECT NULL, 'commission_receivable', 'inflow', 'undated', pc.share_amount
-           FROM partnership_commission pc
-          WHERE pc.status = 'agency_collected'
-       ) forecast
-      GROUP BY forecast.event_on, forecast.kind, forecast.direction, forecast.bucket
-      ORDER BY forecast.event_on IS NULL ASC, forecast.event_on ASC,
-               forecast.direction ASC, forecast.kind ASC`,
-    [
-      generatedOn,
-      generatedOn,
-      range.startOn,
-      range.endOn,
-      generatedOn,
-      generatedOn,
-      range.startOn,
-      range.endOn,
-      generatedOn,
-      generatedOn,
-      range.startOn,
-      range.endOn,
-      generatedOn,
-      generatedOn,
-      range.startOn,
-      range.endOn,
-      range.startOn,
-      range.endOn,
-      generatedOn,
-    ],
   );
 
   const [dueItemRows] = await connection.execute<DueItemRow[]>(
@@ -764,7 +714,16 @@ export async function readCashFlowLedger(
 
   const [unclassifiedRows] = await connection.execute<UnclassifiedRow[]>(
     `SELECT COUNT(*) AS entry_count,
-            COALESCE(SUM(e.total_amount), 0.0000) AS amount
+            COALESCE(SUM(e.total_amount), 0.0000) AS amount,
+            (SELECT COUNT(*)
+               FROM partnership_commission commission
+              WHERE BINARY commission.status = BINARY 'agency_collected'
+            ) AS undated_inflow_count,
+            (SELECT CAST(COALESCE(SUM(commission.share_amount), 0.0000)
+                      AS DECIMAL(65,4))
+               FROM partnership_commission commission
+              WHERE BINARY commission.status = BINARY 'agency_collected'
+            ) AS undated_inflow_amount
        FROM expense e
       WHERE e.status = 'active' AND e.payment_method = 'other'
         AND e.incurred_on >= ? AND e.incurred_on <= ?
@@ -797,7 +756,6 @@ export async function readCashFlowLedger(
     [range.endOn],
   );
 
-  const recurringForecast: CashFlowForecastAggregate[] = [];
   const recurringDueItems: CashFlowDueItem[] = [];
   for (const row of recurringExpenseRows) {
     const firstOn = canonicalDate(row.next_due_on);
@@ -828,14 +786,6 @@ export async function readCashFlowLedger(
         continue;
       }
       const isOverdue = projected.eventOn < generatedOn;
-      recurringForecast.push({
-        amount: totalAmount,
-        bucket: isOverdue ? "overdue" : "scheduled",
-        direction: "outflow",
-        entryCount: 1,
-        eventOn: projected.eventOn,
-        kind: projected.forecastKind,
-      });
       recurringDueItems.push({
         direction: "outflow",
         dueOn: projected.eventOn,
@@ -849,6 +799,34 @@ export async function readCashFlowLedger(
         totalAmount,
       });
     }
+  }
+
+  const dueItems: CashFlowDueItem[] = [
+    ...dueItemRows.map((row) => ({
+      direction: direction(row.direction),
+      dueOn: canonicalDate(row.due_on),
+      id: row.id,
+      kind: dueItemKind(row.kind),
+      label: row.label,
+      remainingAmount: money(row.remaining_amount),
+      settledAmount: money(row.settled_amount),
+      sourceLabel: row.source_label,
+      status: dueItemStatus(row.status),
+      totalAmount: money(row.total_amount),
+    })),
+    ...recurringDueItems,
+  ];
+  const forecast = forecastFromDueItems(dueItems, generatedOn);
+  const undatedInflowCount = count(unclassified.undated_inflow_count);
+  if (undatedInflowCount > 0) {
+    forecast.push({
+      amount: money(unclassified.undated_inflow_amount),
+      bucket: "undated",
+      direction: "inflow",
+      entryCount: undatedInflowCount,
+      eventOn: null,
+      kind: "commission_receivable",
+    });
   }
 
   return {
@@ -869,32 +847,8 @@ export async function readCashFlowLedger(
       currentAssetAmount: money(balance.current_asset_amount),
       openingBalanceAmount: money(balance.opening_balance_amount),
     },
-    dueItems: [
-      ...dueItemRows.map((row) => ({
-        direction: direction(row.direction),
-        dueOn: canonicalDate(row.due_on),
-        id: row.id,
-        kind: dueItemKind(row.kind),
-        label: row.label,
-        remainingAmount: money(row.remaining_amount),
-        settledAmount: money(row.settled_amount),
-        sourceLabel: row.source_label,
-        status: dueItemStatus(row.status),
-        totalAmount: money(row.total_amount),
-      })),
-      ...recurringDueItems,
-    ],
-    forecast: [
-      ...forecastRows.map((row) => ({
-        amount: money(row.amount),
-        bucket: bucket(row.bucket),
-        direction: direction(row.direction),
-        entryCount: count(row.entry_count),
-        eventOn: row.event_on === null ? null : canonicalDate(row.event_on),
-        kind: forecastKind(row.kind),
-      })),
-      ...recurringForecast,
-    ],
+    dueItems,
+    forecast,
     unclassifiedExpenseAmount: money(unclassified.amount),
     unclassifiedExpenseCount: count(unclassified.entry_count),
   };

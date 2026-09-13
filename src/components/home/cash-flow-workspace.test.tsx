@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/platform/navigation/portal-return-path", () => ({
@@ -226,7 +226,43 @@ describe("CashFlowWorkspace", () => {
 
   afterEach(() => {
     cleanup();
+    vi.useRealTimers();
     vi.unstubAllGlobals();
+  });
+
+  it("turns a stalled report request into a visible retry state", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((_input: RequestInfo | URL, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          const signal = init?.signal;
+          if (!(signal instanceof AbortSignal)) {
+            reject(new Error("Missing abort signal."));
+            return;
+          }
+          signal.addEventListener(
+            "abort",
+            () => reject(new DOMException("Aborted", "AbortError")),
+            { once: true },
+          );
+        }),
+      ),
+    );
+
+    render(<CashFlowWorkspace />);
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Nakit hareketleri uzlaştırılıyor",
+    );
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(15_000);
+    });
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Hesaplama beklenenden uzun sürdü",
+    );
+    expect(screen.getByRole("button", { name: "Yeniden dene" })).toBeVisible();
   });
 
   it("renders reconciled totals, period balances and an accessible trend", async () => {

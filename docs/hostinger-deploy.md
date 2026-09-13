@@ -81,7 +81,7 @@ Hostinger'ın global `sql_mode` değeri paylaşımlı sağlayıcı ayarıdır. P
 
 GitHub Actions her gün 09.00'da ve bekleyen e-posta kuyruğunu güvenli biçimde boşaltmak için her saatin 10. dakikasında `Europe/Istanbul` zaman diliminde exact `POST /api/internal/cron/dispatch` çağrısı yapar. GitHub repository secret adı `PORTAL_PUSULA_CRON_BEARER_TOKEN` olup değeri Hostinger'daki `CRON_BEARER_TOKEN` ile aynıdır. Token curl komut argümanına değil stdin config'ine verilir ve yalnız `Authorization` header'ında taşınır. DB idempotency aynı güne ait özeti bir kez oluşturur; Resend idempotency anahtarı tekrar teslimi etkisizleştirir. Tek çağrı en fazla iki outbox teslimi dener ve her sağlayıcı isteği 1 saniyede kesilir; böylece 4 saniyelik endpoint bütçesi korunur. Cron environment'ı eksik veya biçim dışıysa endpoint fail-closed kalır.
 
-Yeni gider e-postası yalnız başarıyla oluşturulan ilk kayıt için hazırlanır; idempotent tekrar kayıtları yeni bildirim üretmez. Gönderim hatası gider yazımını geri almaz; olay outbox içinde güvenli tekrar için kalır. Günlük e-posta yalnız planlı/telafi bekleyen ziyaret veya tamamlanmamış günlük iş varsa aktif owner hesaplarına gider.
+Yeni gider e-postası yalnız başarıyla oluşturulan ilk kayıt için hazırlanır; idempotent tekrar kayıtları yeni bildirim üretmez. Gönderim hatası gider yazımını geri almaz; olay outbox içinde güvenli tekrar için kalır. Günlük e-posta; planlı/telafi bekleyen ziyaret, tamamlanmamış günlük iş veya vadesi bugün/geçmiş açık alacak ya da ödeme varsa aktif owner hesaplarına gider. Finans satırları yalnız `finance.reports.read` erişimi olan alıcıya eklenir; sabah özeti için tam nakit akış raporu değil dar vadeli-kalem sorgusu kullanılır.
 
 ## Readiness davranışı
 

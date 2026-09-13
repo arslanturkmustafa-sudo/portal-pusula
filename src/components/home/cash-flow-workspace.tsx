@@ -97,6 +97,7 @@ type ReportFilter = Readonly<{
 }>;
 
 const DAY_IN_MILLISECONDS = 86_400_000;
+const CASH_FLOW_REQUEST_TIMEOUT_MS = 15_000;
 
 function istanbulToday(): string {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -238,14 +239,19 @@ export function CashFlowWorkspace() {
     return { applied: initial, draft: initial };
   });
   const [payload, setPayload] = useState<CashFlowPayload | null>(null);
-  const [state, setState] = useState<"error" | "forbidden" | "loading" | "ready">(
-    "loading",
-  );
+  const [state, setState] = useState<
+    "error" | "forbidden" | "loading" | "ready" | "timeout"
+  >("loading");
   const [validationMessage, setValidationMessage] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);
 
   useEffect(() => {
     const controller = new AbortController();
+    let timedOut = false;
+    const timeoutId = window.setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, CASH_FLOW_REQUEST_TIMEOUT_MS);
     void fetch(reportUrl(filters.applied), {
       cache: "no-store",
       credentials: "same-origin",
@@ -270,11 +276,17 @@ export function CashFlowWorkspace() {
         setState("ready");
       })
       .catch((error: unknown) => {
-        if (error instanceof DOMException && error.name === "AbortError") return;
+        if (!timedOut && error instanceof DOMException && error.name === "AbortError") {
+          return;
+        }
         setPayload(null);
-        setState("error");
-      });
-    return () => controller.abort();
+        setState(timedOut ? "timeout" : "error");
+      })
+      .finally(() => window.clearTimeout(timeoutId));
+    return () => {
+      window.clearTimeout(timeoutId);
+      controller.abort();
+    };
   }, [filters.applied, revision]);
 
   const chartMaximum = payload
@@ -453,9 +465,13 @@ export function CashFlowWorkspace() {
           Bu rapor finans raporu izni olan hesaplara açıktır.
         </p>
       ) : null}
-      {state === "error" ? (
+      {state === "error" || state === "timeout" ? (
         <div className={styles.message} role="alert">
-          <span>Nakit akışı hazırlanamadı.</span>
+          <span>
+            {state === "timeout"
+              ? "Hesaplama beklenenden uzun sürdü. Verileriniz değişmedi; yeniden deneyebilirsiniz."
+              : "Nakit akışı hazırlanamadı."}
+          </span>
           <button
             type="button"
             onClick={() => {

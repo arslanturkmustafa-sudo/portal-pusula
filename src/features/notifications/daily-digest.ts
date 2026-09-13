@@ -9,6 +9,10 @@ import {
   type DailyAgendaItem,
   type DailyPlanTask,
 } from "@/features/daily-plan";
+import {
+  listOpenFinanceDigestItems,
+  type FinanceDigestItem,
+} from "@/features/finance/finance-digest-repository";
 import { emailNotificationsEnabled } from "@/platform/config/email-env";
 import { enqueueEmailDelivery } from "@/platform/email/outbox-email";
 import { withUtcTransaction } from "@/platform/jobs/mysql-transaction";
@@ -101,7 +105,7 @@ export async function enqueueDailyDigestEmailsIfDue(
   }
 
   return withUtcTransaction(pool, async (connection) => {
-    const [allVisits, allTasks] = await Promise.all([
+    const [allVisits, allTasks, recipients] = await Promise.all([
       listDailyAgendaItems(
         connection,
         window.businessDate,
@@ -112,10 +116,17 @@ export async function enqueueDailyDigestEmailsIfDue(
         window.businessDate,
         window.businessDate,
       ),
+      listActiveOwnerEmailRecipients(connection),
     ]);
     const visits = digestVisits(allVisits);
     const tasks = digestTasks(allTasks);
-    if (visits.length === 0 && tasks.length === 0) {
+    const hasFinanceRecipient = recipients.some(
+      (recipient) => recipient.canReadFinanceReports,
+    );
+    const financeItems: readonly FinanceDigestItem[] = hasFinanceRecipient
+      ? await listOpenFinanceDigestItems(connection, window.businessDate)
+      : [];
+    if (visits.length === 0 && tasks.length === 0 && financeItems.length === 0) {
       return {
         businessDate: window.businessDate,
         deliveryCount: 0,
@@ -123,7 +134,6 @@ export async function enqueueDailyDigestEmailsIfDue(
       };
     }
 
-    const recipients = await listActiveOwnerEmailRecipients(connection);
     if (recipients.length === 0) {
       return {
         businessDate: window.businessDate,
@@ -133,24 +143,37 @@ export async function enqueueDailyDigestEmailsIfDue(
     }
 
     const availableAtUtc = toUtcDateTime6(now);
+    let deliveryCount = 0;
     for (const recipient of recipients) {
+      const recipientFinanceItems = recipient.canReadFinanceReports
+        ? financeItems
+        : undefined;
+      if (
+        visits.length === 0 &&
+        tasks.length === 0 &&
+        recipientFinanceItems === undefined
+      ) {
+        continue;
+      }
       await enqueueEmailDelivery(connection, {
         availableAtUtc,
         idempotencyKey: `daily-digest:${window.businessDate}:${recipient.id}`,
         message: createDailyDigestEmail({
           businessDate: window.businessDate,
+          financeItems: recipientFinanceItems,
           recipientName: recipient.displayName,
           tasks,
           visits,
         }),
         recipientAccountId: recipient.id,
       });
+      deliveryCount += 1;
     }
 
     return {
       businessDate: window.businessDate,
-      deliveryCount: recipients.length,
-      status: "enqueued" as const,
+      deliveryCount,
+      status: deliveryCount > 0 ? ("enqueued" as const) : ("empty" as const),
     };
   });
 }

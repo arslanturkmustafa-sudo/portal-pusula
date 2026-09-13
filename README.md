@@ -86,7 +86,7 @@ Gerekli environment adları:
 | `RESEND_API_KEY` | Resend API anahtarı; yalnız server environment içinde tutulur |
 | `EMAIL_FROM_ADDRESS`, `EMAIL_FROM_NAME` | Doğrulanmış gönderen adresi ve isteğe bağlı görünen adı |
 
-E-posta bildirimleri varsayılan kapalıdır. Etkin olduğunda yeni gider kaydı aktif owner hesaplarına dayanıklı outbox üzerinden bildirilir; her gün 09.00'da (Europe/Istanbul) planlı ziyaretler ve tamamlanmamış günlük işler için tek özet hazırlanır. Boş gün özeti gönderilmez. GitHub Actions 09.00 günlük tetikleyicisine ek olarak kuyruğu her saatin 10. dakikasında güvenli biçimde boşaltır. Çağrılar yalnız bearer header kullanır; tekrarlar DB ve Resend idempotency anahtarlarıyla etkisizleştirilir.
+E-posta bildirimleri varsayılan kapalıdır. Etkin olduğunda yeni gider kaydı aktif owner hesaplarına dayanıklı outbox üzerinden bildirilir; her gün 09.00'da (Europe/Istanbul) planlı ziyaretler, tamamlanmamış günlük işler ve vadesi gelmiş açık alacak/ödemeler için tek özet hazırlanır. Finans bölümleri yalnız finans raporu erişimi olan alıcılara eklenir; günlük çalışma veya açık finans kalemi yoksa özet gönderilmez. GitHub Actions 09.00 günlük tetikleyicisine ek olarak kuyruğu her saatin 10. dakikasında güvenli biçimde boşaltır. Çağrılar yalnız bearer header kullanır; tekrarlar DB ve Resend idempotency anahtarlarıyla etkisizleştirilir.
 
 ## Migration sırası
 
