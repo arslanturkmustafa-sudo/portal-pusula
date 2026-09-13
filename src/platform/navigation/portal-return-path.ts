@@ -1,6 +1,7 @@
 const DEFAULT_PORTAL_PATH = "/";
 
 const PORTAL_ROUTE_ROOTS = [
+  "/gunum",
   "/musteriler",
   "/gunluk-plan",
   "/gorevler",

@@ -19,7 +19,7 @@ test("protects and renders the accessible customer workbench", async (
   const response = await page.reload();
 
   await expect(
-    page.getByRole("heading", { level: 1, name: "Müşteriler" }),
+    page.getByRole("heading", { level: 1, name: "Günüm" }),
   ).toBeVisible();
   await expect(
     page.getByRole("navigation", {
@@ -29,9 +29,8 @@ test("protects and renders the accessible customer workbench", async (
     }),
   ).toBeVisible();
   await expect(
-    page.getByRole("region", { name: "Müşteri kayıtları" }),
+    page.getByRole("region", { name: "Gün özeti" }),
   ).toBeVisible();
-  await expect(page.getByText("Atlas Makina")).toHaveCount(0);
 
   const skipLink = page.getByRole("link", { name: "Ana içeriğe geç" });
   await page.keyboard.press("Tab");
@@ -39,12 +38,19 @@ test("protects and renders the accessible customer workbench", async (
   await page.keyboard.press("Enter");
   await expect(page.locator("main#ana-icerik")).toBeFocused();
 
-  await page.getByRole("link", { name: "Günlük plan" }).click();
+  await page
+    .getByRole("link", { exact: true, name: "Planlama" })
+    .click();
   await expect(page).toHaveURL(/\/gunluk-plan$/u);
   await expect(
-    page.getByRole("heading", { level: 1, name: "Günlük plan" }),
+    page.getByRole("heading", { level: 1, name: "Planlama" }),
   ).toBeVisible();
 
+  if (testInfo.project.name.startsWith("mobile")) {
+    await page
+      .locator('summary[aria-label="Hızlı ulaşım ve diğer sayfalar"]')
+      .click();
+  }
   await page.getByRole("link", { name: "Finans" }).click();
   await expect(page).toHaveURL(/\/finans$/u);
   await expect(
@@ -62,6 +68,7 @@ test("protects and renders the accessible customer workbench", async (
   ).toBeVisible();
   await page.getByRole("link", { name: "Müşteriler" }).click();
   await expect(page).toHaveURL(/\/musteriler$/u);
+  await expect(page.getByText("Atlas Makina")).toHaveCount(0);
   await expect(page.getByRole("columnheader", { name: "Sonraki ziyaret" })).toHaveCount(1);
   await expect(page.getByRole("columnheader", { name: "Aylık ücret" })).toHaveCount(1);
 

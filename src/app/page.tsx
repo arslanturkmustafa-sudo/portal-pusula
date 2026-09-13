@@ -23,6 +23,13 @@ const MODULE_HOMES: readonly Readonly<{
 export default async function HomePage() {
   const principal = await authenticateCurrentPrincipal();
   if (!principal) redirect("/giris?next=%2F");
+  if (
+    (["daily-plan.read", "tasks.read", "finance.reports.read"] as const).some(
+      (permission) => hasPermission(principal, permission),
+    )
+  ) {
+    redirect("/gunum");
+  }
   const home = MODULE_HOMES.find(({ permission }) =>
     hasPermission(principal, permission),
   );

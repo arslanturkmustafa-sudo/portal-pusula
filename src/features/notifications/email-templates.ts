@@ -9,7 +9,7 @@ import type { Expense } from "@/features/finance/spending-repository";
 import type { EmailMessage } from "@/platform/email/outbox-email";
 
 const PORTAL_DAILY_PLAN_URL =
-  "https://portal.muhendiskafasi.com.tr/gunluk-plan";
+  "https://portal.muhendiskafasi.com.tr/gunum";
 const MAX_ITEMS_PER_SECTION = 50;
 
 const paymentMethodLabels = {
@@ -210,7 +210,7 @@ export function createDailyDigestEmail(
     textSection("Yapılacak görevler", taskRows, input.tasks.length),
     ...financeTextSections,
     "",
-    `Günlük planı açın: ${PORTAL_DAILY_PLAN_URL}`,
+    `Günümü açın: ${PORTAL_DAILY_PLAN_URL}`,
   ].join("\n");
 
   const html = `<!doctype html>
@@ -225,7 +225,7 @@ export function createDailyDigestEmail(
           ${htmlSection("Ziyaretler", visitRows, input.visits.length)}
           ${htmlSection("Yapılacak görevler", taskRows, input.tasks.length)}
           ${financeHtmlSections}
-          <a href="${PORTAL_DAILY_PLAN_URL}" style="display:inline-block;margin-top:26px;padding:11px 16px;border-radius:10px;background:#0f766e;color:#ffffff;text-decoration:none;font-weight:700">Günlük planı aç</a>
+          <a href="${PORTAL_DAILY_PLAN_URL}" style="display:inline-block;margin-top:26px;padding:11px 16px;border-radius:10px;background:#0f766e;color:#ffffff;text-decoration:none;font-weight:700">Günümü aç</a>
           <p style="margin:24px 0 0;font-size:12px;color:#94a3b8">Bu ileti Portal Pusula tarafından otomatik oluşturuldu.</p>
         </div>
       </main>

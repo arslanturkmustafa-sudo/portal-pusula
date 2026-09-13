@@ -14,6 +14,7 @@ type PortalIconName =
   | "calendar"
   | "customers"
   | "finance"
+  | "home"
   | "more"
   | "plus"
   | "projects"
@@ -38,6 +39,13 @@ type PortalQuickAction = Readonly<{
 
 export const portalNavigationItems: readonly PortalNavigationItem[] = [
   {
+    href: "/gunum",
+    icon: "home",
+    label: "Günüm",
+    permissions: ["daily-plan.read", "tasks.read", "finance.reports.read"],
+    shortLabel: "Günüm",
+  },
+  {
     href: "/musteriler",
     icon: "customers",
     label: "Müşteriler",
@@ -47,7 +55,7 @@ export const portalNavigationItems: readonly PortalNavigationItem[] = [
   {
     href: "/gunluk-plan",
     icon: "calendar",
-    label: "Günlük plan",
+    label: "Planlama",
     permissions: ["daily-plan.read"],
     shortLabel: "Plan",
   },
@@ -154,6 +162,12 @@ function PortalNavIcon({ name }: Readonly<{ name: PortalIconName }>) {
       <>
         <path d="M3 3v18h18" />
         <path d="m7 16 4-5 3 3 5-7" />
+      </>
+    ),
+    home: (
+      <>
+        <path d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-5v-6h-4v6H5a1 1 0 0 1-1-1Z" />
+        <path d="M8 11h8" />
       </>
     ),
     projects: (

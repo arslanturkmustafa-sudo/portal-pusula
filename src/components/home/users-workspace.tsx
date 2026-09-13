@@ -44,7 +44,7 @@ const permissionGroups: readonly Readonly<{
     description: "Günlük çalışma, proje ve görev akışları",
     label: "Operasyon",
     permissions: [
-      { code: "daily-plan.read", label: "Günlük plan" },
+      { code: "daily-plan.read", label: "Planlama" },
       { code: "projects.read", label: "Projeleri görüntüle" },
       { code: "projects.write", label: "Projeleri düzenle" },
       { code: "projects.lifecycle", label: "Projeleri arşivle" },
