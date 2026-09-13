@@ -7,7 +7,7 @@ import { hasPermission } from "@/platform/auth/permissions";
 import { authenticateCurrentPrincipal } from "@/platform/auth/server-auth";
 
 export const metadata: Metadata = {
-  title: "Günlük plan · Portal Pusula",
+  title: "Planlama · Portal Pusula",
 };
 
 export default async function DailyPlanPage() {
@@ -16,9 +16,9 @@ export default async function DailyPlanPage() {
   return (
     <PortalPermissionGate anyOf={["daily-plan.read"]}>
       <PortalPageHeader
-        context="Günlük çalışma"
+        context="Takvim / saha"
         note="Ziyaretleri günlük, haftalık veya aylık inceleyin; gerçekleşenleri plandan tamamlayın."
-        title="Günlük plan"
+        title="Planlama"
       />
       <DailyPlanWorkspace
         canWriteTasks={

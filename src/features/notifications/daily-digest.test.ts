@@ -228,6 +228,9 @@ describe("daily digest", () => {
     expect(firstMessage.text).toContain("Vadesi gelen ödemeler (1)");
     expect(firstMessage.text).toContain("Ağustos danışmanlık");
     expect(firstMessage.text).toContain("KDV");
+    expect(firstMessage.text).toContain(
+      "Günümü açın: https://portal.muhendiskafasi.com.tr/gunum",
+    );
     expect(firstMessage.text).not.toContain("completed");
     expect(firstMessage.html).toContain("Atlas &lt;Üretim&gt;");
     expect(firstMessage.html).not.toContain("<script>");

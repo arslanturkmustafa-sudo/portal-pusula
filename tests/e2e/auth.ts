@@ -8,8 +8,8 @@ export async function signIn(page: Page): Promise<void> {
   await page.getByLabel("E-posta").fill(e2eAdminEmail);
   await page.getByLabel("Parola").fill(e2eAdminPassword);
   await page.getByRole("button", { name: "Giriş yap" }).click();
-  await expect(page).toHaveURL(/\/musteriler$/u);
+  await expect(page).toHaveURL(/\/gunum$/u);
   await expect(
-    page.getByRole("heading", { level: 1, name: "Müşteriler" }),
+    page.getByRole("heading", { level: 1, name: "Günüm" }),
   ).toBeVisible();
 }

@@ -5,6 +5,7 @@ import { safePortalReturnPath } from "@/platform/navigation/portal-return-path";
 describe("safePortalReturnPath", () => {
   it.each([
     "/",
+    "/gunum",
     "/finans",
     "/ayarlar",
     "/finans/raporlar?month=2026-09",

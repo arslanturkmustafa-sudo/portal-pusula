@@ -1,0 +1,361 @@
+.workspace {
+  display: grid;
+  gap: 18px;
+  padding: 20px 0 36px;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+
+.action,
+.primaryAction {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--sheet);
+  box-shadow: var(--shadow-sm);
+  font-size: 0.76rem;
+  font-weight: 650;
+  text-decoration: none;
+}
+
+.primaryAction {
+  border-color: #4f6bff;
+  background: #4f6bff;
+  color: #fff;
+}
+
+.action:hover {
+  border-color: #aab5ca;
+  background: #f9faff;
+}
+
+.primaryAction:hover {
+  background: #405bdc;
+}
+
+.summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--sheet);
+  box-shadow: var(--shadow-sm);
+}
+
+.summary article {
+  min-height: 108px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 17px 18px;
+  border-right: 1px solid var(--line);
+}
+
+.summary article:last-child {
+  border-right: 0;
+}
+
+.summary span,
+.summary small {
+  color: var(--ink-soft);
+  font-size: 0.67rem;
+}
+
+.summary strong {
+  margin: 4px 0 2px;
+  font-size: 1.8rem;
+  font-weight: 690;
+  letter-spacing: -0.055em;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.panel {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--sheet);
+  box-shadow: var(--shadow-sm);
+}
+
+.financePanel {
+  grid-column: 1 / -1;
+}
+
+.panelHeader {
+  min-height: 78px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 15px 17px;
+  border-bottom: 1px solid var(--line);
+}
+
+.panelHeader p,
+.panelHeader h2,
+.financeGrid h3 {
+  margin: 0;
+}
+
+.panelHeader p {
+  margin-bottom: 4px;
+  color: #758199;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 0.58rem;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.panelHeader h2 {
+  font-size: 1rem;
+  font-weight: 675;
+  letter-spacing: -0.025em;
+}
+
+.panelHeader a {
+  flex: 0 0 auto;
+  color: #405bdc;
+  font-size: 0.7rem;
+  font-weight: 650;
+  text-decoration: none;
+}
+
+.panelHeader a:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.list,
+.financeList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.row {
+  min-height: 68px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 17px;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 72%, transparent);
+}
+
+.row:last-child,
+.financeList li:last-child {
+  border-bottom: 0;
+}
+
+.row time {
+  min-width: 48px;
+  color: #405bdc;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.row div,
+.financeList li > div {
+  min-width: 0;
+}
+
+.row strong,
+.row span,
+.financeList strong,
+.financeList span {
+  display: block;
+}
+
+.row strong,
+.financeList strong {
+  overflow-wrap: anywhere;
+  font-size: 0.76rem;
+  font-weight: 640;
+}
+
+.row div > span,
+.financeList div > span {
+  margin-top: 3px;
+  color: var(--ink-soft);
+  font-size: 0.66rem;
+  line-height: 1.4;
+}
+
+.status {
+  padding: 5px 7px;
+  border-radius: 999px;
+  background: #f0f3ff;
+  color: #405bdc;
+  font-size: 0.58rem !important;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.taskMarker {
+  width: 10px;
+  height: 10px;
+  border: 2px solid #4f6bff;
+  border-radius: 3px;
+}
+
+.financeGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.financeGrid > div {
+  min-width: 0;
+  border-right: 1px solid var(--line);
+}
+
+.financeGrid > div:last-child {
+  border-right: 0;
+}
+
+.financeGrid h3 {
+  padding: 12px 17px;
+  border-bottom: 1px solid var(--line);
+  background: #f8f9fc;
+  font-size: 0.72rem;
+  font-weight: 680;
+}
+
+.financeList li {
+  min-height: 68px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 17px;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 72%, transparent);
+}
+
+.amount {
+  flex: 0 0 auto;
+  text-align: right;
+}
+
+.amount strong {
+  font-variant-numeric: tabular-nums;
+}
+
+.empty {
+  margin: 0;
+  padding: 24px 17px;
+  color: var(--ink-soft);
+  font-size: 0.72rem;
+}
+
+.unavailable {
+  max-width: 620px;
+  margin: 32px 0;
+  padding: 20px;
+  border: 1px solid #e4b7aa;
+  border-radius: 14px;
+  background: #fff8f5;
+}
+
+.unavailable p {
+  margin: 6px 0 16px;
+  color: var(--ink-soft);
+}
+
+.unavailable a {
+  color: #405bdc;
+  font-weight: 650;
+}
+
+@media (max-width: 900px) {
+  .grid,
+  .financeGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .financeGrid > div {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .financeGrid > div:last-child {
+    border-bottom: 0;
+  }
+
+  .summary article:nth-child(2n) {
+    border-right: 0;
+  }
+}
+
+@media (max-width: 620px) {
+  .workspace {
+    padding-top: 14px;
+  }
+
+  .actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .action,
+  .primaryAction {
+    width: 100%;
+    padding: 0 12px;
+  }
+
+  .summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .summary article {
+    min-height: 94px;
+    padding: 13px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .summary article:nth-last-child(-n + 2) {
+    border-bottom: 0;
+  }
+
+  .summary strong {
+    font-size: 1.55rem;
+  }
+
+  .panelHeader {
+    align-items: flex-start;
+  }
+
+  .row {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .row .status {
+    grid-column: 2;
+    justify-self: start;
+  }
+
+  .financeList li {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .amount {
+    text-align: left;
+  }
+}

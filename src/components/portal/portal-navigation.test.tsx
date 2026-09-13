@@ -16,8 +16,9 @@ describe("PortalNavigation", () => {
     render(<PortalNavigation principal={{ permissions: [], role: "owner" }} />);
     const navigation = screen.getByRole("navigation", { name: "Ana navigasyon" });
     const expectedLinks = [
+      ["Günüm", "/gunum"],
       ["Müşteriler", "/musteriler"],
-      ["Günlük plan", "/gunluk-plan"],
+      ["Planlama", "/gunluk-plan"],
       ["Görevler", "/gorevler"],
       ["Finans", "/finans"],
       ["Projeler", "/projeler"],
@@ -45,6 +46,7 @@ describe("PortalNavigation", () => {
       />,
     );
     const navigation = screen.getByRole("navigation", { name: "Ana navigasyon" });
+    expect(within(navigation).getByRole("link", { name: "Günüm" })).toBeVisible();
     expect(within(navigation).getByRole("link", { name: "Müşteriler" })).toBeVisible();
     expect(within(navigation).getByRole("link", { name: "Görevler" })).toBeVisible();
     expect(within(navigation).queryByRole("link", { name: "Finans" })).toBeNull();

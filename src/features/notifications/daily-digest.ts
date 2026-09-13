@@ -3,16 +3,7 @@ import "server-only";
 import type { Pool } from "mysql2/promise";
 
 import { listActiveOwnerEmailRecipients } from "@/features/account/repository";
-import {
-  listDailyAgendaItems,
-  listDailyPlanTasks,
-  type DailyAgendaItem,
-  type DailyPlanTask,
-} from "@/features/daily-plan";
-import {
-  listOpenFinanceDigestItems,
-  type FinanceDigestItem,
-} from "@/features/finance/finance-digest-repository";
+import { readTodayOverview } from "@/features/today";
 import { emailNotificationsEnabled } from "@/platform/config/email-env";
 import { enqueueEmailDelivery } from "@/platform/email/outbox-email";
 import { withUtcTransaction } from "@/platform/jobs/mysql-transaction";
@@ -70,20 +61,6 @@ export function istanbulDigestWindow(now: Date): IstanbulDigestWindow {
   };
 }
 
-function digestVisits(
-  visits: readonly DailyAgendaItem[],
-): readonly DailyAgendaItem[] {
-  return visits.filter(
-    (visit) =>
-      visit.resolutionStatus === "planned" ||
-      visit.resolutionStatus === "makeup_pending",
-  );
-}
-
-function digestTasks(tasks: readonly DailyPlanTask[]): readonly DailyPlanTask[] {
-  return tasks.filter((task) => task.status !== "done");
-}
-
 export async function enqueueDailyDigestEmailsIfDue(
   pool: Pool,
   now: Date = new Date(),
@@ -105,28 +82,25 @@ export async function enqueueDailyDigestEmailsIfDue(
   }
 
   return withUtcTransaction(pool, async (connection) => {
-    const [allVisits, allTasks, recipients] = await Promise.all([
-      listDailyAgendaItems(
-        connection,
-        window.businessDate,
-        window.businessDate,
-      ),
-      listDailyPlanTasks(
-        connection,
-        window.businessDate,
-        window.businessDate,
-      ),
-      listActiveOwnerEmailRecipients(connection),
-    ]);
-    const visits = digestVisits(allVisits);
-    const tasks = digestTasks(allTasks);
+    const recipients = await listActiveOwnerEmailRecipients(connection);
     const hasFinanceRecipient = recipients.some(
       (recipient) => recipient.canReadFinanceReports,
     );
-    const financeItems: readonly FinanceDigestItem[] = hasFinanceRecipient
-      ? await listOpenFinanceDigestItems(connection, window.businessDate)
-      : [];
-    if (visits.length === 0 && tasks.length === 0 && financeItems.length === 0) {
+    const { financeItems, tasks, visits } = await readTodayOverview(
+      connection,
+      window.businessDate,
+      {
+        canReadFinance: hasFinanceRecipient,
+        canReadTasks: true,
+        canReadVisits: true,
+      },
+    );
+    const sharedFinanceItems = financeItems ?? [];
+    if (
+      visits.length === 0 &&
+      tasks.length === 0 &&
+      sharedFinanceItems.length === 0
+    ) {
       return {
         businessDate: window.businessDate,
         deliveryCount: 0,
@@ -146,7 +120,7 @@ export async function enqueueDailyDigestEmailsIfDue(
     let deliveryCount = 0;
     for (const recipient of recipients) {
       const recipientFinanceItems = recipient.canReadFinanceReports
-        ? financeItems
+        ? sharedFinanceItems
         : undefined;
       if (
         visits.length === 0 &&
