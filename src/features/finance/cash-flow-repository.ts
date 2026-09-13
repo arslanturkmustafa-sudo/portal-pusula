@@ -355,6 +355,8 @@ export async function readCashFlowLedger(
 ): Promise<CashFlowLedgerSnapshot> {
   await assertFinanceLedgerReconciled(connection);
 
+  // Cash flow is the current effective view. Immutable reversal pairs remain
+  // in the account ledger, but neither side contributes to this report.
   const [balanceRows] = await connection.execute<BalanceRow[]>(
     `SELECT
        (SELECT COUNT(*)
@@ -380,6 +382,12 @@ export async function readCashFlowLedger(
                FROM finance_ledger_entry le
                JOIN finance_transaction t ON t.id = le.transaction_id
               WHERE t.occurred_on < ? AND t.occurred_on <= ?
+                AND t.reversal_of_id IS NULL
+                AND NOT EXISTS (
+                  SELECT 1
+                    FROM finance_transaction reversal
+                   WHERE reversal.reversal_of_id = t.id
+                )
            ), 0.0000)
          AS DECIMAL(65,4)
        ) AS opening_balance_amount,
@@ -401,6 +409,12 @@ export async function readCashFlowLedger(
                FROM finance_ledger_entry le
                JOIN finance_transaction t ON t.id = le.transaction_id
               WHERE t.occurred_on <= ? AND t.occurred_on <= ?
+                AND t.reversal_of_id IS NULL
+                AND NOT EXISTS (
+                  SELECT 1
+                    FROM finance_transaction reversal
+                   WHERE reversal.reversal_of_id = t.id
+                )
            ), 0.0000)
          AS DECIMAL(65,4)
        ) AS closing_balance_amount,
@@ -421,6 +435,12 @@ export async function readCashFlowLedger(
                FROM finance_ledger_entry le
                JOIN finance_transaction t ON t.id = le.transaction_id
               WHERE t.occurred_on <= ?
+                AND t.reversal_of_id IS NULL
+                AND NOT EXISTS (
+                  SELECT 1
+                    FROM finance_transaction reversal
+                   WHERE reversal.reversal_of_id = t.id
+                )
            ), 0.0000)
          AS DECIMAL(65,4)
        ) AS current_asset_amount`,
@@ -480,6 +500,12 @@ export async function readCashFlowLedger(
        JOIN finance_ledger_entry le ON le.transaction_id = t.id
       WHERE t.occurred_on >= ? AND t.occurred_on <= ?
         AND t.occurred_on <= ?
+        AND t.reversal_of_id IS NULL
+        AND NOT EXISTS (
+          SELECT 1
+            FROM finance_transaction reversal
+           WHERE reversal.reversal_of_id = t.id
+        )
       GROUP BY t.occurred_on
      HAVING inflow_amount <> 0.0000 OR outflow_amount <> 0.0000
       ORDER BY t.occurred_on ASC`,
