@@ -38,7 +38,9 @@ test("protects and renders the accessible customer workbench", async (
   await page.keyboard.press("Enter");
   await expect(page.locator("main#ana-icerik")).toBeFocused();
 
-  await page.getByRole("link", { name: "Planlama" }).click();
+  await page
+    .getByRole("link", { exact: true, name: "Planlama" })
+    .click();
   await expect(page).toHaveURL(/\/gunluk-plan$/u);
   await expect(
     page.getByRole("heading", { level: 1, name: "Planlama" }),
