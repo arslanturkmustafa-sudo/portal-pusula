@@ -169,6 +169,13 @@
       "when": 1789195799696,
       "tag": "0023_collection_card_accounts",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "5",
+      "when": 1789383073515,
+      "tag": "0024_partial_card_payments",
+      "breakpoints": true
     }
   ]
 }

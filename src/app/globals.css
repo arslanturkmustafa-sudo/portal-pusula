@@ -3562,9 +3562,9 @@ button, a { color: inherit; }
 }
 .card-bulk-payment-trigger:disabled { cursor: not-allowed; opacity: 0.5; }
 .card-bulk-payment-editor {
-  width: min(680px, 100%);
+  width: min(840px, 100%);
   display: grid;
-  grid-template-columns: minmax(145px, 0.8fr) minmax(210px, 1.2fr) auto;
+  grid-template-columns: minmax(125px, 0.7fr) minmax(145px, 0.8fr) minmax(210px, 1.2fr) auto;
   align-items: end;
   gap: 0.55rem;
 }
@@ -3608,6 +3608,8 @@ button, a { color: inherit; }
 .card-installment-status.is-overdue::before { background: var(--terracotta); }
 .card-installment-status.is-paid::before { background: #47745f; }
 .card-installment-status.is-planned::before { background: #b58a38; }
+.card-installment-status.is-partial:not(.is-overdue) { color: #2f6474; }
+.card-installment-status.is-partial:not(.is-overdue)::before { background: #2f6474; }
 .card-payment-editor {
   min-width: 188px;
   display: grid;

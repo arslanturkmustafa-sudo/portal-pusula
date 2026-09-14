@@ -116,39 +116,40 @@ describe("spending validation", () => {
     ).toBe(true);
   });
 
-  it("keeps installment payment date and account consistent with status", () => {
+  it("validates partial-payment and reopen actions", () => {
     expect(
       updateCardInstallmentInputSchema.safeParse({
-        paidOn: null,
-        sourceAccountId: recordId,
-        status: "paid",
-        version: 1,
-      }).success,
-    ).toBe(false);
-    expect(
-      updateCardInstallmentInputSchema.safeParse({
-        paidOn: "2026-09-03",
-        sourceAccountId: null,
-        status: "paid",
-        version: 1,
-      }).success,
-    ).toBe(false);
-    expect(
-      updateCardInstallmentInputSchema.safeParse({
+        action: "pay",
+        amount: "10",
+        clientOperationKey: recordId,
         paidOn: "2026-09-03",
         sourceAccountId: recordId,
-        status: "paid",
         version: 1,
       }).success,
     ).toBe(true);
     expect(
       updateCardInstallmentInputSchema.safeParse({
-        paidOn: null,
-        sourceAccountId: null,
-        status: "planned",
+        action: "pay",
+        amount: "0",
+        clientOperationKey: recordId,
+        paidOn: "2026-09-03",
+        sourceAccountId: recordId,
+        version: 1,
+      }).success,
+    ).toBe(false);
+    expect(
+      updateCardInstallmentInputSchema.safeParse({
+        action: "reopen",
         version: 1,
       }).success,
     ).toBe(true);
+    expect(
+      updateCardInstallmentInputSchema.safeParse({
+        action: "reopen",
+        amount: "10",
+        version: 1,
+      }).success,
+    ).toBe(false);
   });
 
   it("accepts only the explicit open installment-list status", () => {
@@ -160,43 +161,29 @@ describe("spending validation", () => {
     ).toBe(false);
   });
 
-  it("accepts a bounded unique bulk-payment snapshot and rejects partial amounts", () => {
+  it("accepts a bounded unique partial bulk-payment snapshot", () => {
     const installment = {
+      clientOperationKey: "50000000-0000-4000-8000-000000000001",
       id: "60000000-0000-4000-8000-000000000001",
       version: 2,
     };
-    expect(
-      bulkPayCardInstallmentsInputSchema.parse({
-        cardId: recordId,
-        installments: [installment],
-        month: "2026-09",
-        paidOn: "2026-09-03",
-        sourceAccountId: recordId,
-      }),
-    ).toEqual({
+    const input = {
+      amount: "10",
       cardId: recordId,
       installments: [installment],
       month: "2026-09",
       paidOn: "2026-09-03",
       sourceAccountId: recordId,
+    };
+    expect(bulkPayCardInstallmentsInputSchema.parse(input)).toEqual({
+      ...input,
+      amount: "10.0000",
     });
     expect(
       bulkPayCardInstallmentsInputSchema.safeParse({
-        amount: "10.0000",
-        cardId: recordId,
-        installments: [installment],
-        month: "2026-09",
-        paidOn: "2026-09-03",
-        sourceAccountId: recordId,
-      }).success,
-    ).toBe(false);
-    expect(
-      bulkPayCardInstallmentsInputSchema.safeParse({
+        ...input,
         cardId: recordId,
         installments: [installment, installment],
-        month: "2026-09",
-        paidOn: "2026-09-03",
-        sourceAccountId: recordId,
       }).success,
     ).toBe(false);
   });

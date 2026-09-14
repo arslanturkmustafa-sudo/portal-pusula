@@ -23,19 +23,23 @@ import { addMoney } from "@/features/finance/money";
 import { istanbulDate, monthBounds } from "@/features/finance/period";
 import {
   deletePlannedExpenseInstallments,
+  findCardInstallmentPaymentByOperationKeyForUpdate,
   findCardInstallmentForUpdate,
   findCreditCardForUpdate,
   findExpenseByOperationKeyForUpdate,
   findExpenseForUpdate,
+  insertCardInstallmentPaymentRecordIdempotently,
   insertCardInstallmentRecords,
   insertCreditCardRecordIdempotently,
   insertExpenseRecordIdempotently,
   listCardInstallmentRecords,
   listCardInstallmentsForBulkUpdate,
+  listCardInstallmentPaymentsForUpdate,
   listCreditCardRecords,
   listExpenseInstallmentsForUpdate,
   listExpenseRecords,
   type CardInstallment,
+  type CardInstallmentPayment,
   type CreditCard,
   type Expense,
   updateCardInstallmentRecord,
@@ -136,6 +140,13 @@ export class CardInstallmentBulkConflictError extends Error {
   constructor() {
     super("The card installment selection changed before bulk payment.");
     this.name = "CardInstallmentBulkConflictError";
+  }
+}
+
+export class CardInstallmentPaymentExceedsRemainingError extends Error {
+  constructor() {
+    super("The card installment payment exceeds the remaining amount.");
+    this.name = "CardInstallmentPaymentExceedsRemainingError";
   }
 }
 
@@ -282,8 +293,10 @@ function installmentAuditSummary(installment: CardInstallment) {
     dueOn: installment.dueOn,
     expenseId: installment.expenseId,
     financeTransactionId: installment.financeTransactionId,
+    paidAmount: installment.paidAmount,
     paidOn: installment.paidOn,
     paymentAccountId: installment.paymentAccountId,
+    remainingAmount: installment.remainingAmount,
     status: installment.status,
     version: installment.version,
   };
@@ -294,7 +307,7 @@ function installmentView(
   today: string,
 ): CardInstallmentView {
   const status =
-    installment.status === "paid"
+    new Decimal(installment.remainingAmount).isZero()
       ? "paid"
       : installment.dueOn < today
         ? "overdue"
@@ -317,7 +330,6 @@ function summarizeInstallmentsByCard(
       remainingAmount: "0.0000",
       totalAmount: "0.0000",
     };
-    const isPaid = installment.status === "paid";
     const isEarlierDue =
       installment.status === "planned" &&
       (current.nextDueOn === null || installment.dueOn < current.nextDueOn);
@@ -327,21 +339,20 @@ function summarizeInstallmentsByCard(
     summaries.set(installment.creditCardId, {
       ...current,
       nextDueAmount: isEarlierDue
-        ? installment.amount
+        ? installment.remainingAmount
         : isSameDue
-          ? addMoney(current.nextDueAmount, installment.amount)
+          ? addMoney(current.nextDueAmount, installment.remainingAmount)
           : current.nextDueAmount,
       nextDueOn: isEarlierDue ? installment.dueOn : current.nextDueOn,
       overdueAmount:
         installment.status === "overdue"
-          ? addMoney(current.overdueAmount, installment.amount)
+          ? addMoney(current.overdueAmount, installment.remainingAmount)
           : current.overdueAmount,
-      paidAmount: isPaid
-        ? addMoney(current.paidAmount, installment.amount)
-        : current.paidAmount,
-      remainingAmount: isPaid
-        ? current.remainingAmount
-        : addMoney(current.remainingAmount, installment.amount),
+      paidAmount: addMoney(current.paidAmount, installment.paidAmount),
+      remainingAmount: addMoney(
+        current.remainingAmount,
+        installment.remainingAmount,
+      ),
       totalAmount: addMoney(current.totalAmount, installment.amount),
     });
   }
@@ -470,6 +481,8 @@ function cardPaymentLedgerDescription(installment: CardInstallment): string {
 async function createCardPaymentMovement(
   connection: Parameters<typeof findFinanceAccountForUpdate>[0],
   installment: CardInstallment,
+  amount: string,
+  clientOperationKey: string,
   paidOn: string,
   sourceAccountId: string,
   context: SpendingWriteContext,
@@ -477,8 +490,8 @@ async function createCardPaymentMovement(
   const result = await createFinanceTransactionInConnection(
     connection,
     {
-      amount: installment.amount,
-      clientOperationKey: randomUUID(),
+      amount,
+      clientOperationKey,
       description: cardPaymentLedgerDescription(installment),
       occurredOn: paidOn,
       sourceAccountId,
@@ -493,16 +506,96 @@ async function createCardPaymentMovement(
 async function reverseCardPaymentMovement(
   connection: Parameters<typeof findFinanceAccountForUpdate>[0],
   transactionId: string,
+  clientOperationKey: string,
   reason: string,
   context: SpendingWriteContext,
-): Promise<void> {
-  await reverseFinanceTransactionInConnection(
+): Promise<string> {
+  const result = await reverseFinanceTransactionInConnection(
     connection,
     transactionId,
-    { clientOperationKey: randomUUID(), reason },
+    { clientOperationKey, reason },
     context,
     { allowExpenseManaged: true, preserveOriginalDate: true },
   );
+  return result.transaction.id;
+}
+
+function cardPaymentMatches(
+  payment: CardInstallmentPayment,
+  expected: Readonly<{
+    amount: string;
+    clientOperationKey: string;
+    installmentId: string;
+    paidOn: string;
+    sourceAccountId: string;
+  }>,
+): boolean {
+  return (
+    payment.amount === expected.amount &&
+    payment.clientOperationKey === expected.clientOperationKey &&
+    payment.entryType === "payment" &&
+    payment.installmentId === expected.installmentId &&
+    payment.paidOn === expected.paidOn &&
+    payment.paymentAccountId === expected.sourceAccountId &&
+    payment.reversalOfId === null &&
+    payment.reversalReason === null
+  );
+}
+
+function activeCardPayments(
+  payments: readonly CardInstallmentPayment[],
+): readonly CardInstallmentPayment[] {
+  return payments.filter(
+    (payment) => payment.entryType === "payment" && !payment.reversed,
+  );
+}
+
+async function createCardInstallmentPaymentEntry(
+  connection: Parameters<typeof findFinanceAccountForUpdate>[0],
+  installment: CardInstallment,
+  input: Readonly<{
+    amount: string;
+    clientOperationKey: string;
+    paidOn: string;
+    sourceAccountId: string;
+  }>,
+  paymentAccount: FinanceAccountRecord,
+  now: string,
+  context: SpendingWriteContext,
+): Promise<CardInstallmentPayment> {
+  const financeTransactionId = await createCardPaymentMovement(
+    connection,
+    installment,
+    input.amount,
+    input.clientOperationKey,
+    input.paidOn,
+    paymentAccount.id,
+    context,
+  );
+  const pending: CardInstallmentPayment = {
+    amount: input.amount,
+    clientOperationKey: input.clientOperationKey,
+    createdAtUtc: now,
+    entryType: "payment",
+    financeTransactionId,
+    id: randomUUID(),
+    installmentId: installment.id,
+    paidOn: input.paidOn,
+    paymentAccountId: paymentAccount.id,
+    paymentAccountName: paymentAccount.displayName,
+    paymentAccountType: paymentAccount.accountType,
+    reversalOfId: null,
+    reversalReason: null,
+    reversed: false,
+  };
+  const persisted = await insertCardInstallmentPaymentRecordIdempotently(
+    connection,
+    pending,
+  );
+  if (!cardPaymentMatches(persisted, { ...input, installmentId: installment.id })) {
+    throw new SpendingIdempotencyConflictError();
+  }
+  return persisted;
 }
 
 function generatedInstallments(
@@ -793,8 +886,14 @@ export async function updateExpense(
       throw new CreditCardInactiveError();
     }
     const installments = await listExpenseInstallmentsForUpdate(connection, id);
-    const hasPaidInstallment = installments.some((item) => item.status === "paid");
-    if (hasPaidInstallment && (planChanged || input.status === "voided")) {
+    const hasPaidInstallment = installments.some((item) =>
+      new Decimal(item.paidAmount).greaterThan(0),
+    );
+    const hasPaymentHistory = installments.some((item) => item.hasPaymentHistory);
+    if (
+      (hasPaidInstallment && (planChanged || input.status === "voided")) ||
+      (hasPaymentHistory && planChanged)
+    ) {
       throw new ExpensePlanLockedError();
     }
 
@@ -929,7 +1028,9 @@ export async function voidExpense(
     if (before.version !== input.version) throw new SpendingVersionConflictError();
     if (before.status === "voided") throw new ExpenseAlreadyVoidedError();
     const installments = await listExpenseInstallmentsForUpdate(connection, id);
-    if (installments.some((item) => item.status === "paid")) {
+    if (
+      installments.some((item) => new Decimal(item.paidAmount).greaterThan(0))
+    ) {
       throw new ExpensePlanLockedError();
     }
     if (before.financeTransactionId !== null) {
@@ -987,13 +1088,13 @@ export async function listCardInstallments(
     const installments = stored.map((item) => {
       const visible = installmentView(item, today);
       const { status } = visible;
-      if (status === "paid") paidAmount = addMoney(paidAmount, item.amount);
-      else {
-        openAmount = addMoney(openAmount, item.amount);
+      paidAmount = addMoney(paidAmount, item.paidAmount);
+      if (status !== "paid") {
+        openAmount = addMoney(openAmount, item.remainingAmount);
         if (status === "overdue") {
-          overdueAmount = addMoney(overdueAmount, item.amount);
+          overdueAmount = addMoney(overdueAmount, item.remainingAmount);
         } else {
-          plannedAmount = addMoney(plannedAmount, item.amount);
+          plannedAmount = addMoney(plannedAmount, item.remainingAmount);
         }
       }
       return visible;
@@ -1029,39 +1130,69 @@ export async function bulkPayCardInstallments(
       input.month,
     );
     const requested = new Map(
-      input.installments.map((installment) => [installment.id, installment.version]),
+      input.installments.map((installment) => [installment.id, installment]),
     );
-    const open = locked.filter((installment) => installment.status === "planned");
-
-    if (open.length === 0) {
-      const replayed = input.installments.every((expected) => {
+    const replayPayments = new Map<string, CardInstallmentPayment>();
+    for (const expected of input.installments) {
+      const payment = await findCardInstallmentPaymentByOperationKeyForUpdate(
+        connection,
+        expected.clientOperationKey,
+      );
+      if (payment !== null) replayPayments.set(expected.id, payment);
+    }
+    if (replayPayments.size > 0) {
+      let replayedAmount = new Decimal(0);
+      for (const expected of input.installments) {
         const installment = locked.find((candidate) => candidate.id === expected.id);
-        return (
-          installment?.status === "paid" &&
-          installment.paidOn === input.paidOn &&
-          installment.paymentAccountId === input.sourceAccountId &&
-          installment.financeTransactionId !== null &&
-          installment.version === expected.version + 1
-        );
-      });
-      if (!replayed) throw new CardInstallmentBulkConflictError();
-      const requestedIds = new Set(requested.keys());
+        const payment = replayPayments.get(expected.id);
+        if (!installment) throw new CardInstallmentBulkConflictError();
+        if (payment === undefined) {
+          if (installment.version !== expected.version) {
+            throw new CardInstallmentBulkConflictError();
+          }
+          continue;
+        }
+        if (
+          payment.entryType !== "payment" ||
+          payment.reversed ||
+          payment.installmentId !== expected.id ||
+          payment.paidOn !== input.paidOn ||
+          payment.paymentAccountId !== input.sourceAccountId ||
+          installment.version !== expected.version + 1
+        ) {
+          throw new SpendingIdempotencyConflictError();
+        }
+        replayedAmount = replayedAmount.plus(payment.amount);
+      }
+      if (!replayedAmount.equals(input.amount)) {
+        throw new SpendingIdempotencyConflictError();
+      }
       return {
         installments: locked
-          .filter((installment) => requestedIds.has(installment.id))
+          .filter((installment) => requested.has(installment.id))
           .map((installment) => installmentView(installment, today)),
         replayed: true,
         updatedCount: 0,
       };
     }
 
+    const open = locked.filter((installment) =>
+      new Decimal(installment.remainingAmount).greaterThan(0),
+    );
     if (
       open.length !== requested.size ||
       open.some(
-        (installment) => requested.get(installment.id) !== installment.version,
+        (installment) => requested.get(installment.id)?.version !== installment.version,
       )
     ) {
       throw new CardInstallmentBulkConflictError();
+    }
+    const periodRemaining = open.reduce(
+      (total, installment) => total.plus(installment.remainingAmount),
+      new Decimal(0),
+    );
+    if (new Decimal(input.amount).greaterThan(periodRemaining)) {
+      throw new CardInstallmentPaymentExceedsRemainingError();
     }
 
     const paymentAccount = await selectedCardPaymentAccount(
@@ -1069,28 +1200,57 @@ export async function bulkPayCardInstallments(
       input.sourceAccountId,
     );
     const updated: CardInstallment[] = [];
+    let amountToAllocate = new Decimal(input.amount);
     for (const before of open) {
-      const financeTransactionId = await createCardPaymentMovement(
+      if (amountToAllocate.isZero()) break;
+      const allocation = Decimal.min(
+        amountToAllocate,
+        new Decimal(before.remainingAmount),
+      ).toFixed(4);
+      const expected = requested.get(before.id);
+      if (!expected) throw new CardInstallmentBulkConflictError();
+      await createCardInstallmentPaymentEntry(
         connection,
         before,
-        input.paidOn,
-        paymentAccount.id,
+        {
+          amount: allocation,
+          clientOperationKey: expected.clientOperationKey,
+          paidOn: input.paidOn,
+          sourceAccountId: paymentAccount.id,
+        },
+        paymentAccount,
+        now,
         context,
       );
-      const after: CardInstallment = {
+      const paidAmount = new Decimal(before.paidAmount).plus(allocation);
+      const remainingAmount = new Decimal(before.amount).minus(paidAmount);
+      const fullyPaid = remainingAmount.isZero();
+      const afterCandidate: CardInstallment = {
         ...before,
-        financeTransactionId,
-        paidOn: input.paidOn,
+        hasPaymentHistory: true,
+        paidAmount: paidAmount.toFixed(4),
+        paidOn: fullyPaid ? input.paidOn : null,
         paymentAccountId: paymentAccount.id,
         paymentAccountName: paymentAccount.displayName,
         paymentAccountType: paymentAccount.accountType,
-        status: "paid",
+        remainingAmount: remainingAmount.toFixed(4),
+        status: fullyPaid ? "paid" : "planned",
         updatedAtUtc: now,
         version: before.version + 1,
       };
-      if (!(await updateCardInstallmentRecord(connection, after, before.version))) {
+      if (
+        !(await updateCardInstallmentRecord(
+          connection,
+          afterCandidate,
+          before.version,
+        ))
+      ) {
         throw new CardInstallmentBulkConflictError();
       }
+      const after: CardInstallment = {
+        ...afterCandidate,
+        paidOn: input.paidOn,
+      };
       await appendAuditEvent(connection, {
         action: "credit_card_installment.paid_bulk",
         actorId: context.actorId,
@@ -1103,6 +1263,7 @@ export async function bulkPayCardInstallments(
         occurredAtUtc: now,
       });
       updated.push(after);
+      amountToAllocate = amountToAllocate.minus(allocation);
     }
     return {
       installments: updated.map((installment) => installmentView(installment, today)),
@@ -1124,7 +1285,7 @@ export async function updateCardInstallment(
   const nowDate = context.now ?? new Date();
   const now = toUtcDateTime6(nowDate);
   const today = istanbulDate(nowDate);
-  if (input.paidOn !== null && input.paidOn > today) {
+  if (input.action === "pay" && input.paidOn > today) {
     throw new InstallmentPaymentDateInFutureError();
   }
   requireAccountLedgerPermission(context);
@@ -1135,70 +1296,148 @@ export async function updateCardInstallment(
     }
     const { expenseStatus, ...before } = locked;
     if (expenseStatus !== "active") throw new SpendingResourceNotFoundError();
+    if (input.action === "pay") {
+      const replay = await findCardInstallmentPaymentByOperationKeyForUpdate(
+        connection,
+        input.clientOperationKey,
+      );
+      if (replay !== null) {
+        if (
+          !cardPaymentMatches(replay, {
+            ...input,
+            installmentId: before.id,
+          }) ||
+          replay.reversed
+        ) {
+          throw new SpendingIdempotencyConflictError();
+        }
+        return installmentView(before, today);
+      }
+      if (before.version !== input.version) {
+        throw new SpendingVersionConflictError();
+      }
+      if (new Decimal(input.amount).greaterThan(before.remainingAmount)) {
+        throw new CardInstallmentPaymentExceedsRemainingError();
+      }
+      const paymentAccount = await selectedCardPaymentAccount(
+        connection,
+        input.sourceAccountId,
+      );
+      await createCardInstallmentPaymentEntry(
+        connection,
+        before,
+        input,
+        paymentAccount,
+        now,
+        context,
+      );
+      const paidAmount = new Decimal(before.paidAmount).plus(input.amount);
+      const remainingAmount = new Decimal(before.amount).minus(paidAmount);
+      const fullyPaid = remainingAmount.isZero();
+      const afterCandidate: CardInstallment = {
+        ...before,
+        hasPaymentHistory: true,
+        paidAmount: paidAmount.toFixed(4),
+        paidOn: fullyPaid ? input.paidOn : null,
+        paymentAccountId: paymentAccount.id,
+        paymentAccountName: paymentAccount.displayName,
+        paymentAccountType: paymentAccount.accountType,
+        remainingAmount: remainingAmount.toFixed(4),
+        status: fullyPaid ? "paid" : "planned",
+        updatedAtUtc: now,
+        version: before.version + 1,
+      };
+      if (
+        !(await updateCardInstallmentRecord(
+          connection,
+          afterCandidate,
+          input.version,
+        ))
+      ) {
+        throw new SpendingVersionConflictError();
+      }
+      const after: CardInstallment = {
+        ...afterCandidate,
+        paidOn: input.paidOn,
+      };
+      await appendAuditEvent(connection, {
+        action: "credit_card_installment.payment_created",
+        actorId: context.actorId,
+        actorType: "user",
+        afterSummary: installmentAuditSummary(after),
+        beforeSummary: installmentAuditSummary(before),
+        correlationId: context.correlationId,
+        entityId: after.id,
+        entityType: "credit_card_installment",
+        occurredAtUtc: now,
+      });
+      return installmentView(after, today);
+    }
+
     if (before.version !== input.version) throw new SpendingVersionConflictError();
-    const movementChanged =
-      input.status === "paid" &&
-      (before.status !== "paid" ||
-        before.financeTransactionId === null ||
-        before.paidOn !== input.paidOn ||
-        before.paymentAccountId !== input.sourceAccountId);
-    const paymentAccount =
-      movementChanged && input.sourceAccountId !== null
-        ? await selectedCardPaymentAccount(connection, input.sourceAccountId)
-        : null;
-    if (
-      before.financeTransactionId !== null &&
-      (input.status === "planned" || movementChanged)
-    ) {
+    const payments = await listCardInstallmentPaymentsForUpdate(
+      connection,
+      before.id,
+    );
+    const activePayments = activeCardPayments(payments);
+    const reason = "Kredi kartı taksit ödemesi plana geri alındı.";
+    for (const payment of activePayments) {
+      const clientOperationKey = randomUUID();
+      const reversalFinanceTransactionId =
+        payment.financeTransactionId === null
+          ? null
+          : await reverseCardPaymentMovement(
+              connection,
+              payment.financeTransactionId,
+              clientOperationKey,
+              reason,
+              context,
+            );
+      await insertCardInstallmentPaymentRecordIdempotently(connection, {
+        amount: payment.amount,
+        clientOperationKey,
+        createdAtUtc: now,
+        entryType: "reversal",
+        financeTransactionId: reversalFinanceTransactionId,
+        id: randomUUID(),
+        installmentId: before.id,
+        paidOn: today,
+        paymentAccountId: payment.paymentAccountId,
+        paymentAccountName: payment.paymentAccountName,
+        paymentAccountType: payment.paymentAccountType,
+        reversalOfId: payment.id,
+        reversalReason: reason,
+        reversed: false,
+      });
+    }
+    if (activePayments.length === 0 && before.financeTransactionId !== null) {
       await reverseCardPaymentMovement(
         connection,
         before.financeTransactionId,
-        input.status === "planned"
-          ? "Kredi kartı taksit ödemesi plana geri alındı."
-          : "Kredi kartı taksit ödemesi güncellendi.",
+        randomUUID(),
+        reason,
         context,
       );
     }
-    const financeTransactionId =
-      movementChanged && input.paidOn !== null && paymentAccount !== null
-        ? await createCardPaymentMovement(
-            connection,
-            before,
-            input.paidOn,
-            paymentAccount.id,
-            context,
-          )
-        : input.status === "paid"
-          ? before.financeTransactionId
-          : null;
-    const after: CardInstallment = {
+    const afterCandidate: CardInstallment = {
       ...before,
-      financeTransactionId,
-      paidOn: input.paidOn,
-      paymentAccountId:
-        input.status === "paid"
-          ? paymentAccount?.id ?? before.paymentAccountId
-          : null,
-      paymentAccountName:
-        input.status === "paid"
-          ? paymentAccount?.displayName ?? before.paymentAccountName
-          : null,
-      paymentAccountType:
-        input.status === "paid"
-          ? paymentAccount?.accountType ?? before.paymentAccountType
-          : null,
-      status: input.status,
+      financeTransactionId: null,
+      paidAmount: "0.0000",
+      paidOn: null,
+      paymentAccountId: null,
+      paymentAccountName: null,
+      paymentAccountType: null,
+      remainingAmount: before.amount,
+      status: "planned",
       updatedAtUtc: now,
       version: before.version + 1,
     };
-    if (!(await updateCardInstallmentRecord(connection, after, input.version))) {
+    if (!(await updateCardInstallmentRecord(connection, afterCandidate, input.version))) {
       throw new SpendingVersionConflictError();
     }
+    const after = afterCandidate;
     await appendAuditEvent(connection, {
-      action:
-        input.status === "paid"
-          ? "credit_card_installment.paid"
-          : "credit_card_installment.reopened",
+      action: "credit_card_installment.reopened",
       actorId: context.actorId,
       actorType: "user",
       afterSummary: installmentAuditSummary(after),
@@ -1208,12 +1447,6 @@ export async function updateCardInstallment(
       entityType: "credit_card_installment",
       occurredAtUtc: now,
     });
-    const visibleStatus =
-      after.status === "paid"
-        ? "paid"
-        : after.dueOn < today
-          ? "overdue"
-          : "planned";
-    return { ...after, status: visibleStatus };
+    return installmentView(after, today);
   });
 }

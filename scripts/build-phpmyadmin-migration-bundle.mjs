@@ -49,6 +49,8 @@ const RECURRING_TASKS_EXPENSES_MIGRATION_TAG =
   "0022_recurring_tasks_expenses";
 const COLLECTION_CARD_ACCOUNTS_MIGRATION_TAG =
   "0023_collection_card_accounts";
+const PARTIAL_CARD_PAYMENTS_MIGRATION_TAG =
+  "0024_partial_card_payments";
 
 // 0020 alters an existing financial table, so keep every accepted statement
 // byte-independent but semantically exact after whitespace normalization.
@@ -98,6 +100,19 @@ const COLLECTION_CARD_ACCOUNTS_STATEMENT_HASHES = new Set([
   "671072d3c8677b4223568d6ee337863d7293d92348b4aa47bd4a04c14a22762e",
   "21d9bc1304b5f9a244e584bef6489bde1488de361db90966fd4066dbde4a96c9",
 ]);
+
+// 0024 introduces an immutable payment/reversal child ledger and migrates
+// already-settled installment rows without changing their legacy columns.
+const PARTIAL_CARD_PAYMENTS_STATEMENT_HASHES = new Set([
+  "2b5bed8192ad51d0583fa0a491fed179fe66e641dd5421e2df61e581706d408d",
+  "b5db64695fec7bea4dc931e7cb5881cb3394b5839f5518274e56bd443106f260",
+  "4f2c5d4bfd7bfa44d8f55ef239b49824de6f708009894fc00c12ee3a6d2c7f5e",
+  "297c5e34a9c0b07d1a3b18bba9ff9ccac37a512f6bd1596a9a3af3465262f4bf",
+  "b62ba9b219ff9129a165849c33025ef2ccb0ccf26528c3d3e280b40fdaeb9f05",
+  "5b73625b7be19fb57c93c2d77f32180ee3ee49234e5c695a371cc231b8b4e1c9",
+]);
+
+const PARTIAL_CARD_PAYMENTS_BACKFILL_SQL = "INSERT INTO `credit_card_installment_payment` (`id`, `client_operation_key`, `installment_id`, `finance_transaction_id`, `amount`, `paid_on`, `entry_type`, `created_at_utc`) SELECT UUID(), UUID(), `id`, `finance_transaction_id`, `amount`, `paid_on`, 'payment', `updated_at_utc` FROM `credit_card_installment` WHERE BINARY `status` = BINARY 'paid'";
 
 const EXPENSE_CATEGORY_SEED_ROWS = Object.freeze([
   ["81000000-0000-4000-8000-000000000001", "rent", "82000000-0000-4000-8000-000000000001", "Kira"],
@@ -259,6 +274,8 @@ function assertExactManagedMigrationStatement(statement, migrationTag) {
     acceptedHashes = RECURRING_TASKS_EXPENSES_STATEMENT_HASHES;
   } else if (migrationTag === COLLECTION_CARD_ACCOUNTS_MIGRATION_TAG) {
     acceptedHashes = COLLECTION_CARD_ACCOUNTS_STATEMENT_HASHES;
+  } else if (migrationTag === PARTIAL_CARD_PAYMENTS_MIGRATION_TAG) {
+    acceptedHashes = PARTIAL_CARD_PAYMENTS_STATEMENT_HASHES;
   }
   if (acceptedHashes === null) return;
 
@@ -631,6 +648,17 @@ function parsePlanningExpenseCategoriesStatement(statement) {
   };
 }
 
+function parsePartialCardPaymentsStatement(statement) {
+  const normalized = statement.replaceAll(/\s+/gu, " ").trim();
+  if (normalized !== PARTIAL_CARD_PAYMENTS_BACKFILL_SQL) return null;
+  return {
+    backfillKind: "credit-card-installment-payments",
+    name: "backfill_credit_card_installment_payments",
+    tableName: "credit_card_installment_payment",
+    type: "data-backfill",
+  };
+}
+
 function managedColumnSpec(definition) {
   const varchar = /^varchar\((\d+)\)(?: CHARACTER SET (ascii|utf8mb4) COLLATE (ascii_bin|utf8mb4_unicode_ci))?(?: DEFAULT '([^']+)')?( NOT NULL)?$/u.exec(
     definition,
@@ -842,6 +870,12 @@ export function analyzeMigrationStatement(statement, migrationTag) {
   if (planningExpenseCategoriesAnalysis) {
     return planningExpenseCategoriesAnalysis;
   }
+
+  const partialCardPaymentsAnalysis =
+    migrationTag === PARTIAL_CARD_PAYMENTS_MIGRATION_TAG
+      ? parsePartialCardPaymentsStatement(statement)
+      : null;
+  if (partialCardPaymentsAnalysis) return partialCardPaymentsAnalysis;
 
   const managedForwardAnalysis = parseManagedForwardStatement(
     statement,

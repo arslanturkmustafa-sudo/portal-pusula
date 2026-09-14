@@ -5,6 +5,7 @@ import {
   bulkPayCardInstallments,
   bulkPayCardInstallmentsInputSchema,
   CardInstallmentBulkConflictError,
+  CardInstallmentPaymentExceedsRemainingError,
   ExpenseAccountPermissionError,
   FinanceAccountInactiveError,
   FinanceAccountNotFoundError,
@@ -12,6 +13,7 @@ import {
   FinanceTransactionFutureDateError,
   InstallmentPaymentDateInFutureError,
   SpendingResourceNotFoundError,
+  SpendingIdempotencyConflictError,
 } from "@/features/finance";
 import {
   isJsonRequest,
@@ -86,6 +88,12 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
     }
     if (error instanceof CardInstallmentBulkConflictError) {
       return spendingJson({ status: "installment_selection_conflict" }, 409);
+    }
+    if (error instanceof CardInstallmentPaymentExceedsRemainingError) {
+      return spendingJson({ status: "payment_exceeds_remaining" }, 409);
+    }
+    if (error instanceof SpendingIdempotencyConflictError) {
+      return spendingJson({ status: "idempotency_conflict" }, 409);
     }
     const mysqlErrorCode = safeMySqlErrorCode(error);
     requestLogger(correlationId).error(

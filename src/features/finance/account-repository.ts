@@ -522,14 +522,23 @@ export async function findCardInstallmentByFinanceTransactionForUpdate(
   connection: PoolConnection,
   financeTransactionId: string,
 ): Promise<string | null> {
-  const [rows] = await connection.execute<ManagedMovementRow[]>(
+  const [legacyRows] = await connection.execute<ManagedMovementRow[]>(
     `SELECT id
        FROM credit_card_installment
       WHERE finance_transaction_id = ?
       FOR UPDATE`,
     [financeTransactionId],
   );
-  return rows[0]?.id ?? null;
+  if (legacyRows[0]) return legacyRows[0].id;
+
+  const [paymentRows] = await connection.execute<ManagedMovementRow[]>(
+    `SELECT installment_id AS id
+       FROM credit_card_installment_payment
+      WHERE finance_transaction_id = ?
+      FOR UPDATE`,
+    [financeTransactionId],
+  );
+  return paymentRows[0]?.id ?? null;
 }
 
 export async function findFinanceTransactionByOperationKeyForUpdate(

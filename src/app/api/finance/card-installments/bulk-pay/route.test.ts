@@ -19,6 +19,7 @@ vi.mock("@/features/finance", () => ({
   bulkPayCardInstallments: mocks.bulkPay,
   bulkPayCardInstallmentsInputSchema: { parse: mocks.parse },
   CardInstallmentBulkConflictError: mocks.CardInstallmentBulkConflictError,
+  CardInstallmentPaymentExceedsRemainingError: class extends Error {},
   ExpenseAccountPermissionError: class extends Error {},
   FinanceAccountInactiveError: class extends Error {},
   FinanceAccountNotFoundError: class extends Error {},
@@ -26,6 +27,7 @@ vi.mock("@/features/finance", () => ({
   FinanceTransactionFutureDateError: class extends Error {},
   InstallmentPaymentDateInFutureError: class extends Error {},
   SpendingResourceNotFoundError: class extends Error {},
+  SpendingIdempotencyConflictError: class extends Error {},
 }));
 vi.mock("@/platform/auth/server-auth", () => ({
   authenticateAdminRequest: mocks.authenticate,
@@ -45,8 +47,15 @@ import { PATCH } from "@/app/api/finance/card-installments/bulk-pay/route";
 const cardId = "20000000-0000-4000-8000-000000000001";
 const installmentId = "60000000-0000-4000-8000-000000000001";
 const input = {
+  amount: "40.0000",
   cardId,
-  installments: [{ id: installmentId, version: 1 }],
+  installments: [
+    {
+      clientOperationKey: "50000000-0000-4000-8000-000000000001",
+      id: installmentId,
+      version: 1,
+    },
+  ],
   month: "2026-09",
   paidOn: "2026-09-03",
   sourceAccountId: "70000000-0000-4000-8000-000000000001",

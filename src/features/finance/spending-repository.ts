@@ -22,6 +22,7 @@ export type ExpensePaymentMethod =
   | "credit_card"
   | "other";
 export type InstallmentStoredStatus = "paid" | "planned";
+export type CardInstallmentPaymentEntryType = "payment" | "reversal";
 
 export type CreditCard = Readonly<{
   bankName: string | null;
@@ -81,17 +82,37 @@ export type CardInstallment = Readonly<{
   expenseDescription: string;
   expenseId: string;
   financeTransactionId: string | null;
+  hasPaymentHistory: boolean;
   id: string;
   installmentCount: number;
   installmentNumber: number;
+  paidAmount: string;
   paidOn: string | null;
   paymentAccountId: string | null;
   paymentAccountName: string | null;
   paymentAccountType: "bank" | "cash" | null;
+  remainingAmount: string;
   statementMonth: string;
   status: InstallmentStoredStatus;
   updatedAtUtc: string;
   version: number;
+}>;
+
+export type CardInstallmentPayment = Readonly<{
+  amount: string;
+  clientOperationKey: string;
+  createdAtUtc: string;
+  entryType: CardInstallmentPaymentEntryType;
+  financeTransactionId: string | null;
+  id: string;
+  installmentId: string;
+  paidOn: string;
+  paymentAccountId: string | null;
+  paymentAccountName: string | null;
+  paymentAccountType: "bank" | "cash" | null;
+  reversalOfId: string | null;
+  reversalReason: string | null;
+  reversed: boolean;
 }>;
 
 export type NewCardInstallment = Omit<
@@ -103,6 +124,9 @@ export type NewCardInstallment = Omit<
   | "paymentAccountId"
   | "paymentAccountName"
   | "paymentAccountType"
+  | "paidAmount"
+  | "hasPaymentHistory"
+  | "remainingAmount"
   | "updatedAtUtc"
 > &
   Readonly<{ createdAtUtc: string; updatedAtUtc: string }>;
@@ -165,17 +189,37 @@ type InstallmentRow = RowDataPacket & {
   expense_description: string;
   expense_id: string;
   finance_transaction_id: string | null;
+  has_payment_history: number | boolean;
   id: string;
   installment_count: number;
   installment_number: number;
+  paid_amount: string;
   paid_on: string | Date | null;
   payment_account_id: string | null;
   payment_account_name: string | null;
   payment_account_type: string | null;
+  remaining_amount: string;
   statement_month: string | Date;
   status: string;
   updated_at_utc: string | Date;
   version: number;
+};
+
+type InstallmentPaymentRow = RowDataPacket & {
+  amount: string;
+  client_operation_key: string;
+  created_at_utc: string | Date;
+  entry_type: string;
+  finance_transaction_id: string | null;
+  id: string;
+  installment_id: string;
+  paid_on: string | Date;
+  payment_account_id: string | null;
+  payment_account_name: string | null;
+  payment_account_type: string | null;
+  reversal_of_id: string | null;
+  reversal_reason: string | null;
+  reversed_flag: number | boolean;
 };
 
 const EXPENSE_CATEGORY_PATTERN = /^[a-z][a-z0-9_]{0,31}$/u;
@@ -334,17 +378,52 @@ function mapInstallment(row: InstallmentRow): CardInstallment {
     expenseDescription: row.expense_description,
     expenseId: row.expense_id,
     financeTransactionId: row.finance_transaction_id,
+    hasPaymentHistory: Boolean(row.has_payment_history),
     id: row.id,
     installmentCount: row.installment_count,
     installmentNumber: row.installment_number,
+    paidAmount: row.paid_amount,
     paidOn: row.paid_on === null ? null : canonicalDate(row.paid_on),
     paymentAccountId: row.payment_account_id,
     paymentAccountName: row.payment_account_name,
     paymentAccountType,
+    remainingAmount: row.remaining_amount,
     statementMonth: canonicalMonth(row.statement_month),
     status: mapInstallmentStatus(row.status),
     updatedAtUtc: canonicalDateTime(row.updated_at_utc),
     version: validVersion(row.version),
+  };
+}
+
+function mapInstallmentPayment(
+  row: InstallmentPaymentRow,
+): CardInstallmentPayment {
+  const paymentAccountType = row.payment_account_type;
+  if (
+    paymentAccountType !== null &&
+    paymentAccountType !== "bank" &&
+    paymentAccountType !== "cash"
+  ) {
+    throw new Error("Card installment payment account type is invalid.");
+  }
+  if (row.entry_type !== "payment" && row.entry_type !== "reversal") {
+    throw new Error("Card installment payment entry type is invalid.");
+  }
+  return {
+    amount: row.amount,
+    clientOperationKey: row.client_operation_key,
+    createdAtUtc: canonicalDateTime(row.created_at_utc),
+    entryType: row.entry_type,
+    financeTransactionId: row.finance_transaction_id,
+    id: row.id,
+    installmentId: row.installment_id,
+    paidOn: canonicalDate(row.paid_on),
+    paymentAccountId: row.payment_account_id,
+    paymentAccountName: row.payment_account_name,
+    paymentAccountType,
+    reversalOfId: row.reversal_of_id,
+    reversalReason: row.reversal_reason,
+    reversed: Boolean(row.reversed_flag),
   };
 }
 
@@ -368,17 +447,82 @@ const INSTALLMENT_COLUMNS = `
   ci.id, ci.expense_id, e.credit_card_id,
   cc.display_name AS credit_card_name, e.description AS expense_description,
   ci.installment_number, ci.installment_count, ci.statement_month, ci.due_on,
-  ci.amount, ci.status, ci.paid_on, ci.finance_transaction_id,
+  ci.amount,
+  installment_payment_total.installment_id IS NOT NULL AS has_payment_history,
+  CASE
+    WHEN installment_payment_total.installment_id IS NULL AND ci.status = 'paid'
+      THEN ci.amount
+    ELSE COALESCE(installment_payment_total.paid_amount, 0.0000)
+  END AS paid_amount,
+  GREATEST(ci.amount - CASE
+    WHEN installment_payment_total.installment_id IS NULL AND ci.status = 'paid'
+      THEN ci.amount
+    ELSE COALESCE(installment_payment_total.paid_amount, 0.0000)
+  END, 0.0000) AS remaining_amount,
+  ci.status, COALESCE(latest_payment.paid_on, ci.paid_on) AS paid_on,
+  ci.finance_transaction_id,
   payment_transaction.source_account_id AS payment_account_id,
   payment_account.display_name AS payment_account_name,
   payment_account.account_type AS payment_account_type,
   ci.version, ci.created_at_utc, ci.updated_at_utc`;
 
 const INSTALLMENT_PAYMENT_JOINS = `
+       LEFT JOIN (
+         SELECT installment_id,
+                SUM(CASE
+                  WHEN entry_type = 'reversal' THEN -amount
+                  ELSE amount
+                END) AS paid_amount
+           FROM credit_card_installment_payment
+          GROUP BY installment_id
+       ) installment_payment_total
+         ON installment_payment_total.installment_id = ci.id
+       LEFT JOIN credit_card_installment_payment latest_payment
+         ON latest_payment.id = (
+           SELECT payment.id
+             FROM credit_card_installment_payment payment
+            WHERE payment.installment_id = ci.id
+              AND payment.entry_type = 'payment'
+              AND NOT EXISTS (
+                SELECT 1
+                  FROM credit_card_installment_payment reversal
+                 WHERE reversal.entry_type = 'reversal'
+                   AND reversal.reversal_of_id = payment.id
+              )
+            ORDER BY payment.paid_on DESC, payment.created_at_utc DESC,
+                     payment.id DESC
+            LIMIT 1
+         )
        LEFT JOIN finance_transaction payment_transaction
-         ON payment_transaction.id = ci.finance_transaction_id
+         ON payment_transaction.id = COALESCE(
+           latest_payment.finance_transaction_id,
+           ci.finance_transaction_id
+         )
        LEFT JOIN finance_account payment_account
          ON payment_account.id = payment_transaction.source_account_id`;
+
+const INSTALLMENT_PAYMENT_COLUMNS = `
+  payment.id, payment.client_operation_key, payment.installment_id,
+  payment.finance_transaction_id, payment.amount, payment.paid_on,
+  payment.entry_type, payment.reversal_of_id, payment.reversal_reason,
+  payment.created_at_utc,
+  COALESCE(finance_transaction.source_account_id,
+           finance_transaction.target_account_id) AS payment_account_id,
+  payment_account.display_name AS payment_account_name,
+  payment_account.account_type AS payment_account_type,
+  EXISTS(
+    SELECT 1
+      FROM credit_card_installment_payment reversal
+     WHERE reversal.entry_type = 'reversal'
+       AND reversal.reversal_of_id = payment.id
+  ) AS reversed_flag`;
+
+const INSTALLMENT_PAYMENT_RECORD_JOINS = `
+  LEFT JOIN finance_transaction
+    ON finance_transaction.id = payment.finance_transaction_id
+  LEFT JOIN finance_account payment_account
+    ON payment_account.id = COALESCE(finance_transaction.source_account_id,
+                                     finance_transaction.target_account_id)`;
 
 export async function listCreditCardRecords(
   connection: PoolConnection,
@@ -671,7 +815,13 @@ export async function deletePlannedExpenseInstallments(
 ): Promise<void> {
   await connection.execute<ResultSetHeader>(
     `DELETE FROM credit_card_installment
-      WHERE expense_id = ? AND status = 'planned'`,
+      WHERE expense_id = ?
+        AND status = 'planned'
+        AND NOT EXISTS (
+          SELECT 1
+            FROM credit_card_installment_payment payment
+           WHERE payment.installment_id = credit_card_installment.id
+        )`,
     [expenseId],
   );
 }
@@ -783,6 +933,69 @@ export async function findCardInstallmentForUpdate(
   return row
     ? { ...mapInstallment(row), expenseStatus: mapExpenseStatus(row.expense_status) }
     : null;
+}
+
+export async function listCardInstallmentPaymentsForUpdate(
+  connection: PoolConnection,
+  installmentId: string,
+): Promise<readonly CardInstallmentPayment[]> {
+  const [rows] = await connection.execute<InstallmentPaymentRow[]>(
+    `SELECT ${INSTALLMENT_PAYMENT_COLUMNS}
+       FROM credit_card_installment_payment payment
+       ${INSTALLMENT_PAYMENT_RECORD_JOINS}
+      WHERE payment.installment_id = ?
+      ORDER BY payment.created_at_utc ASC, payment.id ASC
+      FOR UPDATE`,
+    [installmentId],
+  );
+  return rows.map(mapInstallmentPayment);
+}
+
+export async function findCardInstallmentPaymentByOperationKeyForUpdate(
+  connection: PoolConnection,
+  clientOperationKey: string,
+): Promise<CardInstallmentPayment | null> {
+  const [rows] = await connection.execute<InstallmentPaymentRow[]>(
+    `SELECT ${INSTALLMENT_PAYMENT_COLUMNS}
+       FROM credit_card_installment_payment payment
+       ${INSTALLMENT_PAYMENT_RECORD_JOINS}
+      WHERE payment.client_operation_key = ?
+      FOR UPDATE`,
+    [clientOperationKey],
+  );
+  return rows[0] ? mapInstallmentPayment(rows[0]) : null;
+}
+
+export async function insertCardInstallmentPaymentRecordIdempotently(
+  connection: PoolConnection,
+  payment: CardInstallmentPayment,
+): Promise<CardInstallmentPayment> {
+  await connection.execute<ResultSetHeader>(
+    `INSERT INTO credit_card_installment_payment
+       (id, client_operation_key, installment_id, finance_transaction_id,
+        amount, paid_on, entry_type, reversal_of_id, reversal_reason,
+        created_at_utc)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE id = id`,
+    [
+      payment.id,
+      payment.clientOperationKey,
+      payment.installmentId,
+      payment.financeTransactionId,
+      payment.amount,
+      payment.paidOn,
+      payment.entryType,
+      payment.reversalOfId,
+      payment.reversalReason,
+      payment.createdAtUtc,
+    ],
+  );
+  const persisted = await findCardInstallmentPaymentByOperationKeyForUpdate(
+    connection,
+    payment.clientOperationKey,
+  );
+  if (!persisted) throw new Error("Card installment payment insert failed.");
+  return persisted;
 }
 
 export async function updateCardInstallmentRecord(

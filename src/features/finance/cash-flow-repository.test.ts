@@ -479,6 +479,17 @@ describe("cash flow repository", () => {
       /GROUP BY card\.id, card\.display_name, card\.bank_name,[\s\S]*installment\.due_on/u,
     );
     expect(dueItemSql).toContain("SUM(installment.amount) AS total_amount");
+    expect(dueItemSql).toContain(
+      "FROM credit_card_installment_payment entry",
+    );
+    expect(dueItemSql).toContain(
+      "WHEN BINARY entry.entry_type = BINARY 'reversal'",
+    );
+    expect(dueItemSql).toContain("THEN -entry.amount");
+    expect(dueItemSql).toContain("WHEN card_entry.entry_count > 0");
+    expect(dueItemSql).toMatch(
+      /WHEN installment\.status = 'paid'[\s\S]*THEN installment\.amount/u,
+    );
     expect(dueItemSql).toContain("'card_payment'");
     expect(dueItemSql).toMatch(
       /GROUP BY expense\.category, category\.display_name, expense\.incurred_on/u,
@@ -509,7 +520,7 @@ describe("cash flow repository", () => {
     );
     expect(taxDueSql).toContain("tax_due.payable_amount > 0");
     expect(taxDueSql).not.toContain("paid_on");
-    expect(dueItemSql.match(/\?/gu)).toHaveLength(26);
+    expect(dueItemSql.match(/\?/gu)).toHaveLength(27);
     expect(execute.mock.calls[5]?.[1]).toEqual([
       // Customer receivable.
       "2026-09-15",
@@ -525,6 +536,7 @@ describe("cash flow repository", () => {
       "2026-09-01",
       "2026-09-15",
       // Card payment.
+      "2026-09-15",
       "2026-09-15",
       "2026-09-15",
       "2026-09-01",

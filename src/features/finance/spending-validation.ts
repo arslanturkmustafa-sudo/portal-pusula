@@ -60,10 +60,6 @@ const nullableTextSchema = (maximum: number) =>
 const isoDateSchema = z
   .string()
   .refine(isRealIsoDate, "Geçerli bir tarih girin.");
-const nullableIsoDateSchema = z.preprocess(
-  emptyToNull,
-  z.union([isoDateSchema, z.null()]),
-);
 const nullablePositiveMoneySchema = z.preprocess(
   emptyToNull,
   z.union([moneySchema(true), z.null()]),
@@ -254,44 +250,24 @@ export const installmentListFilterSchema = z
   })
   .strict();
 
-export const updateCardInstallmentInputSchema = z
-  .object({
-    paidOn: nullableIsoDateSchema.default(null),
-    sourceAccountId: nullableUuidSchema.default(null),
-    status: installmentStoredStatusSchema,
-    version: z.number().int().min(1).max(4_294_967_294),
-  })
-  .strict()
-  .superRefine((value, context) => {
-    if (value.status === "paid" && value.paidOn === null) {
-      context.addIssue({
-        code: "custom",
-        message: "Ödeme tarihi zorunludur.",
-        path: ["paidOn"],
-      });
-    }
-    if (value.status === "paid" && value.sourceAccountId === null) {
-      context.addIssue({
-        code: "custom",
-        message: "Ödeme hesabı veya kasa seçimi zorunludur.",
-        path: ["sourceAccountId"],
-      });
-    }
-    if (value.status === "planned" && value.paidOn !== null) {
-      context.addIssue({
-        code: "custom",
-        message: "Planlanan taksitte ödeme tarihi kullanılamaz.",
-        path: ["paidOn"],
-      });
-    }
-    if (value.status === "planned" && value.sourceAccountId !== null) {
-      context.addIssue({
-        code: "custom",
-        message: "Planlanan taksitte ödeme hesabı kullanılamaz.",
-        path: ["sourceAccountId"],
-      });
-    }
-  });
+export const updateCardInstallmentInputSchema = z.discriminatedUnion("action", [
+  z
+    .object({
+      action: z.literal("pay"),
+      amount: moneySchema(true),
+      clientOperationKey: canonicalUuidSchema,
+      paidOn: isoDateSchema,
+      sourceAccountId: canonicalUuidSchema,
+      version: z.number().int().min(1).max(4_294_967_294),
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal("reopen"),
+      version: z.number().int().min(1).max(4_294_967_294),
+    })
+    .strict(),
+]);
 
 export const bulkPayCardInstallmentsInputSchema = z
   .object({
@@ -300,6 +276,7 @@ export const bulkPayCardInstallmentsInputSchema = z
       .array(
         z
           .object({
+            clientOperationKey: canonicalUuidSchema,
             id: canonicalUuidSchema,
             version: z.number().int().min(1).max(4_294_967_294),
           })
@@ -307,6 +284,7 @@ export const bulkPayCardInstallmentsInputSchema = z
       )
       .min(1)
       .max(250),
+    amount: moneySchema(true),
     month: z.string().refine(isRealMonth, "Geçerli bir dönem seçin."),
     paidOn: isoDateSchema,
     sourceAccountId: canonicalUuidSchema,
@@ -318,6 +296,16 @@ export const bulkPayCardInstallmentsInputSchema = z
       context.addIssue({
         code: "custom",
         message: "Aynı taksit birden fazla kez seçilemez.",
+        path: ["installments"],
+      });
+    }
+    const operationKeys = new Set(
+      value.installments.map((installment) => installment.clientOperationKey),
+    );
+    if (operationKeys.size !== value.installments.length) {
+      context.addIssue({
+        code: "custom",
+        message: "Her taksit için benzersiz bir işlem anahtarı gerekir.",
         path: ["installments"],
       });
     }

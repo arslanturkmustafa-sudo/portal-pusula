@@ -36,10 +36,12 @@ const installment = {
   id: "installment-1",
   installmentCount: 3,
   installmentNumber: 1,
+  paidAmount: "0.0000",
   paidOn: null,
   paymentAccountId: null,
   paymentAccountName: null,
   paymentAccountType: null,
+  remainingAmount: "4000.0000",
   statementMonth: "2026-09",
   status: "planned",
   updatedAtUtc: "2026-09-01 09:00:00.000000",
@@ -130,8 +132,11 @@ describe("CardPlanWorkspace", () => {
     expect((await screen.findAllByText("İş kartı")).length).toBeGreaterThan(0);
   });
 
-  it("marks a planned installment paid with the chosen date and version", async () => {
-    let patchBody: Record<string, unknown> | undefined;
+  it("records a partial installment payment with its amount and a stable retry key", async () => {
+    const operationKey = "40000000-0000-4000-8000-000000000002";
+    vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue(operationKey);
+    const patchBodies: Record<string, unknown>[] = [];
+    let patchCount = 0;
     vi.stubGlobal(
       "fetch",
       vi.fn<typeof fetch>(async (input, init) => {
@@ -144,16 +149,19 @@ describe("CardPlanWorkspace", () => {
           return jsonResponse({ installments: [installment] });
         }
         if (url === "/api/finance/card-installments/installment-1" && init?.method === "PATCH") {
-          patchBody = JSON.parse(String(init.body)) as Record<string, unknown>;
+          patchBodies.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+          patchCount += 1;
+          if (patchCount === 1) return jsonResponse({ status: "unavailable" }, 500);
           return jsonResponse({
             installment: {
               ...installment,
               financeTransactionId: "80000000-0000-4000-8000-000000000001",
-              paidOn: String(patchBody.paidOn),
+              paidAmount: "1500.0000",
+              paidOn: "2026-08-31",
               paymentAccountId: paymentAccount.id,
               paymentAccountName: paymentAccount.displayName,
               paymentAccountType: paymentAccount.accountType,
-              status: "paid",
+              remainingAmount: "2500.0000",
               version: 2,
             },
           });
@@ -164,28 +172,40 @@ describe("CardPlanWorkspace", () => {
     const user = userEvent.setup();
 
     render(<CardPlanWorkspace canManagePayments canWrite />);
-    await user.click(await screen.findByRole("button", { name: /ödendi işaretle/iu }));
+    await user.click(await screen.findByRole("button", { name: /taksitini öde/iu }));
+    const amount = screen.getByLabelText("Yazılım lisansı 1. taksit ödeme tutarı");
+    await user.clear(amount);
+    await user.type(amount, "1500");
     const paidOn = screen.getByLabelText("Yazılım lisansı 1. taksit ödeme tarihi");
     await user.clear(paidOn);
     await user.type(paidOn, "2026-08-31");
-    await user.click(screen.getByRole("button", {
+    const submit = screen.getByRole("button", {
       name: "Yazılım lisansı 1. taksit ödemesini kaydet",
-    }));
+    });
+    await user.click(submit);
+    expect(await screen.findByText(/Taksit durumu güncellenemedi/iu)).toBeInTheDocument();
+    await user.click(submit);
 
-    await waitFor(() => expect(patchBody).toEqual({
+    await waitFor(() => expect(patchBodies).toHaveLength(2));
+    expect(patchBodies[0]).toEqual({
+      action: "pay",
+      amount: "1500",
+      clientOperationKey: operationKey,
       paidOn: "2026-08-31",
       sourceAccountId: paymentAccount.id,
-      status: "paid",
       version: 1,
-    }));
+    });
+    expect(patchBodies[1]).toEqual(patchBodies[0]);
     expect(
       await within(
         screen.getByRole("table", { name: "İş kartı taksit planı" }),
-      ).findByText("Ödendi"),
+      ).findByText("Kısmi ödendi"),
     ).toBeInTheDocument();
+    expect(screen.getAllByText("₺1.500,00").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("₺2.500,00").length).toBeGreaterThan(0);
     expect(screen.getByText("31 Ağu 2026")).toBeInTheDocument();
     expect(screen.getByText(paymentAccount.displayName)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /plana geri al/iu })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /taksitini öde/iu })).toBeInTheDocument();
   });
 
   it("groups installments under each card with debt and next-due summaries", async () => {
@@ -197,7 +217,9 @@ describe("CardPlanWorkspace", () => {
         dueOn: "2026-09-10",
         id: "installment-2",
         installmentNumber: 2,
+        paidAmount: "1000.0000",
         paidOn: "2026-09-02",
+        remainingAmount: "0.0000",
         status: "paid",
       },
       {
@@ -206,6 +228,7 @@ describe("CardPlanWorkspace", () => {
         dueOn: "2026-09-01",
         id: "installment-3",
         installmentNumber: 3,
+        remainingAmount: "500.0000",
       },
     ];
     vi.stubGlobal(
@@ -235,12 +258,20 @@ describe("CardPlanWorkspace", () => {
     ).toBeInTheDocument();
   });
 
-  it("bulk-pays the exact open card-period snapshot without a partial amount", async () => {
+  it("partially pays a card period with a stable key for each open installment", async () => {
+    const firstOperationKey = "40000000-0000-4000-8000-000000000003";
+    const secondOperationKey = "40000000-0000-4000-8000-000000000004";
+    vi.spyOn(globalThis.crypto, "randomUUID")
+      .mockReturnValueOnce("40000000-0000-4000-8000-000000000099")
+      .mockReturnValueOnce("40000000-0000-4000-8000-000000000098")
+      .mockReturnValueOnce(firstOperationKey)
+      .mockReturnValueOnce(secondOperationKey);
     const second = {
       ...installment,
       amount: "1000.0000",
       id: "installment-2",
       installmentNumber: 2,
+      remainingAmount: "1000.0000",
       version: 2,
     };
     let bulkBody: Record<string, unknown> | undefined;
@@ -263,11 +294,17 @@ describe("CardPlanWorkspace", () => {
           const paidOn = String(bulkBody.paidOn);
           return jsonResponse({
             installments: [
-              { ...installment, paidOn, status: "paid", version: 2 },
-              { ...second, paidOn, status: "paid", version: 3 },
+              {
+                ...installment,
+                paidAmount: "2500.0000",
+                paidOn,
+                remainingAmount: "1500.0000",
+                version: 2,
+              },
+              second,
             ],
             replayed: false,
-            updatedCount: 2,
+            updatedCount: 1,
           });
         }
         throw new Error(`Unexpected request: ${url}`);
@@ -277,19 +314,20 @@ describe("CardPlanWorkspace", () => {
 
     render(<CardPlanWorkspace canManagePayments canWrite />);
     const bulkTrigger = await screen.findByRole("button", {
-      name: "Dönemin açık taksitlerini ödendi olarak işaretle",
+      name: "Dönem borcuna ödeme yap",
     });
     await user.click(bulkTrigger);
     const date = screen.getByLabelText("İş kartı toplu ödeme tarihi");
     await waitFor(() => expect(date).toHaveFocus());
     const bulkForm = screen.getByRole("form", {
-      name: "İş kartı açık taksitlerini toplu şekilde ödendi olarak işaretle",
+      name: "İş kartı dönem borcuna ödeme yap",
     });
     expect(within(bulkForm).getByText("İş kartı")).toBeVisible();
     expect(within(bulkForm).getByText("2 açık taksit · ₺5.000,00")).toBeVisible();
+    expect(within(bulkForm).getByLabelText("İş kartı dönem ödeme tutarı")).toHaveValue(5000);
     await user.click(within(bulkForm).getByRole("button", { name: "Vazgeç" }));
     const returnedTrigger = screen.getByRole("button", {
-      name: "Dönemin açık taksitlerini ödendi olarak işaretle",
+      name: "Dönem borcuna ödeme yap",
     });
     await waitFor(() => expect(returnedTrigger).toHaveFocus());
 
@@ -297,16 +335,28 @@ describe("CardPlanWorkspace", () => {
     const reopenedDate = screen.getByLabelText("İş kartı toplu ödeme tarihi");
     await user.clear(reopenedDate);
     await user.type(reopenedDate, "2026-09-03");
+    const amount = screen.getByLabelText("İş kartı dönem ödeme tutarı");
+    await user.clear(amount);
+    await user.type(amount, "2500");
     await user.click(screen.getByRole("button", {
-      name: "2 taksiti ödendi olarak işaretle",
+      name: "Ödemeyi kaydet",
     }));
 
     await waitFor(() =>
       expect(bulkBody).toEqual({
+        amount: "2500",
         cardId: card.id,
         installments: [
-          { id: installment.id, version: 1 },
-          { id: second.id, version: 2 },
+          {
+            clientOperationKey: firstOperationKey,
+            id: installment.id,
+            version: 1,
+          },
+          {
+            clientOperationKey: secondOperationKey,
+            id: second.id,
+            version: 2,
+          },
         ],
         month: expect.stringMatching(/^\d{4}-\d{2}$/u),
         paidOn: "2026-09-03",
@@ -314,11 +364,9 @@ describe("CardPlanWorkspace", () => {
       }),
     );
     expect(
-      screen.queryByRole("button", {
-        name: "Dönemin açık taksitlerini ödendi olarak işaretle",
-      }),
-    ).not.toBeInTheDocument();
-    expect(screen.queryByLabelText(/tutar/iu)).not.toBeInTheDocument();
+      screen.getByRole("button", { name: "Dönem borcuna ödeme yap" }),
+    ).toBeInTheDocument();
+    expect(screen.getAllByText("₺2.500,00").length).toBeGreaterThan(0);
   });
 
   it("closes a stale bulk editor and requires a safe plan reload after conflict", async () => {
@@ -348,7 +396,9 @@ describe("CardPlanWorkspace", () => {
                 : [
                     {
                       ...installment,
+                      paidAmount: installment.amount,
                       paidOn: "2026-09-03",
+                      remainingAmount: "0.0000",
                       status: "paid",
                       version: 2,
                     },
@@ -363,12 +413,12 @@ describe("CardPlanWorkspace", () => {
     render(<CardPlanWorkspace canManagePayments canWrite />);
     await user.click(
       await screen.findByRole("button", {
-        name: "Dönemin açık taksitlerini ödendi olarak işaretle",
+        name: "Dönem borcuna ödeme yap",
       }),
     );
     await user.click(
       screen.getByRole("button", {
-        name: "1 taksiti ödendi olarak işaretle",
+        name: "Ödemeyi kaydet",
       }),
     );
 
@@ -377,12 +427,12 @@ describe("CardPlanWorkspace", () => {
     });
     expect(
       screen.queryByRole("form", {
-        name: "İş kartı açık taksitlerini toplu şekilde ödendi olarak işaretle",
+        name: "İş kartı dönem borcuna ödeme yap",
       }),
     ).not.toBeInTheDocument();
     expect(
       screen.queryByRole("button", {
-        name: "Dönemin açık taksitlerini ödendi olarak işaretle",
+        name: "Dönem borcuna ödeme yap",
       }),
     ).not.toBeInTheDocument();
     expect(bulkWriteCount).toBe(1);
@@ -419,10 +469,10 @@ describe("CardPlanWorkspace", () => {
     );
     expect(await screen.findByText("Yazılım lisansı")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "+ Kart ekle" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /ödendi işaretle/iu })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /taksitini öde/iu })).not.toBeInTheDocument();
     expect(
       screen.queryByRole("button", {
-        name: "Dönemin açık taksitlerini ödendi olarak işaretle",
+        name: "Dönem borcuna ödeme yap",
       }),
     ).not.toBeInTheDocument();
   });
