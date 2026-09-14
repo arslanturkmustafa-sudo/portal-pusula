@@ -36,6 +36,7 @@ const creditCardTable = "credit_card";
 const expenseTable = "expense";
 const expenseCategoryTable = "expense_category";
 const creditCardInstallmentTable = "credit_card_installment";
+const creditCardInstallmentPaymentTable = "credit_card_installment_payment";
 const customerProjectTable = "customer_project";
 const partnershipCommissionTable = "partnership_commission";
 const partnershipContributionTable = "partnership_contribution";
@@ -72,6 +73,7 @@ const allMigratedPlatformTables = [
   expenseCategoryTable,
   expenseTable,
   creditCardInstallmentTable,
+  creditCardInstallmentPaymentTable,
   customerProjectTable,
   partnershipCommissionTable,
   partnershipContributionTable,
@@ -85,7 +87,7 @@ const allMigratedPlatformTables = [
   recurringExpenseTable,
 ] as const;
 const repositoryRoot = process.cwd();
-const expectedMigrationCount = 24;
+const expectedMigrationCount = 25;
 const migrationLockWaitTimeoutMs = 5_000;
 const migrationLockPollIntervalMs = 25;
 
@@ -359,6 +361,9 @@ async function resetKnownMigrationArtifacts(pool: Pool): Promise<void> {
   await pool.query(`DROP TABLE IF EXISTS \`${taxObligationTable}\``);
   await pool.query(`DROP TABLE IF EXISTS \`${workTaskVisitTable}\``);
   await pool.query(`DROP TABLE IF EXISTS \`${financeLedgerEntryTable}\``);
+  await pool.query(
+    `DROP TABLE IF EXISTS \`${creditCardInstallmentPaymentTable}\``,
+  );
   await pool.query(`DROP TABLE IF EXISTS \`${creditCardInstallmentTable}\``);
   await pool.query("DROP TABLE IF EXISTS `receivable_collection`");
   await pool.query(`DROP TABLE IF EXISTS \`${expenseTable}\``);
