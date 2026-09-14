@@ -117,8 +117,8 @@ describe.sequential("clean-only phpMyAdmin migration bundle policy", () => {
     expect(second.summary).toEqual(first.summary);
     expect(second.sql).toBe(first.sql);
     expect(second.manifestText).toBe(first.manifestText);
-    expect(first.summary.migrationCount).toBe(24);
-    expect(first.summary.statementCount).toBe(241);
+    expect(first.summary.migrationCount).toBe(25);
+    expect(first.summary.statementCount).toBe(247);
     expect(first.summary.sqlBytes).toBe(Buffer.byteLength(first.sql));
     expect(first.summary.sqlSha256).toBe(
       createHash("sha256").update(first.sql).digest("hex"),
@@ -171,6 +171,7 @@ describe.sequential("clean-only phpMyAdmin migration bundle policy", () => {
       "consulting_contract",
       "credit_card",
       "credit_card_installment",
+      "credit_card_installment_payment",
       "cron_dispatch_gate",
       "customer",
       "customer_project",
@@ -237,6 +238,18 @@ describe.sequential("clean-only phpMyAdmin migration bundle policy", () => {
     expect(manifest.schema.tables.credit_card_installment).toContain(
       "finance_transaction_id",
     );
+    expect(manifest.schema.tables.credit_card_installment_payment).toEqual([
+      "id",
+      "client_operation_key",
+      "installment_id",
+      "finance_transaction_id",
+      "amount",
+      "paid_on",
+      "entry_type",
+      "reversal_of_id",
+      "reversal_reason",
+      "created_at_utc",
+    ]);
     expect(manifest.schema.tables.expense_category).toEqual(
       expect.arrayContaining(["code", "display_name", "status"]),
     );
@@ -309,6 +322,22 @@ describe.sequential("clean-only phpMyAdmin migration bundle policy", () => {
       name: "chk_receivable_collection_finance_transaction_identity",
       tableName: "receivable_collection",
     });
+    expect(manifest.schema.checks).toEqual(
+      expect.arrayContaining([
+        {
+          name: "chk_credit_card_installment_payment_identity",
+          tableName: "credit_card_installment_payment",
+        },
+        {
+          name: "chk_credit_card_installment_payment_amount",
+          tableName: "credit_card_installment_payment",
+        },
+        {
+          name: "chk_credit_card_installment_payment_entry",
+          tableName: "credit_card_installment_payment",
+        },
+      ]),
+    );
     expect(manifest.schema.foreignKeys).toEqual([
       {
         name: "fk_consulting_contract_archived_by",
@@ -321,6 +350,18 @@ describe.sequential("clean-only phpMyAdmin migration bundle policy", () => {
       {
         name: "fk_consulting_contract_customer_project",
         tableName: "consulting_contract",
+      },
+      {
+        name: "fk_credit_card_installment_payment_installment",
+        tableName: "credit_card_installment_payment",
+      },
+      {
+        name: "fk_credit_card_installment_payment_reversal",
+        tableName: "credit_card_installment_payment",
+      },
+      {
+        name: "fk_credit_card_installment_payment_transaction",
+        tableName: "credit_card_installment_payment",
       },
       {
         name: "fk_credit_card_installment_expense",
@@ -523,6 +564,26 @@ describe.sequential("clean-only phpMyAdmin migration bundle policy", () => {
       name: "uq_credit_card_installment_finance_transaction",
       tableName: "credit_card_installment",
     });
+    expect(manifest.schema.indexes).toEqual(
+      expect.arrayContaining([
+        {
+          name: "idx_credit_card_installment_payment_installment_date",
+          tableName: "credit_card_installment_payment",
+        },
+        {
+          name: "uq_credit_card_installment_payment_operation",
+          tableName: "credit_card_installment_payment",
+        },
+        {
+          name: "uq_credit_card_installment_payment_reversal",
+          tableName: "credit_card_installment_payment",
+        },
+        {
+          name: "uq_credit_card_installment_payment_transaction",
+          tableName: "credit_card_installment_payment",
+        },
+      ]),
+    );
     expect(manifest.schema.indexes).toContainEqual({
       name: "idx_receivable_state_due",
       tableName: "receivable",
@@ -717,10 +778,16 @@ describe.sequential("clean-only phpMyAdmin migration bundle policy", () => {
         sqlFileName: "0023_collection_card_accounts.sql",
         statementCount: 8,
       },
+      {
+        createdAt: 1789383073515,
+        hash: "e9dd804de1525319cc1da6fed05d4d4c69afa776dde4cda99457cfcdab6d1bf5",
+        sqlFileName: "0024_partial_card_payments.sql",
+        statementCount: 6,
+      },
     ]);
     expect(
       manifest.migrations.flatMap((migration) => migration.statementHashes),
-    ).toHaveLength(241);
+    ).toHaveLength(247);
     expect(
       manifest.migrations
         .flatMap((migration) => migration.statementHashes)

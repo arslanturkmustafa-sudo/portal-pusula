@@ -72,6 +72,8 @@ const recurringTasksExpensesMigrationTag =
   "0022_recurring_tasks_expenses";
 const collectionCardAccountsMigrationTag =
   "0023_collection_card_accounts";
+const partialCardPaymentsMigrationTag =
+  "0024_partial_card_payments";
 const incremental0011Backfills = untyped0011Backfills as {
   consultingContract: string;
   customerProject: string;
@@ -534,6 +536,17 @@ describe.sequential("phpMyAdmin incremental migration bundle policy", () => {
       },
       statementCount: 8,
     },
+    {
+      expectedJournalCount: 24,
+      expectedPreviousTag: collectionCardAccountsMigrationTag,
+      migrationTag: partialCardPaymentsMigrationTag,
+      requiredTarget: {
+        name: "credit_card_installment_payment",
+        tableName: "credit_card_installment_payment",
+        type: "create-table",
+      },
+      statementCount: 6,
+    },
   ])(
     "builds deterministic guarded $migrationTag artifact",
     async ({
@@ -918,6 +931,88 @@ describe.sequential("phpMyAdmin incremental migration bundle policy", () => {
         analyzeIncrementalMigrationStatement(
           mutated,
           collectionCardAccountsMigrationTag,
+        ),
+      ).toThrow();
+    }
+  });
+
+  it("locks the 0024 partial card payment ledger and legacy backfill", async () => {
+    const migrationSql = await readFile(
+      resolve(projectRoot, "drizzle", `${partialCardPaymentsMigrationTag}.sql`),
+      "utf8",
+    );
+    const migrationStatements = migrationSql
+      .split(/--> statement-breakpoint\s*/gu)
+      .map((statement) => statement.trim().replace(/;$/u, ""));
+    const artifact = await buildCurrentIncremental(
+      partialCardPaymentsMigrationTag,
+      await temporaryOutputDirectory(),
+    );
+    const initialGuard = artifact.sql.slice(
+      0,
+      artifact.sql.indexOf("SET @pp_candidate_sql = 0x"),
+    );
+    const createTable = migrationStatements[0];
+    const backfill = migrationStatements.at(-1)!;
+
+    expect(
+      migrationStatements.map((statement) =>
+        analyzeIncrementalMigrationStatement(
+          statement,
+          partialCardPaymentsMigrationTag,
+        ),
+      ),
+    ).toHaveLength(6);
+    expect(artifact.manifest).toMatchObject({
+      expectedJournalCount: 24,
+      expectedPreviousMigration: { tag: collectionCardAccountsMigrationTag },
+      migration: {
+        createdAt: 1789383073515,
+        hash: "e9dd804de1525319cc1da6fed05d4d4c69afa776dde4cda99457cfcdab6d1bf5",
+        tag: partialCardPaymentsMigrationTag,
+      },
+    });
+    for (const tableName of [
+      "credit_card_installment",
+      "finance_transaction",
+    ]) {
+      expect(initialGuard).toContain(
+        `TABLE_NAME = '${tableName}' AND COLUMN_NAME = 'id' AND DATA_TYPE = 'char' AND COLUMN_TYPE = 'char(36)'`,
+      );
+      expect(initialGuard).toContain(
+        `TABLE_NAME = '${tableName}' AND CONSTRAINT_NAME = 'PRIMARY' AND CONSTRAINT_TYPE = 'PRIMARY KEY') = 1`,
+      );
+    }
+    expect(createTable).toContain(
+      "`installment_id` char(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL",
+    );
+    expect(createTable).toContain(
+      "`entry_type` varchar(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT 'payment'",
+    );
+    expect(createTable).toContain(
+      "uq_credit_card_installment_payment_reversal",
+    );
+    expect(backfill).toContain(
+      "SELECT UUID(), UUID(), `id`, `finance_transaction_id`, `amount`, `paid_on`, 'payment', `updated_at_utc`",
+    );
+    expect(artifact.manifest.targetObjects).toContainEqual({
+      name: "backfill_credit_card_installment_payments",
+      tableName: "credit_card_installment_payment",
+      type: "data-backfill",
+    });
+    expect(artifact.sql).toContain(
+      "FROM `credit_card_installment_payment` payment JOIN `credit_card_installment` ci",
+    );
+
+    for (const mutated of [
+      createTable.replace("ascii_bin", "utf8mb4_unicode_ci"),
+      createTable.replace("BINARY 'payment'", "BINARY 'planned'"),
+      backfill.replace("UUID(), UUID()", "UUID(), `id`"),
+    ]) {
+      expect(() =>
+        analyzeIncrementalMigrationStatement(
+          mutated,
+          partialCardPaymentsMigrationTag,
         ),
       ).toThrow();
     }

@@ -143,14 +143,57 @@ export async function listOpenFinanceDigestItems(
          SELECT installment.due_on,
                 CONCAT(card.display_name, ' kart borcu'),
                 card.bank_name, 'outflow',
-                CAST(SUM(installment.amount) AS DECIMAL(65,4))
+                CAST(SUM(GREATEST(
+                  installment.amount - LEAST(
+                    installment.amount,
+                    GREATEST(
+                      CASE
+                        WHEN card_entry.entry_count > 0
+                          THEN card_entry.net_amount
+                        WHEN installment.status = 'paid'
+                          AND installment.paid_on <= ?
+                          THEN installment.amount
+                        ELSE 0.0000
+                      END,
+                      0.0000
+                    )
+                  ),
+                  0.0000
+                )) AS DECIMAL(65,4))
            FROM credit_card_installment installment
            JOIN expense expense ON expense.id = installment.expense_id
            JOIN credit_card card ON card.id = expense.credit_card_id
+           LEFT JOIN (
+             SELECT entry.installment_id, COUNT(*) AS entry_count,
+                    SUM(CASE
+                      WHEN entry.paid_on > ? THEN 0.0000
+                      WHEN BINARY entry.entry_type = BINARY 'reversal'
+                        THEN -entry.amount
+                      ELSE entry.amount
+                    END) AS net_amount
+               FROM credit_card_installment_payment entry
+              GROUP BY entry.installment_id
+           ) card_entry ON card_entry.installment_id = installment.id
           WHERE expense.status = 'active'
-            AND installment.status = 'planned'
             AND installment.due_on <= ?
           GROUP BY installment.due_on, card.id, card.display_name, card.bank_name
+         HAVING SUM(GREATEST(
+                  installment.amount - LEAST(
+                    installment.amount,
+                    GREATEST(
+                      CASE
+                        WHEN card_entry.entry_count > 0
+                          THEN card_entry.net_amount
+                        WHEN installment.status = 'paid'
+                          AND installment.paid_on <= ?
+                          THEN installment.amount
+                        ELSE 0.0000
+                      END,
+                      0.0000
+                    )
+                  ),
+                  0.0000
+                )) > 0.0000
          UNION ALL
          SELECT tax.due_on,
                 CASE BINARY tax.tax_type
@@ -167,7 +210,16 @@ export async function listOpenFinanceDigestItems(
        ) due_item
       ORDER BY due_item.due_on ASC, due_item.direction ASC,
                due_item.label ASC`,
-    [businessDate, businessDate, businessDate, businessDate, businessDate],
+    [
+      businessDate,
+      businessDate,
+      businessDate,
+      businessDate,
+      businessDate,
+      businessDate,
+      businessDate,
+      businessDate,
+    ],
   );
 
   const [recurringRows] = await connection.execute<RecurringExpenseRow[]>(

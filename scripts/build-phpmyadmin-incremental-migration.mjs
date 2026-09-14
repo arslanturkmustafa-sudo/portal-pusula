@@ -45,6 +45,8 @@ const RECURRING_TASKS_EXPENSES_MIGRATION_TAG =
   "0022_recurring_tasks_expenses";
 const COLLECTION_CARD_ACCOUNTS_MIGRATION_TAG =
   "0023_collection_card_accounts";
+const PARTIAL_CARD_PAYMENTS_MIGRATION_TAG =
+  "0024_partial_card_payments";
 
 const LEGACY_EXPENSE_CATEGORY_CODES = Object.freeze([
   "rent",
@@ -613,6 +615,24 @@ function dataBackfillPreflightPredicate(backfillKind) {
          WHERE r.\`contract_id\` IS NOT NULL AND cc.\`id\` IS NULL) = 0`,
     ].join(" AND ");
   }
+  if (backfillKind === "credit-card-installment-payments") {
+    return [
+      `(SELECT COUNT(*) FROM \`credit_card_installment_payment\`) = 0`,
+      `(SELECT COUNT(*)
+          FROM \`credit_card_installment\` ci
+          LEFT JOIN \`finance_transaction\` ft
+            ON ft.\`id\` = ci.\`finance_transaction_id\`
+         WHERE BINARY ci.\`status\` = BINARY 'paid'
+           AND (
+             ci.\`paid_on\` IS NULL
+             OR ci.\`amount\` <= 0
+             OR (
+               ci.\`finance_transaction_id\` IS NOT NULL
+               AND ft.\`id\` IS NULL
+             )
+           )) = 0`,
+    ].join(" AND ");
+  }
   throw new PhpMyAdminIncrementalBundleError();
 }
 
@@ -689,6 +709,37 @@ function dataBackfillPostflightPredicate(backfillKind) {
             ON cp.\`customer_id\` = r.\`customer_id\`
            AND cp.\`project_id\` = r.\`project_id\`
          WHERE cp.\`customer_id\` IS NULL) = 0`,
+    ].join(" AND ");
+  }
+  if (backfillKind === "credit-card-installment-payments") {
+    return [
+      `(SELECT COUNT(*) FROM \`credit_card_installment_payment\`) =
+        (SELECT COUNT(*) FROM \`credit_card_installment\`
+          WHERE BINARY \`status\` = BINARY 'paid')`,
+      `(SELECT COUNT(*)
+          FROM \`credit_card_installment\` ci
+          LEFT JOIN \`credit_card_installment_payment\` payment
+            ON payment.\`installment_id\` = ci.\`id\`
+           AND BINARY payment.\`entry_type\` = BINARY 'payment'
+         WHERE BINARY ci.\`status\` = BINARY 'paid'
+           AND payment.\`id\` IS NULL) = 0`,
+      `(SELECT COUNT(*)
+          FROM \`credit_card_installment_payment\` payment
+          JOIN \`credit_card_installment\` ci
+            ON ci.\`id\` = payment.\`installment_id\`
+         WHERE BINARY ci.\`status\` <> BINARY 'paid'
+            OR BINARY payment.\`entry_type\` <> BINARY 'payment'
+            OR payment.\`reversal_of_id\` IS NOT NULL
+            OR payment.\`reversal_reason\` IS NOT NULL
+            OR payment.\`amount\` <> ci.\`amount\`
+            OR payment.\`paid_on\` <> ci.\`paid_on\`
+            OR NOT (payment.\`finance_transaction_id\` <=> ci.\`finance_transaction_id\`)) = 0`,
+      `(SELECT COUNT(*) FROM (
+          SELECT \`installment_id\`
+            FROM \`credit_card_installment_payment\`
+           GROUP BY \`installment_id\`
+          HAVING COUNT(*) <> 1
+        ) duplicate_payment) = 0`,
     ].join(" AND ");
   }
   throw new PhpMyAdminIncrementalBundleError();
@@ -1398,6 +1449,18 @@ function prerequisitePredicates(statements, migrationTag) {
     predicates.add(exactCreditCardInstallmentStatusPredicate());
   }
 
+  if (migrationTag === PARTIAL_CARD_PAYMENTS_MIGRATION_TAG) {
+    for (const tableName of [
+      "credit_card_installment",
+      "finance_transaction",
+    ]) {
+      predicates.add(exactTableStorageAndDefaultPredicate(tableName));
+      predicates.add(exactCanonicalParentIdPredicate(tableName));
+      predicates.add(exactSingleColumnPrimaryKeyPredicate(tableName));
+    }
+    predicates.add(exactCreditCardInstallmentStatusPredicate());
+  }
+
   return [...predicates];
 }
 
@@ -1525,6 +1588,14 @@ function buildSql({
           // target is absent. Referencing it directly in the global guard
           // would fail before the guarded CREATE TABLE can run. The seed's
           // own step still verifies the table and exact row absence.
+          return false;
+        }
+        if (
+          item.analysis.type === "data-backfill" &&
+          item.analysis.backfillKind === "credit-card-installment-payments"
+        ) {
+          // The new payment table is already covered by its CREATE TABLE
+          // absence guard. Its exact legacy-row checks run at the backfill step.
           return false;
         }
         return true;

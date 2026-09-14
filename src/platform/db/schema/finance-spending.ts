@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import {
   char,
   check,
+  customType,
   date,
   datetime,
   decimal,
@@ -9,6 +10,7 @@ import {
   index,
   int,
   mysqlTable,
+  type MySqlTableExtraConfigValue,
   smallint,
   tinyint,
   uniqueIndex,
@@ -17,6 +19,20 @@ import {
 
 import { project } from "./project";
 import { financeAccount, financeTransaction } from "./finance-account";
+
+const asciiUuid = customType<{
+  data: string;
+  driverData: string;
+}>({
+  dataType: () => "char(36) CHARACTER SET ascii COLLATE ascii_bin",
+});
+
+const asciiEntryType = customType<{
+  data: string;
+  driverData: string;
+}>({
+  dataType: () => "varchar(16) CHARACTER SET ascii COLLATE ascii_bin",
+});
 
 export const creditCard = mysqlTable(
   "credit_card",
@@ -485,6 +501,101 @@ export const creditCardInstallment = mysqlTable(
   ],
 );
 
+export const creditCardInstallmentPayment = mysqlTable(
+  "credit_card_installment_payment",
+  {
+    id: asciiUuid("id").primaryKey(),
+    clientOperationKey: asciiUuid("client_operation_key").notNull(),
+    installmentId: asciiUuid("installment_id").notNull(),
+    financeTransactionId: asciiUuid("finance_transaction_id"),
+    amount: decimal("amount", { precision: 19, scale: 4 }).notNull(),
+    paidOn: date("paid_on", { mode: "string" }).notNull(),
+    entryType: asciiEntryType("entry_type")
+      .default("payment")
+      .notNull(),
+    reversalOfId: asciiUuid("reversal_of_id"),
+    reversalReason: varchar("reversal_reason", { length: 2000 }),
+    createdAtUtc: datetime("created_at_utc", {
+      fsp: 6,
+      mode: "string",
+    })
+      .default(sql`CURRENT_TIMESTAMP(6)`)
+      .notNull(),
+  },
+  (table): MySqlTableExtraConfigValue[] => [
+    check(
+      "chk_credit_card_installment_payment_identity",
+      sql`OCTET_LENGTH(${table.id}) = 36
+        AND BINARY ${table.id} REGEXP '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+        AND OCTET_LENGTH(${table.clientOperationKey}) = 36
+        AND BINARY ${table.clientOperationKey} REGEXP '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+        AND OCTET_LENGTH(${table.installmentId}) = 36
+        AND BINARY ${table.installmentId} REGEXP '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+        AND (${table.financeTransactionId} IS NULL OR (
+          OCTET_LENGTH(${table.financeTransactionId}) = 36
+          AND BINARY ${table.financeTransactionId} REGEXP '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+        ))
+        AND (${table.reversalOfId} IS NULL OR (
+          OCTET_LENGTH(${table.reversalOfId}) = 36
+          AND BINARY ${table.reversalOfId} REGEXP '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+        ))`,
+    ),
+    check(
+      "chk_credit_card_installment_payment_amount",
+      sql`${table.amount} > 0`,
+    ),
+    check(
+      "chk_credit_card_installment_payment_entry",
+      sql`(
+          BINARY ${table.entryType} = BINARY 'payment'
+          AND ${table.reversalOfId} IS NULL
+          AND ${table.reversalReason} IS NULL
+        ) OR (
+          BINARY ${table.entryType} = BINARY 'reversal'
+          AND ${table.reversalOfId} IS NOT NULL
+          AND ${table.reversalReason} IS NOT NULL
+          AND CHAR_LENGTH(${table.reversalReason}) BETWEEN 1 AND 2000
+          AND ${table.reversalReason} = TRIM(${table.reversalReason})
+        )`,
+    ),
+    foreignKey({
+      name: "fk_credit_card_installment_payment_installment",
+      columns: [table.installmentId],
+      foreignColumns: [creditCardInstallment.id],
+    })
+      .onDelete("restrict")
+      .onUpdate("restrict"),
+    foreignKey({
+      name: "fk_credit_card_installment_payment_transaction",
+      columns: [table.financeTransactionId],
+      foreignColumns: [financeTransaction.id],
+    })
+      .onDelete("restrict")
+      .onUpdate("restrict"),
+    foreignKey({
+      name: "fk_credit_card_installment_payment_reversal",
+      columns: [table.reversalOfId],
+      foreignColumns: [creditCardInstallmentPayment.id],
+    })
+      .onDelete("restrict")
+      .onUpdate("restrict"),
+    uniqueIndex("uq_credit_card_installment_payment_operation").on(
+      table.clientOperationKey,
+    ),
+    uniqueIndex("uq_credit_card_installment_payment_transaction").on(
+      table.financeTransactionId,
+    ),
+    uniqueIndex("uq_credit_card_installment_payment_reversal").on(
+      table.reversalOfId,
+    ),
+    index("idx_credit_card_installment_payment_installment_date").on(
+      table.installmentId,
+      table.paidOn,
+      table.createdAtUtc,
+    ),
+  ],
+);
+
 export type CreditCardRecord = typeof creditCard.$inferSelect;
 export type NewCreditCardRecord = typeof creditCard.$inferInsert;
 export type ExpenseCategoryRecord = typeof expenseCategory.$inferSelect;
@@ -495,3 +606,7 @@ export type CreditCardInstallmentRecord =
   typeof creditCardInstallment.$inferSelect;
 export type NewCreditCardInstallmentRecord =
   typeof creditCardInstallment.$inferInsert;
+export type CreditCardInstallmentPaymentRecord =
+  typeof creditCardInstallmentPayment.$inferSelect;
+export type NewCreditCardInstallmentPaymentRecord =
+  typeof creditCardInstallmentPayment.$inferInsert;

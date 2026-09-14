@@ -8,6 +8,10 @@ const migration = readFileSync(
   resolve(root, "drizzle/0010_expenses_cards.sql"),
   "utf8",
 );
+const partialPaymentMigration = readFileSync(
+  resolve(root, "drizzle/0024_partial_card_payments.sql"),
+  "utf8",
+);
 
 describe("finance spending migration policy", () => {
   it("adds only cards, expenses, and materialized card installments", () => {
@@ -77,5 +81,72 @@ describe("finance spending migration policy", () => {
     expect(snapshot.tables).toHaveProperty("credit_card");
     expect(snapshot.tables).toHaveProperty("expense");
     expect(snapshot.tables).toHaveProperty("credit_card_installment");
+  });
+});
+
+describe("partial card payment migration policy", () => {
+  it("adds an immutable payment and reversal ledger without changing installments", () => {
+    expect(partialPaymentMigration.match(/CREATE TABLE/gu)).toHaveLength(1);
+    expect(partialPaymentMigration).toContain(
+      "CREATE TABLE `credit_card_installment_payment`",
+    );
+    expect(partialPaymentMigration).toContain(
+      "ENGINE=InnoDB DEFAULT CHARACTER SET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+    );
+    expect(
+      partialPaymentMigration.match(
+        /CHARACTER SET ascii COLLATE ascii_bin/gu,
+      ),
+    ).toHaveLength(6);
+    expect(partialPaymentMigration).toContain("decimal(19,4) NOT NULL");
+    expect(partialPaymentMigration).toContain(
+      "chk_credit_card_installment_payment_entry",
+    );
+    expect(partialPaymentMigration).toContain(
+      "uq_credit_card_installment_payment_operation",
+    );
+    expect(partialPaymentMigration).toContain(
+      "uq_credit_card_installment_payment_reversal",
+    );
+    expect(partialPaymentMigration).toContain(
+      "uq_credit_card_installment_payment_transaction",
+    );
+    expect(
+      partialPaymentMigration.match(
+        /ON DELETE restrict ON UPDATE restrict/gu,
+      ),
+    ).toHaveLength(3);
+    expect(partialPaymentMigration).not.toMatch(
+      /ALTER TABLE `credit_card_installment`/u,
+    );
+    expect(partialPaymentMigration).not.toMatch(
+      /(?:^|;)\s*(?:DROP|TRUNCATE|DELETE|UPDATE|REPLACE)\b/imu,
+    );
+  });
+
+  it("backfills every legacy paid installment with the preserved payment snapshot", () => {
+    expect(partialPaymentMigration).toMatch(
+      /INSERT INTO `credit_card_installment_payment`[\s\S]*?SELECT UUID\(\), UUID\(\), `id`, `finance_transaction_id`, `amount`, `paid_on`, 'payment', `updated_at_utc` FROM `credit_card_installment` WHERE BINARY `status` = BINARY 'paid'/u,
+    );
+
+    const journal = JSON.parse(
+      readFileSync(resolve(root, "drizzle/meta/_journal.json"), "utf8"),
+    ) as { entries: Array<{ idx: number; tag: string; when: number }> };
+    expect(
+      journal.entries.find(
+        (entry) => entry.tag === "0024_partial_card_payments",
+      ),
+    ).toEqual({
+      breakpoints: true,
+      idx: 24,
+      tag: "0024_partial_card_payments",
+      version: "5",
+      when: 1789383073515,
+    });
+
+    const snapshot = JSON.parse(
+      readFileSync(resolve(root, "drizzle/meta/0024_snapshot.json"), "utf8"),
+    ) as { tables: Record<string, unknown> };
+    expect(snapshot.tables).toHaveProperty("credit_card_installment_payment");
   });
 });

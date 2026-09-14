@@ -8,6 +8,7 @@ vi.mock("server-only", () => ({}));
 import {
   assertFinanceLedgerReconciled,
   FinanceLedgerIntegrityError,
+  findCardInstallmentByFinanceTransactionForUpdate,
   findFinanceAccountBalanceRecord,
   insertFinanceLedgerEntries,
   listFinanceAccountBalanceRecords,
@@ -30,6 +31,35 @@ const accountRow = {
 };
 
 describe("finance account repository", () => {
+  it("treats a partial card payment ledger movement as installment-managed", async () => {
+    const execute = vi
+      .fn()
+      .mockResolvedValueOnce([[], []])
+      .mockResolvedValueOnce([
+        [{ id: "30000000-0000-4000-8000-000000000001" }],
+        [],
+      ]);
+
+    await expect(
+      findCardInstallmentByFinanceTransactionForUpdate(
+        { execute } as unknown as PoolConnection,
+        "40000000-0000-4000-8000-000000000001",
+      ),
+    ).resolves.toBe("30000000-0000-4000-8000-000000000001");
+
+    expect(execute).toHaveBeenCalledTimes(2);
+    expect(execute.mock.calls[0]?.[0]).toContain(
+      "FROM credit_card_installment",
+    );
+    expect(execute.mock.calls[1]?.[0]).toContain(
+      "FROM credit_card_installment_payment",
+    );
+    expect(execute.mock.calls[1]?.[0]).toContain("FOR UPDATE");
+    expect(execute.mock.calls[1]?.[1]).toEqual([
+      "40000000-0000-4000-8000-000000000001",
+    ]);
+  });
+
   it("derives account balance only from opening balance and signed ledger entries", async () => {
     const execute = vi.fn()
       .mockResolvedValueOnce([[], []])

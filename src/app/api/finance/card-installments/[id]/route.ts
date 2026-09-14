@@ -9,6 +9,8 @@ import {
   FinanceTransactionBeforeAccountOpeningError,
   FinanceTransactionFutureDateError,
   InstallmentPaymentDateInFutureError,
+  CardInstallmentPaymentExceedsRemainingError,
+  SpendingIdempotencyConflictError,
   SpendingResourceNotFoundError,
   SpendingVersionConflictError,
   updateCardInstallment,
@@ -82,6 +84,9 @@ export async function PATCH(
     if (error instanceof InstallmentPaymentDateInFutureError) {
       return spendingJson({ status: "payment_date_in_future" }, 400);
     }
+    if (error instanceof CardInstallmentPaymentExceedsRemainingError) {
+      return spendingJson({ status: "payment_exceeds_remaining" }, 409);
+    }
     if (error instanceof ExpenseAccountPermissionError) {
       return spendingJson({ status: "forbidden" }, 403);
     }
@@ -105,6 +110,9 @@ export async function PATCH(
     }
     if (error instanceof SpendingVersionConflictError) {
       return spendingJson({ status: "version_conflict" }, 409);
+    }
+    if (error instanceof SpendingIdempotencyConflictError) {
+      return spendingJson({ status: "idempotency_conflict" }, 409);
     }
     const mysqlErrorCode = safeMySqlErrorCode(error);
     requestLogger(correlationId).error(

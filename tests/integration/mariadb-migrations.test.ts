@@ -36,6 +36,7 @@ const creditCardTable = "credit_card";
 const expenseTable = "expense";
 const expenseCategoryTable = "expense_category";
 const creditCardInstallmentTable = "credit_card_installment";
+const creditCardInstallmentPaymentTable = "credit_card_installment_payment";
 const customerProjectTable = "customer_project";
 const partnershipCommissionTable = "partnership_commission";
 const partnershipContributionTable = "partnership_contribution";
@@ -72,6 +73,7 @@ const allMigratedPlatformTables = [
   expenseCategoryTable,
   expenseTable,
   creditCardInstallmentTable,
+  creditCardInstallmentPaymentTable,
   customerProjectTable,
   partnershipCommissionTable,
   partnershipContributionTable,
@@ -85,7 +87,7 @@ const allMigratedPlatformTables = [
   recurringExpenseTable,
 ] as const;
 const repositoryRoot = process.cwd();
-const expectedMigrationCount = 24;
+const expectedMigrationCount = 25;
 const migrationLockWaitTimeoutMs = 5_000;
 const migrationLockPollIntervalMs = 25;
 
@@ -359,6 +361,9 @@ async function resetKnownMigrationArtifacts(pool: Pool): Promise<void> {
   await pool.query(`DROP TABLE IF EXISTS \`${taxObligationTable}\``);
   await pool.query(`DROP TABLE IF EXISTS \`${workTaskVisitTable}\``);
   await pool.query(`DROP TABLE IF EXISTS \`${financeLedgerEntryTable}\``);
+  await pool.query(
+    `DROP TABLE IF EXISTS \`${creditCardInstallmentPaymentTable}\``,
+  );
   await pool.query(`DROP TABLE IF EXISTS \`${creditCardInstallmentTable}\``);
   await pool.query("DROP TABLE IF EXISTS `receivable_collection`");
   await pool.query(`DROP TABLE IF EXISTS \`${expenseTable}\``);
@@ -1207,7 +1212,7 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
       ]);
     });
 
-    it("records the immutable 0000 through 0023 migration hash chain", async () => {
+    it("records the immutable 0000 through 0024 migration hash chain", async () => {
       const [rows] = await pool.query<MigrationRow[]>(
         `SELECT id, hash, created_at FROM \`${migrationTable}\` ORDER BY id`,
       );
@@ -1331,6 +1336,11 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
           created_at: 1789195799696,
           hash: "e4a5e27b1b6113baa0bafcc52b29c7d1e8a78a293ee326daf5eb086b48bed5e3",
           id: 24,
+        },
+        {
+          created_at: 1789383073515,
+          hash: "e9dd804de1525319cc1da6fed05d4d4c69afa776dde4cda99457cfcdab6d1bf5",
+          id: 25,
         },
       ]);
     });

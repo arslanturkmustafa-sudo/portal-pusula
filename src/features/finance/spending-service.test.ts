@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   buildExpenseCreatedEmail: vi.fn(),
   createFinanceTransactionInConnection: vi.fn(),
   deletePlannedExpenseInstallments: vi.fn(),
+  findCardInstallmentPaymentByOperationKeyForUpdate: vi.fn(),
   findCardInstallmentForUpdate: vi.fn(),
   findCreditCardForUpdate: vi.fn(),
   findActiveExpenseCategoryByCodeForUpdate: vi.fn(),
@@ -18,11 +19,13 @@ const mocks = vi.hoisted(() => ({
   findFinanceAccountForUpdate: vi.fn(),
   findProjectForUpdate: vi.fn(),
   enqueueEmailDelivery: vi.fn(),
+  insertCardInstallmentPaymentRecordIdempotently: vi.fn(),
   insertCardInstallmentRecords: vi.fn(),
   insertCreditCardRecordIdempotently: vi.fn(),
   insertExpenseRecordIdempotently: vi.fn(),
   listCardInstallmentRecords: vi.fn(),
   listCardInstallmentsForBulkUpdate: vi.fn(),
+  listCardInstallmentPaymentsForUpdate: vi.fn(),
   listCreditCardRecords: vi.fn(),
   listExpenseInstallmentsForUpdate: vi.fn(),
   listExpenseRecords: vi.fn(),
@@ -61,16 +64,22 @@ vi.mock("@/features/notifications/email-templates", () => ({
 }));
 vi.mock("@/features/finance/spending-repository", () => ({
   deletePlannedExpenseInstallments: mocks.deletePlannedExpenseInstallments,
+  findCardInstallmentPaymentByOperationKeyForUpdate:
+    mocks.findCardInstallmentPaymentByOperationKeyForUpdate,
   findCardInstallmentForUpdate: mocks.findCardInstallmentForUpdate,
   findCreditCardForUpdate: mocks.findCreditCardForUpdate,
   findExpenseByOperationKeyForUpdate: mocks.findExpenseByOperationKeyForUpdate,
   findExpenseForUpdate: mocks.findExpenseForUpdate,
+  insertCardInstallmentPaymentRecordIdempotently:
+    mocks.insertCardInstallmentPaymentRecordIdempotently,
   insertCardInstallmentRecords: mocks.insertCardInstallmentRecords,
   insertCreditCardRecordIdempotently:
     mocks.insertCreditCardRecordIdempotently,
   insertExpenseRecordIdempotently: mocks.insertExpenseRecordIdempotently,
   listCardInstallmentRecords: mocks.listCardInstallmentRecords,
   listCardInstallmentsForBulkUpdate: mocks.listCardInstallmentsForBulkUpdate,
+  listCardInstallmentPaymentsForUpdate:
+    mocks.listCardInstallmentPaymentsForUpdate,
   listCreditCardRecords: mocks.listCreditCardRecords,
   listExpenseInstallmentsForUpdate: mocks.listExpenseInstallmentsForUpdate,
   listExpenseRecords: mocks.listExpenseRecords,
@@ -94,6 +103,7 @@ vi.mock("@/platform/jobs/mysql-transaction", () => ({
 import {
   bulkPayCardInstallments,
   CardInstallmentBulkConflictError,
+  CardInstallmentPaymentExceedsRemainingError,
   createCreditCard,
   createExpense,
   ExpensePlanLockedError,
@@ -175,13 +185,16 @@ const installment = {
   expenseDescription: expense.description,
   expenseId,
   financeTransactionId: null,
+  hasPaymentHistory: false,
   id: "60000000-0000-4000-8000-000000000001",
   installmentCount: 3,
   installmentNumber: 1,
+  paidAmount: "0.0000",
   paidOn: null,
   paymentAccountId: null,
   paymentAccountName: null,
   paymentAccountType: null,
+  remainingAmount: "40.0000",
   statementMonth: "2026-08",
   status: "planned" as const,
   updatedAtUtc: nowSql,
@@ -211,6 +224,9 @@ describe("spending service", () => {
       status: "active",
     });
     mocks.findExpenseByOperationKeyForUpdate.mockResolvedValue(null);
+    mocks.findCardInstallmentPaymentByOperationKeyForUpdate.mockResolvedValue(
+      null,
+    );
     mocks.findFinanceAccountForUpdate.mockResolvedValue(cashAccount);
     mocks.findProjectForUpdate.mockResolvedValue({ id: projectId });
     mocks.insertCreditCardRecordIdempotently.mockImplementation(
@@ -223,12 +239,16 @@ describe("spending service", () => {
         projectShortCode: "BYPUSULA",
       }),
     );
+    mocks.insertCardInstallmentPaymentRecordIdempotently.mockImplementation(
+      async (_connection, pending) => pending,
+    );
     mocks.createFinanceTransactionInConnection.mockResolvedValue({
       created: true,
       transaction: { id: financeTransactionId },
     });
     mocks.listExpenseInstallmentsForUpdate.mockResolvedValue([]);
     mocks.listCardInstallmentsForBulkUpdate.mockResolvedValue([]);
+    mocks.listCardInstallmentPaymentsForUpdate.mockResolvedValue([]);
     mocks.listActiveOwnerEmailRecipients.mockResolvedValue([]);
     mocks.buildExpenseCreatedEmail.mockReturnValue({
       html: "<p>Yeni gider kaydı</p>",
@@ -639,7 +659,13 @@ describe("spending service", () => {
   it("does not allow a paid card plan to be changed or voided", async () => {
     mocks.findExpenseForUpdate.mockResolvedValue(expense);
     mocks.listExpenseInstallmentsForUpdate.mockResolvedValue([
-      { status: "paid" },
+      {
+        ...installment,
+        hasPaymentHistory: true,
+        paidAmount: "40.0000",
+        remainingAmount: "0.0000",
+        status: "paid",
+      },
     ]);
     await expect(
       updateExpense(
@@ -744,6 +770,7 @@ describe("spending service", () => {
         dueOn: "2026-09-10",
         id: "60000000-0000-4000-8000-000000000002",
         installmentNumber: 2,
+        remainingAmount: "30.0000",
       },
       {
         ...installment,
@@ -751,12 +778,16 @@ describe("spending service", () => {
         dueOn: "2026-09-10",
         id: "60000000-0000-4000-8000-000000000003",
         installmentNumber: 3,
+        remainingAmount: "20.0000",
       },
       {
         ...installment,
         amount: "10.0000",
         id: "60000000-0000-4000-8000-000000000004",
+        hasPaymentHistory: true,
+        paidAmount: "10.0000",
         paidOn: "2026-09-01",
+        remainingAmount: "0.0000",
         status: "paid",
       },
     ]);
@@ -777,13 +808,14 @@ describe("spending service", () => {
     ]);
   });
 
-  it("bulk-pays the exact open snapshot in repository lock order with audit", async () => {
+  it("allocates a partial period payment in due-date order", async () => {
     const second = {
       ...installment,
       amount: "30.0000",
       dueOn: "2026-09-10",
       id: "60000000-0000-4000-8000-000000000002",
       installmentNumber: 2,
+      remainingAmount: "30.0000",
       version: 2,
     };
     mocks.listCardInstallmentsForBulkUpdate.mockResolvedValue([
@@ -794,10 +826,19 @@ describe("spending service", () => {
     const result = await bulkPayCardInstallments(
       {} as Pool,
       {
+        amount: "50",
         cardId,
         installments: [
-          { id: installment.id, version: 1 },
-          { id: second.id, version: 2 },
+          {
+            clientOperationKey: "50000000-0000-4000-8000-000000000011",
+            id: installment.id,
+            version: 1,
+          },
+          {
+            clientOperationKey: "50000000-0000-4000-8000-000000000012",
+            id: second.id,
+            version: 2,
+          },
         ],
         month: "2026-09",
         paidOn: "2026-09-03",
@@ -826,13 +867,31 @@ describe("spending service", () => {
       }),
       expect.objectContaining({ canMutateAccountLedger: true }),
     );
+    expect(
+      mocks.createFinanceTransactionInConnection.mock.calls.map(
+        (call) => call[1].amount,
+      ),
+    ).toEqual(["40.0000", "10.0000"]);
     expect(mocks.updateCardInstallmentRecord.mock.calls.map((call) => call[1].id)).toEqual([
       installment.id,
       second.id,
     ]);
     expect(mocks.appendAuditEvent).toHaveBeenCalledTimes(2);
     expect(result).toMatchObject({ replayed: false, updatedCount: 2 });
-    expect(result.installments.every((item) => item.status === "paid")).toBe(true);
+    expect(result.installments).toEqual([
+      expect.objectContaining({
+        id: installment.id,
+        paidAmount: "40.0000",
+        remainingAmount: "0.0000",
+        status: "paid",
+      }),
+      expect.objectContaining({
+        id: second.id,
+        paidAmount: "10.0000",
+        remainingAmount: "20.0000",
+        status: "planned",
+      }),
+    ]);
   });
 
   it("rejects a stale or incomplete bulk snapshot before changing any row", async () => {
@@ -849,8 +908,15 @@ describe("spending service", () => {
       bulkPayCardInstallments(
         {} as Pool,
         {
+          amount: "40",
           cardId,
-          installments: [{ id: installment.id, version: 1 }],
+          installments: [
+            {
+              clientOperationKey: "50000000-0000-4000-8000-000000000013",
+              id: installment.id,
+              version: 1,
+            },
+          ],
           month: "2026-09",
           paidOn: "2026-09-03",
           sourceAccountId: cashAccountId,
@@ -862,38 +928,7 @@ describe("spending service", () => {
     expect(mocks.appendAuditEvent).not.toHaveBeenCalled();
   });
 
-  it("treats an exact bulk-payment retry as a no-op without duplicate audit", async () => {
-    mocks.listCardInstallmentsForBulkUpdate.mockResolvedValue([
-      {
-        ...installment,
-        financeTransactionId,
-        paidOn: "2026-09-03",
-        paymentAccountId: cashAccountId,
-        paymentAccountName: cashAccount.displayName,
-        paymentAccountType: cashAccount.accountType,
-        status: "paid",
-        version: 2,
-      },
-    ]);
-
-    const result = await bulkPayCardInstallments(
-      {} as Pool,
-      {
-        cardId,
-        installments: [{ id: installment.id, version: 1 }],
-        month: "2026-09",
-        paidOn: "2026-09-03",
-        sourceAccountId: cashAccountId,
-      },
-      { ...context, canMutateAccountLedger: true },
-    );
-
-    expect(result).toMatchObject({ replayed: true, updatedCount: 0 });
-    expect(mocks.updateCardInstallmentRecord).not.toHaveBeenCalled();
-    expect(mocks.appendAuditEvent).not.toHaveBeenCalled();
-  });
-
-  it("pays one installment from the selected account", async () => {
+  it("pays part of one installment from the selected account", async () => {
     mocks.findCardInstallmentForUpdate.mockResolvedValue({
       ...installment,
       expenseStatus: "active",
@@ -903,9 +938,11 @@ describe("spending service", () => {
       {} as Pool,
       installment.id,
       {
+        action: "pay",
+        amount: "15",
+        clientOperationKey: "50000000-0000-4000-8000-000000000014",
         paidOn: "2026-09-03",
         sourceAccountId: cashAccountId,
-        status: "paid",
         version: 1,
       },
       { ...context, canMutateAccountLedger: true },
@@ -914,7 +951,7 @@ describe("spending service", () => {
     expect(mocks.createFinanceTransactionInConnection).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
-        amount: installment.amount,
+        amount: "15.0000",
         occurredOn: "2026-09-03",
         sourceAccountId: cashAccountId,
         targetAccountId: null,
@@ -925,17 +962,43 @@ describe("spending service", () => {
     expect(mocks.updateCardInstallmentRecord).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
-        financeTransactionId,
+        paidAmount: "15.0000",
         paymentAccountId: cashAccountId,
-        status: "paid",
+        remainingAmount: "25.0000",
+        status: "planned",
       }),
       1,
     );
     expect(result).toMatchObject({
-      financeTransactionId,
+      paidAmount: "15.0000",
       paymentAccountId: cashAccountId,
-      status: "paid",
+      remainingAmount: "25.0000",
+      status: "overdue",
     });
+  });
+
+  it("rejects a payment larger than the installment remainder", async () => {
+    mocks.findCardInstallmentForUpdate.mockResolvedValue({
+      ...installment,
+      expenseStatus: "active",
+    });
+
+    await expect(
+      updateCardInstallment(
+        {} as Pool,
+        installment.id,
+        {
+          action: "pay",
+          amount: "40.0001",
+          clientOperationKey: "50000000-0000-4000-8000-000000000015",
+          paidOn: "2026-09-03",
+          sourceAccountId: cashAccountId,
+          version: 1,
+        },
+        { ...context, canMutateAccountLedger: true },
+      ),
+    ).rejects.toBeInstanceOf(CardInstallmentPaymentExceedsRemainingError);
+    expect(mocks.createFinanceTransactionInConnection).not.toHaveBeenCalled();
   });
 
   it("returns an overdue view when a past-due installment is reopened", async () => {
@@ -949,17 +1012,42 @@ describe("spending service", () => {
       expenseId,
       expenseStatus: "active",
       financeTransactionId,
+      hasPaymentHistory: true,
       id: "60000000-0000-4000-8000-000000000001",
       installmentCount: 3,
       installmentNumber: 1,
+      paidAmount: "40.0000",
       paidOn: "2026-09-02",
       paymentAccountId: cashAccountId,
       paymentAccountName: cashAccount.displayName,
       paymentAccountType: cashAccount.accountType,
+      remainingAmount: "0.0000",
       statementMonth: "2026-08",
       status: "paid",
       updatedAtUtc: nowSql,
       version: 1,
+    });
+    mocks.listCardInstallmentPaymentsForUpdate.mockResolvedValue([
+      {
+        amount: "40.0000",
+        clientOperationKey: "50000000-0000-4000-8000-000000000016",
+        createdAtUtc: nowSql,
+        entryType: "payment",
+        financeTransactionId,
+        id: "60000000-0000-4000-8000-000000000016",
+        installmentId: installment.id,
+        paidOn: "2026-09-02",
+        paymentAccountId: cashAccountId,
+        paymentAccountName: cashAccount.displayName,
+        paymentAccountType: cashAccount.accountType,
+        reversalOfId: null,
+        reversalReason: null,
+        reversed: false,
+      },
+    ]);
+    mocks.reverseFinanceTransactionInConnection.mockResolvedValue({
+      created: true,
+      transaction: { id: "80000000-0000-4000-8000-000000000002" },
     });
     mocks.updateCardInstallmentRecord.mockResolvedValue(true);
 
@@ -967,9 +1055,7 @@ describe("spending service", () => {
       {} as Pool,
       "60000000-0000-4000-8000-000000000001",
       {
-        paidOn: null,
-        sourceAccountId: null,
-        status: "planned",
+        action: "reopen",
         version: 1,
       },
       { ...context, canMutateAccountLedger: true },
@@ -980,6 +1066,7 @@ describe("spending service", () => {
       expect.anything(),
       financeTransactionId,
       expect.objectContaining({
+        clientOperationKey: expect.any(String),
         reason: "Kredi kartı taksit ödemesi plana geri alındı.",
       }),
       expect.objectContaining({ canMutateAccountLedger: true }),

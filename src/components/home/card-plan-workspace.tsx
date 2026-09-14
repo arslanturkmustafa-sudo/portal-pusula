@@ -43,10 +43,12 @@ type CardInstallmentDto = Readonly<{
   id: string;
   installmentCount: number;
   installmentNumber: number;
+  paidAmount: string;
   paidOn: string | null;
   paymentAccountId: string | null;
   paymentAccountName: string | null;
   paymentAccountType: "bank" | "cash" | null;
+  remainingAmount: string;
   statementMonth: string;
   status: InstallmentStatus;
   version: number;
@@ -72,13 +74,17 @@ type CardDraft = {
 };
 
 type PaymentDraft = Readonly<{
+  amount: string;
+  clientOperationKey: string;
   installmentId: string;
   paidOn: string;
   sourceAccountId: string;
 }>;
 
 type BulkPaymentDraft = Readonly<{
+  amount: string;
   cardId: string;
+  installmentOperationKeys: Readonly<Record<string, string>>;
   paidOn: string;
   sourceAccountId: string;
 }>;
@@ -148,6 +154,30 @@ function sumMoney(values: readonly string[]): string {
     .toFixed(4);
 }
 
+function hasMoney(value: string): boolean {
+  try {
+    return new Decimal(value).greaterThan(0);
+  } catch {
+    return false;
+  }
+}
+
+function normalizePaymentAmount(
+  value: string,
+  maximum: string,
+): string | null {
+  try {
+    const normalized = value.trim().replace(",", ".");
+    const amount = new Decimal(normalized);
+    if (!amount.isFinite() || !amount.greaterThan(0) || amount.greaterThan(maximum)) {
+      return null;
+    }
+    return normalized;
+  } catch {
+    return null;
+  }
+}
+
 function paymentAccountLabel(account: FinanceAccountDto): string {
   const type = account.accountType === "bank" ? "Banka" : "Kasa";
   return `${account.displayName} · ${type} · ${formatMoney(account.balanceAmount)}`;
@@ -205,6 +235,13 @@ function statusLabel(status: InstallmentStatus): string {
   }[status];
 }
 
+function installmentStatusLabel(installment: CardInstallmentDto): string {
+  if (hasMoney(installment.paidAmount) && hasMoney(installment.remainingAmount)) {
+    return installment.status === "overdue" ? "Kısmi · gecikti" : "Kısmi ödendi";
+  }
+  return statusLabel(installment.status);
+}
+
 function withCurrentStatus(installment: CardInstallmentDto): CardInstallmentDto {
   if (installment.status !== "planned" || installment.dueOn >= istanbulToday()) {
     return installment;
@@ -223,10 +260,11 @@ function buildCardPlanGroups(
   }
   return [...grouped.entries()]
     .map(([cardId, cardInstallments]) => {
-      const planned = cardInstallments.filter(
-        (installment) => installment.status === "planned",
+      const open = cardInstallments.filter((installment) =>
+        hasMoney(installment.remainingAmount),
       );
-      const nextDueOn = planned[0]?.dueOn ?? null;
+      const upcoming = open.filter((installment) => installment.status !== "overdue");
+      const nextDueOn = upcoming[0]?.dueOn ?? null;
       return {
         cardId,
         creditCardName: cardInstallments[0]?.creditCardName ?? "Kart",
@@ -235,25 +273,19 @@ function buildCardPlanGroups(
           nextDueOn === null
             ? "0.0000"
             : sumMoney(
-                planned
+                upcoming
                   .filter((installment) => installment.dueOn === nextDueOn)
-                  .map((installment) => installment.amount),
+                  .map((installment) => installment.remainingAmount),
               ),
         nextDueOn,
         overdueAmount: sumMoney(
           cardInstallments
             .filter((installment) => installment.status === "overdue")
-            .map((installment) => installment.amount),
+            .map((installment) => installment.remainingAmount),
         ),
-        paidAmount: sumMoney(
-          cardInstallments
-            .filter((installment) => installment.status === "paid")
-            .map((installment) => installment.amount),
-        ),
+        paidAmount: sumMoney(cardInstallments.map((installment) => installment.paidAmount)),
         remainingAmount: sumMoney(
-          cardInstallments
-            .filter((installment) => installment.status !== "paid")
-            .map((installment) => installment.amount),
+          cardInstallments.map((installment) => installment.remainingAmount),
         ),
         totalAmount: sumMoney(cardInstallments.map((installment) => installment.amount)),
       };
@@ -445,17 +477,11 @@ export function CardPlanWorkspace({
       overdue: sumMoney(
         installments
           .filter((installment) => installment.status === "overdue")
-          .map((installment) => installment.amount),
+          .map((installment) => installment.remainingAmount),
       ),
-      paid: sumMoney(
-        installments
-          .filter((installment) => installment.status === "paid")
-          .map((installment) => installment.amount),
-      ),
+      paid: sumMoney(installments.map((installment) => installment.paidAmount)),
       planned: sumMoney(
-        installments
-          .filter((installment) => installment.status !== "paid")
-          .map((installment) => installment.amount),
+        installments.map((installment) => installment.remainingAmount),
       ),
       total: sumMoney(installments.map((installment) => installment.amount)),
     }),
@@ -602,21 +628,34 @@ export function CardPlanWorkspace({
 
   async function updateInstallment(
     installment: CardInstallmentDto,
-    status: "paid" | "planned",
-    paidOn: string | null,
-    sourceAccountId: string | null,
+    action: "pay" | "reopen",
+    payment?: PaymentDraft,
   ): Promise<void> {
     if (updatingInstallmentId !== null) return;
+    const amount =
+      action === "pay" && payment !== undefined
+        ? normalizePaymentAmount(payment.amount, installment.remainingAmount)
+        : null;
+    if (action === "pay" && (payment === undefined || amount === null)) {
+      setPlanError("Ödeme tutarı sıfırdan büyük ve kalan borcu aşmayacak şekilde olmalıdır.");
+      return;
+    }
     setUpdatingInstallmentId(installment.id);
     setPlanError(null);
     try {
       const response = await fetch(`/api/finance/card-installments/${installment.id}`, {
-        body: JSON.stringify({
-          paidOn,
-          sourceAccountId,
-          status,
-          version: installment.version,
-        }),
+        body: JSON.stringify(
+          action === "pay" && payment !== undefined && amount !== null
+            ? {
+                action,
+                amount,
+                clientOperationKey: payment.clientOperationKey,
+                paidOn: payment.paidOn,
+                sourceAccountId: payment.sourceAccountId,
+                version: installment.version,
+              }
+            : { action: "reopen", version: installment.version },
+        ),
         credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
         method: "PATCH",
@@ -632,8 +671,8 @@ export function CardPlanWorkspace({
       );
       setPaymentDraft(null);
       setAnnouncement(
-        status === "paid"
-          ? `${saved.expenseDescription} taksiti ödendi olarak işaretlendi.`
+        action === "pay" && amount !== null
+          ? `${saved.expenseDescription} taksitine ${formatMoney(amount)} ödeme kaydedildi.`
           : `${saved.expenseDescription} taksiti ödeme planına geri alındı.`,
       );
     } catch {
@@ -646,8 +685,12 @@ export function CardPlanWorkspace({
   async function bulkPayGroup(group: CardPlanGroup): Promise<void> {
     const draft = bulkPaymentDraft;
     const openInstallments = group.installments.filter(
-      (installment) => installment.status !== "paid",
+      (installment) => hasMoney(installment.remainingAmount),
     );
+    const amount =
+      draft?.cardId === group.cardId
+        ? normalizePaymentAmount(draft.amount, group.remainingAmount)
+        : null;
     if (
       !canManagePayments ||
       month === "" ||
@@ -658,6 +701,10 @@ export function CardPlanWorkspace({
     ) {
       return;
     }
+    if (amount === null) {
+      setPlanError("Ödeme tutarı sıfırdan büyük ve dönem kalan borcunu aşmamalıdır.");
+      return;
+    }
     setBulkPayingCardId(group.cardId);
     setPlanError(null);
     try {
@@ -665,9 +712,12 @@ export function CardPlanWorkspace({
         body: JSON.stringify({
           cardId: group.cardId,
           installments: openInstallments.map((installment) => ({
+            clientOperationKey:
+              draft.installmentOperationKeys[installment.id],
             id: installment.id,
             version: installment.version,
           })),
+          amount,
           month,
           paidOn: draft.paidOn,
           sourceAccountId: draft.sourceAccountId,
@@ -720,7 +770,7 @@ export function CardPlanWorkspace({
       setAnnouncement(
         payload.replayed
           ? `${group.creditCardName} için ödeme daha önce kaydedilmişti.`
-          : `${group.creditCardName} için ${payload.updatedCount ?? saved.size} taksit ödendi olarak işaretlendi.`,
+          : `${group.creditCardName} için ${formatMoney(amount)} ödeme kaydedildi.`,
       );
     } catch {
       setPlanError("Toplu ödeme kaydedilemedi. Bağlantıyı kontrol edip yeniden deneyin.");
@@ -738,6 +788,8 @@ export function CardPlanWorkspace({
       return;
     }
     setPaymentDraft({
+      amount: installment.remainingAmount,
+      clientOperationKey: globalThis.crypto.randomUUID(),
       installmentId: installment.id,
       paidOn: istanbulToday(),
       sourceAccountId,
@@ -1096,7 +1148,7 @@ export function CardPlanWorkspace({
           <div className="card-plan-groups">
             {cardPlanGroups.map((group) => {
               const openCount = group.installments.filter(
-                (installment) => installment.status !== "paid",
+                (installment) => hasMoney(installment.remainingAmount),
               ).length;
               const bulkEditorOpen = bulkPaymentDraft?.cardId === group.cardId;
               return (
@@ -1128,7 +1180,7 @@ export function CardPlanWorkspace({
                         <form
                           className="card-bulk-payment-editor"
                           aria-describedby={`card-bulk-payment-summary-${group.cardId}`}
-                          aria-label={`${group.creditCardName} açık taksitlerini toplu şekilde ödendi olarak işaretle`}
+                          aria-label={`${group.creditCardName} dönem borcuna ödeme yap`}
                           onSubmit={(event) => {
                             event.preventDefault();
                             void bulkPayGroup(group);
@@ -1144,6 +1196,26 @@ export function CardPlanWorkspace({
                             </span>
                           </p>
                           <label>
+                            <span>Ödeme tutarı</span>
+                            <input
+                              aria-label={`${group.creditCardName} dönem ödeme tutarı`}
+                              inputMode="decimal"
+                              max={group.remainingAmount}
+                              min="0.0001"
+                              required
+                              step="0.0001"
+                              type="number"
+                              value={bulkPaymentDraft.amount}
+                              onChange={(event) =>
+                                setBulkPaymentDraft((current) =>
+                                  current === null
+                                    ? current
+                                    : { ...current, amount: event.target.value },
+                                )
+                              }
+                            />
+                          </label>
+                          <label>
                             <span>Toplu ödeme tarihi</span>
                             <input
                               aria-label={`${group.creditCardName} toplu ödeme tarihi`}
@@ -1153,12 +1225,11 @@ export function CardPlanWorkspace({
                               type="date"
                               value={bulkPaymentDraft.paidOn}
                               onChange={(event) =>
-                                setBulkPaymentDraft({
-                                  cardId: group.cardId,
-                                  paidOn: event.target.value,
-                                  sourceAccountId:
-                                    bulkPaymentDraft.sourceAccountId,
-                                })
+                                setBulkPaymentDraft((current) =>
+                                  current === null
+                                    ? current
+                                    : { ...current, paidOn: event.target.value },
+                                )
                               }
                             />
                           </label>
@@ -1169,11 +1240,14 @@ export function CardPlanWorkspace({
                               required
                               value={bulkPaymentDraft.sourceAccountId}
                               onChange={(event) =>
-                                setBulkPaymentDraft({
-                                  cardId: group.cardId,
-                                  paidOn: bulkPaymentDraft.paidOn,
-                                  sourceAccountId: event.target.value,
-                                })
+                                setBulkPaymentDraft((current) =>
+                                  current === null
+                                    ? current
+                                    : {
+                                        ...current,
+                                        sourceAccountId: event.target.value,
+                                      },
+                                )
                               }
                             >
                               {activePaymentAccounts.map((account) => (
@@ -1196,7 +1270,7 @@ export function CardPlanWorkspace({
                             >
                               {bulkPayingCardId === group.cardId
                                 ? "Kaydediliyor…"
-                                : `${openCount} taksiti ödendi olarak işaretle`}
+                                : "Ödemeyi kaydet"}
                             </button>
                             <button
                               className="card-payment-toggle"
@@ -1225,14 +1299,25 @@ export function CardPlanWorkspace({
                           onClick={() => {
                             setPaymentDraft(null);
                             setBulkPaymentDraft({
+                              amount: group.remainingAmount,
                               cardId: group.cardId,
+                              installmentOperationKeys: Object.fromEntries(
+                                group.installments
+                                  .filter((installment) =>
+                                    hasMoney(installment.remainingAmount),
+                                  )
+                                  .map((installment) => [
+                                    installment.id,
+                                    globalThis.crypto.randomUUID(),
+                                  ]),
+                              ),
                               paidOn: istanbulToday(),
                               sourceAccountId:
                                 activePaymentAccounts[0]?.id ?? "",
                             });
                           }}
                         >
-                          Dönemin açık taksitlerini ödendi olarak işaretle
+                          Dönem borcuna ödeme yap
                         </button>
                       )
                     ) : null}
@@ -1277,6 +1362,8 @@ export function CardPlanWorkspace({
                           <th scope="col">Taksit</th>
                           <th scope="col">Son ödeme</th>
                           <th scope="col">Tutar</th>
+                          <th scope="col">Ödenen</th>
+                          <th scope="col">Kalan</th>
                           <th scope="col">Durum</th>
                           <th scope="col">Ödeme tarihi</th>
                           <th scope="col">Ödeme hesabı</th>
@@ -1290,14 +1377,25 @@ export function CardPlanWorkspace({
                             <td data-label="Taksit">{installment.installmentNumber} / {installment.installmentCount}</td>
                             <td data-label="Son ödeme">{formatDate(installment.dueOn)}</td>
                             <td data-label="Tutar"><strong>{formatMoney(installment.amount)}</strong></td>
+                            <td data-label="Ödenen">{formatMoney(installment.paidAmount)}</td>
+                            <td data-label="Kalan"><strong>{formatMoney(installment.remainingAmount)}</strong></td>
                             <td data-label="Durum">
-                              <span className={`finance-status card-installment-status is-${installment.status}`}>{statusLabel(installment.status)}</span>
+                              <span
+                                className={`finance-status card-installment-status is-${installment.status}${
+                                  hasMoney(installment.paidAmount) &&
+                                  hasMoney(installment.remainingAmount)
+                                    ? " is-partial"
+                                    : ""
+                                }`}
+                              >
+                                {installmentStatusLabel(installment)}
+                              </span>
                             </td>
                             <td data-label="Ödeme tarihi">
                               {installment.paidOn === null ? "—" : formatDate(installment.paidOn)}
                             </td>
                             <td data-label="Ödeme hesabı">
-                              {installment.status === "paid"
+                              {hasMoney(installment.paidAmount)
                                 ? installment.paymentAccountName ?? "Belirtilmemiş"
                                 : "—"}
                             </td>
@@ -1310,12 +1408,31 @@ export function CardPlanWorkspace({
                                       event.preventDefault();
                                       void updateInstallment(
                                         installment,
-                                        "paid",
-                                        paymentDraft.paidOn,
-                                        paymentDraft.sourceAccountId,
+                                        "pay",
+                                        paymentDraft,
                                       );
                                     }}
                                   >
+                                    <label>
+                                      <span>Ödeme tutarı</span>
+                                      <input
+                                        aria-label={`${installment.expenseDescription} ${installment.installmentNumber}. taksit ödeme tutarı`}
+                                        inputMode="decimal"
+                                        max={installment.remainingAmount}
+                                        min="0.0001"
+                                        required
+                                        step="0.0001"
+                                        type="number"
+                                        value={paymentDraft.amount}
+                                        onChange={(event) =>
+                                          setPaymentDraft((current) =>
+                                            current === null
+                                              ? current
+                                              : { ...current, amount: event.target.value },
+                                          )
+                                        }
+                                      />
+                                    </label>
                                     <label>
                                       <span>Ödeme tarihi</span>
                                       <input
@@ -1324,12 +1441,13 @@ export function CardPlanWorkspace({
                                         required
                                         type="date"
                                         value={paymentDraft.paidOn}
-                                        onChange={(event) => setPaymentDraft({
-                                          installmentId: installment.id,
-                                          paidOn: event.target.value,
-                                          sourceAccountId:
-                                            paymentDraft.sourceAccountId,
-                                        })}
+                                        onChange={(event) =>
+                                          setPaymentDraft((current) =>
+                                            current === null
+                                              ? current
+                                              : { ...current, paidOn: event.target.value },
+                                          )
+                                        }
                                       />
                                     </label>
                                     <label>
@@ -1338,11 +1456,16 @@ export function CardPlanWorkspace({
                                         aria-label={`${installment.expenseDescription} ${installment.installmentNumber}. taksit ödeme hesabı veya kasa`}
                                         required
                                         value={paymentDraft.sourceAccountId}
-                                        onChange={(event) => setPaymentDraft({
-                                          installmentId: installment.id,
-                                          paidOn: paymentDraft.paidOn,
-                                          sourceAccountId: event.target.value,
-                                        })}
+                                        onChange={(event) =>
+                                          setPaymentDraft((current) =>
+                                            current === null
+                                              ? current
+                                              : {
+                                                  ...current,
+                                                  sourceAccountId: event.target.value,
+                                                },
+                                          )
+                                        }
                                       >
                                         {activePaymentAccounts.map((account) => (
                                           <option key={account.id} value={account.id}>
@@ -1376,7 +1499,7 @@ export function CardPlanWorkspace({
                                   </form>
                                 ) : (
                                   <button
-                                    aria-label={`${installment.expenseDescription} ${installment.installmentNumber}. taksitini ${installment.status === "paid" ? "plana geri al" : "ödendi işaretle"}`}
+                                    aria-label={`${installment.expenseDescription} ${installment.installmentNumber}. taksitini ${installment.status === "paid" ? "plana geri al" : "öde"}`}
                                     className="card-payment-toggle"
                                     disabled={
                                       updatingInstallmentId !== null ||
@@ -1388,9 +1511,7 @@ export function CardPlanWorkspace({
                                       if (installment.status === "paid") {
                                         void updateInstallment(
                                           installment,
-                                          "planned",
-                                          null,
-                                          null,
+                                          "reopen",
                                         );
                                       } else {
                                         beginPayment(installment);
@@ -1401,7 +1522,7 @@ export function CardPlanWorkspace({
                                       ? "İşleniyor…"
                                       : installment.status === "paid"
                                         ? "Plana geri al"
-                                        : "Ödendi işaretle"}
+                                        : "Ödeme yap"}
                                   </button>
                                 )}
                               </td>

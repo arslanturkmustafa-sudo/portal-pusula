@@ -619,14 +619,34 @@ export async function readCashFlowLedger(
              SELECT card.id AS card_id, card.display_name, card.bank_name,
                     installment.due_on,
                     SUM(installment.amount) AS total_amount,
-                    SUM(CASE
-                      WHEN installment.status = 'paid' AND installment.paid_on <= ?
-                        THEN installment.amount
-                      ELSE 0.0000
-                    END) AS settled_amount
+                    SUM(LEAST(
+                      installment.amount,
+                      GREATEST(
+                        CASE
+                          WHEN card_entry.entry_count > 0
+                            THEN card_entry.net_amount
+                          WHEN installment.status = 'paid'
+                            AND installment.paid_on <= ?
+                            THEN installment.amount
+                          ELSE 0.0000
+                        END,
+                        0.0000
+                      )
+                    )) AS settled_amount
                FROM credit_card_installment installment
                JOIN expense expense ON expense.id = installment.expense_id
                JOIN credit_card card ON card.id = expense.credit_card_id
+               LEFT JOIN (
+                 SELECT entry.installment_id, COUNT(*) AS entry_count,
+                        SUM(CASE
+                          WHEN entry.paid_on > ? THEN 0.0000
+                          WHEN BINARY entry.entry_type = BINARY 'reversal'
+                            THEN -entry.amount
+                          ELSE entry.amount
+                        END) AS net_amount
+                   FROM credit_card_installment_payment entry
+                  GROUP BY entry.installment_id
+               ) card_entry ON card_entry.installment_id = installment.id
               WHERE expense.status = 'active'
                 AND (
                   (installment.due_on >= ? AND installment.due_on <= ?)
@@ -718,6 +738,7 @@ export async function readCashFlowLedger(
       range.startOn,
       generatedOn,
       // Card total: status date, payment cut-off, range/carry-over.
+      generatedOn,
       generatedOn,
       generatedOn,
       range.startOn,

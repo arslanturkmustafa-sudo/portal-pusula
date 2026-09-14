@@ -53,10 +53,23 @@ describe("finance digest repository", () => {
 
     const dueSql = String(execute.mock.calls[0]?.[0]);
     expect(dueSql).toContain("receivable.due_on <= ?");
-    expect(dueSql).toContain("installment.status = 'planned'");
+    expect(dueSql).toContain("FROM credit_card_installment_payment entry");
+    expect(dueSql).toContain(
+      "WHEN BINARY entry.entry_type = BINARY 'reversal'",
+    );
+    expect(dueSql).toContain("THEN -entry.amount");
+    expect(dueSql).toContain("WHEN card_entry.entry_count > 0");
+    expect(dueSql).toMatch(
+      /WHEN installment\.status = 'paid'[\s\S]*THEN installment\.amount/u,
+    );
+    expect(dueSql).not.toContain("installment.status = 'planned'");
+    expect(dueSql).toContain("HAVING SUM(GREATEST");
     expect(dueSql).toContain("tax.status = BINARY 'planned'");
     expect(dueSql).not.toContain("finance_ledger_entry");
     expect(execute.mock.calls[0]?.[1]).toEqual([
+      "2026-09-13",
+      "2026-09-13",
+      "2026-09-13",
       "2026-09-13",
       "2026-09-13",
       "2026-09-13",
