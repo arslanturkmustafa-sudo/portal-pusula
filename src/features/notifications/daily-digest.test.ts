@@ -157,16 +157,16 @@ describe("daily digest", () => {
     );
   });
 
-  it("opens at 09:00 Europe/Istanbul and preserves the Istanbul business date", () => {
-    expect(istanbulDigestWindow(new Date("2026-09-10T05:59:59.999Z"))).toEqual({
+  it("opens at 08:00 Europe/Istanbul and preserves the Istanbul business date", () => {
+    expect(istanbulDigestWindow(new Date("2026-09-10T04:59:59.999Z"))).toEqual({
       businessDate: "2026-09-10",
       due: false,
-      hour: 8,
+      hour: 7,
     });
-    expect(istanbulDigestWindow(new Date("2026-09-10T06:00:00.000Z"))).toEqual({
+    expect(istanbulDigestWindow(new Date("2026-09-10T05:00:00.000Z"))).toEqual({
       businessDate: "2026-09-10",
       due: true,
-      hour: 9,
+      hour: 8,
     });
     expect(istanbulDigestWindow(new Date("2026-09-10T21:30:00.000Z"))).toEqual({
       businessDate: "2026-09-11",
@@ -179,7 +179,7 @@ describe("daily digest", () => {
     await expect(
       enqueueDailyDigestEmailsIfDue(
         {} as Pool,
-        new Date("2026-09-10T06:00:00.000Z"),
+        new Date("2026-09-10T05:00:00.000Z"),
       ),
     ).resolves.toEqual({
       businessDate: "2026-09-10",
@@ -243,7 +243,7 @@ describe("daily digest", () => {
     await expect(
       enqueueDailyDigestEmailsIfDue(
         {} as Pool,
-        new Date("2026-09-10T05:59:00.000Z"),
+        new Date("2026-09-10T04:59:00.000Z"),
       ),
     ).resolves.toMatchObject({ status: "before_window" });
     expect(mocks.withUtcTransaction).not.toHaveBeenCalled();
@@ -252,7 +252,7 @@ describe("daily digest", () => {
     await expect(
       enqueueDailyDigestEmailsIfDue(
         {} as Pool,
-        new Date("2026-09-10T06:00:00.000Z"),
+        new Date("2026-09-10T05:00:00.000Z"),
       ),
     ).resolves.toMatchObject({ status: "disabled" });
     expect(mocks.withUtcTransaction).not.toHaveBeenCalled();
@@ -264,7 +264,7 @@ describe("daily digest", () => {
     await expect(
       enqueueDailyDigestEmailsIfDue(
         {} as Pool,
-        new Date("2026-09-10T06:00:00.000Z"),
+        new Date("2026-09-10T05:00:00.000Z"),
       ),
     ).resolves.toEqual({
       businessDate: "2026-09-10",
@@ -281,7 +281,7 @@ describe("daily digest", () => {
     await expect(
       enqueueDailyDigestEmailsIfDue(
         {} as Pool,
-        new Date("2026-09-10T06:00:00.000Z"),
+        new Date("2026-09-10T05:00:00.000Z"),
       ),
     ).resolves.toEqual({
       businessDate: "2026-09-10",

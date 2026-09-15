@@ -75,7 +75,7 @@ Bu yüzden her production adapter, outbox `id`/`idempotency_key` değerini hedef
 
 ## Varsayılan kapalı cron sınırı
 
-Sınır `/api/internal/cron/dispatch` sözleşmesini kullanır ve environment tanımlanana kadar kapalıdır. Günlük tetikleyici GitHub Actions'ta `Europe/Istanbul` 09.00 olarak tanımlıdır; bekleyen e-postalar her saatin 10. dakikasında tekrar denenir. Her çağrı en fazla iki e-posta teslim eder ve tek sağlayıcı isteği 1 saniyede kesilir; dış endpoint'in 4 saniyelik toplam bütçesi korunur.
+Sınır `/api/internal/cron/dispatch` sözleşmesini kullanır ve environment tanımlanana kadar kapalıdır. Günlük tetikleyici GitHub Actions'ta `Europe/Istanbul` 08.00 olarak tanımlıdır; bekleyen e-postalar her saatin 10. dakikasında tekrar denenir. Her çağrı en fazla iki e-posta teslim eder ve tek sağlayıcı isteği 1 saniyede kesilir; dış endpoint'in 4 saniyelik toplam bütçesi korunur.
 
 - Yalnız exact `POST /api/internal/cron/dispatch` kabul edilir; query/hash, body ve cookie bulunamaz. Taşınan payload/metadata reddedilir.
 - Yetki yalnız exact `Authorization: Bearer <CRON_BEARER_TOKEN>` header'ıdır; query, path, cookie veya body içindeki değer kabul edilmez.
