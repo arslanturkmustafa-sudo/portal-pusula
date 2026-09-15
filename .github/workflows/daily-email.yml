@@ -2,7 +2,7 @@ name: Portal Pusula Daily Email
 
 on:
   schedule:
-    - cron: "0 9 * * *"
+    - cron: "0 8 * * *"
       timezone: Europe/Istanbul
     - cron: "10 * * * *"
       timezone: Europe/Istanbul

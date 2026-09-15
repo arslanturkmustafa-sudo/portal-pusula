@@ -11,7 +11,7 @@ import { toUtcDateTime6 } from "@/platform/jobs/time";
 
 import { createDailyDigestEmail } from "./email-templates";
 
-const DAILY_DIGEST_START_HOUR = 9;
+const DAILY_DIGEST_START_HOUR = 8;
 
 export type IstanbulDigestWindow = Readonly<{
   businessDate: string;
