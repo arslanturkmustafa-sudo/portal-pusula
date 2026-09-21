@@ -879,7 +879,7 @@ export function TasksWorkspace({
         actions={capabilities.canExportReports || capabilities.canWriteTasks ? (
           <>
             {capabilities.canWriteTasks ? (
-              <BypusulaPendingNotice />
+              <BypusulaPendingNotice enabled={loadState === "ready"} />
             ) : null}
             {capabilities.canExportReports ? (
               <Link

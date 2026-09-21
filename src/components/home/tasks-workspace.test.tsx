@@ -12,6 +12,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 import { TasksWorkspace } from "@/components/home/tasks-workspace";
+import actions from "./workspace-actions.module.css";
 
 type TaskStatus = "backlog" | "todo" | "in_progress" | "blocked" | "done" | "cancelled";
 
@@ -161,7 +162,7 @@ describe("TasksWorkspace", () => {
       .toBeInTheDocument();
     const reportLink = screen.getByRole("link", { name: "Firma görev raporu" });
     expect(reportLink).toHaveAttribute("href", "/gorevler/rapor");
-    expect(reportLink).toHaveClass("task-report-action");
+    expect(reportLink).toHaveClass(actions.secondary);
     expect(within(reportLink).getByText("Firma raporu")).toBeInTheDocument();
     expect(reportLink.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
     await user.selectOptions(
