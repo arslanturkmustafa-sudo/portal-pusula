@@ -117,8 +117,8 @@ describe.sequential("clean-only phpMyAdmin migration bundle policy", () => {
     expect(second.summary).toEqual(first.summary);
     expect(second.sql).toBe(first.sql);
     expect(second.manifestText).toBe(first.manifestText);
-    expect(first.summary.migrationCount).toBe(25);
-    expect(first.summary.statementCount).toBe(247);
+    expect(first.summary.migrationCount).toBe(28);
+    expect(first.summary.statementCount).toBe(261);
     expect(first.summary.sqlBytes).toBe(Buffer.byteLength(first.sql));
     expect(first.summary.sqlSha256).toBe(
       createHash("sha256").update(first.sql).digest("hex"),
@@ -168,6 +168,8 @@ describe.sequential("clean-only phpMyAdmin migration bundle policy", () => {
     expect(Object.keys(manifest.schema.tables)).toEqual([
       "_platform_migration_verification",
       "audit_event",
+      "bypusula_analysis",
+      "bypusula_task_link",
       "consulting_contract",
       "credit_card",
       "credit_card_installment",
@@ -196,6 +198,7 @@ describe.sequential("clean-only phpMyAdmin migration bundle policy", () => {
       "user_account",
       "user_notification_setting",
       "user_permission",
+      "user_project_access",
       "work_task",
       "work_task_project",
       "work_task_visit",
@@ -339,6 +342,10 @@ describe.sequential("clean-only phpMyAdmin migration bundle policy", () => {
       ]),
     );
     expect(manifest.schema.foreignKeys).toEqual([
+      { name: "fk_bypusula_analysis_mapping", tableName: "bypusula_analysis" },
+      { name: "fk_bypusula_sync_approver", tableName: "bypusula_analysis" },
+      { name: "fk_bypusula_task_link_analysis", tableName: "bypusula_task_link" },
+      { name: "fk_bypusula_task_link_task", tableName: "bypusula_task_link" },
       {
         name: "fk_consulting_contract_archived_by",
         tableName: "consulting_contract",
@@ -500,6 +507,10 @@ describe.sequential("clean-only phpMyAdmin migration bundle policy", () => {
         tableName: "user_permission",
       },
       {
+        name: "fk_user_project_access_account",
+        tableName: "user_project_access",
+      },
+      {
         name: "fk_work_task_project_project",
         tableName: "work_task_project",
       },
@@ -625,6 +636,7 @@ describe.sequential("clean-only phpMyAdmin migration bundle policy", () => {
       { columnName: "before_summary", tableName: "audit_event" },
       { columnName: "payload", tableName: "outbox_event" },
       { columnName: "payload", tableName: "scheduled_job" },
+      { columnName: "project_ids", tableName: "user_project_access" },
     ]);
     expect(
       manifest.migrations.map((migration) => ({
@@ -784,10 +796,13 @@ describe.sequential("clean-only phpMyAdmin migration bundle policy", () => {
         sqlFileName: "0024_partial_card_payments.sql",
         statementCount: 6,
       },
+      {"createdAt":1789627118684,"hash":"2cf03ae65abab3cf3e252f9a35c7c621be792ef303cf9e40e05884612e906b26","sqlFileName":"0025_bypusula_transfer.sql","statementCount":6},
+      {"createdAt":1789630919032,"hash":"2394c412b8ec299ba00b08dd24e6c1f22783e97335de9293eecb2c5bd25ec732","sqlFileName":"0026_bypusula_auto_sync.sql","statementCount":6},
+      {"createdAt":1789660459291,"hash":"0dca41b69fa1663065e4068e83a22897ff41cb98bfc84f93abd3225d7d1786ce","sqlFileName":"0027_user_project_access.sql","statementCount":2},
     ]);
     expect(
       manifest.migrations.flatMap((migration) => migration.statementHashes),
-    ).toHaveLength(247);
+    ).toHaveLength(261);
     expect(
       manifest.migrations
         .flatMap((migration) => migration.statementHashes)

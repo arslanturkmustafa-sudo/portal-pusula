@@ -1,3 +1,5 @@
+import { readUserProjectScope, replaceUserProjectScope } from "./project-access-repository";
+import type { ProjectScope } from "@/platform/auth/project-access";
 import "server-only";
 
 import { randomUUID } from "node:crypto";
@@ -105,6 +107,7 @@ export type AccountSummary = Readonly<{
 export type ValidatedAccountSession = Readonly<{
   account: UserAccount;
   permissions: readonly PermissionCode[];
+  projectIds?: ProjectScope;
 }>;
 
 export type ManagedUser = Readonly<{
@@ -114,6 +117,7 @@ export type ManagedUser = Readonly<{
   email: string;
   id: string;
   permissions: readonly PermissionCode[];
+  projectIds?: ProjectScope;
   role: UserAccount["role"];
   status: UserAccount["status"];
   updatedAtUtc: string;
@@ -144,6 +148,7 @@ function safeAuditSummary(account: UserAccount) {
 function managedUser(
   account: UserAccount,
   permissions: readonly PermissionCode[],
+  projectIds: ProjectScope = null,
 ): ManagedUser {
   return {
     createdAtUtc: account.createdAtUtc,
@@ -152,6 +157,7 @@ function managedUser(
     email: account.email,
     id: account.id,
     permissions,
+    projectIds,
     role: account.role,
     status: account.status,
     updatedAtUtc: account.updatedAtUtc,
@@ -164,9 +170,9 @@ export async function listManagedUsers(pool: Pool): Promise<readonly ManagedUser
       listUserAccounts(connection),
       listAllUserPermissions(connection),
     ]);
-    return accounts.map((account) =>
-      managedUser(account, permissions.get(account.id) ?? []),
-    );
+    return Promise.all(accounts.map(async (account) =>
+      managedUser(account, permissions.get(account.id) ?? [], await readUserProjectScope(connection, account.id)),
+    ));
   });
 }
 
@@ -194,6 +200,7 @@ export async function createManagedUser(
     return await withUtcTransaction(pool, async (connection) => {
       await insertUserAccount(connection, account);
       await replaceUserPermissions(connection, account.id, input.permissions, now);
+      await replaceUserProjectScope(connection, account.id, input.projectIds === undefined ? [] : input.projectIds);
       await appendAuditEvent(connection, {
         action: "account.member_created",
         actorId: context.actorId,
@@ -202,6 +209,7 @@ export async function createManagedUser(
           ...safeAuditSummary(account),
           displayName: account.displayName,
           permissions: input.permissions,
+          projectIds: input.projectIds === undefined ? [] : input.projectIds,
           role: account.role,
         },
         correlationId: context.correlationId,
@@ -209,7 +217,7 @@ export async function createManagedUser(
         entityType: "user_account",
         occurredAtUtc: now,
       });
-      return managedUser(account, input.permissions);
+      return managedUser(account, input.permissions, input.projectIds === undefined ? [] : input.projectIds);
     });
   } catch (error) {
     if (isDuplicateEntry(error)) throw new ManagedUserEmailConflictError();
@@ -251,6 +259,8 @@ export async function updateManagedUser(
       throw new ManagedUserVersionConflictError();
     }
     await replaceUserPermissions(connection, after.id, input.permissions, now);
+    const projectIds = input.projectIds === undefined ? await readUserProjectScope(connection, after.id) : input.projectIds;
+    await replaceUserProjectScope(connection, after.id, projectIds);
     await appendAuditEvent(connection, {
       action: "account.member_access_updated",
       actorId: context.actorId,
@@ -258,6 +268,7 @@ export async function updateManagedUser(
       afterSummary: {
         credentialVersion: after.credentialVersion,
         permissions: input.permissions,
+        projectIds,
         status: after.status,
       },
       beforeSummary: {
@@ -269,7 +280,7 @@ export async function updateManagedUser(
       entityType: "user_account",
       occurredAtUtc: now,
     });
-    return managedUser(after, input.permissions);
+    return managedUser(after, input.permissions, projectIds);
   });
 }
 
@@ -400,6 +411,7 @@ export async function validateAccountPrincipalSession(
     return {
       account,
       permissions: await listUserPermissionCodes(connection, account.id),
+      projectIds: await readUserProjectScope(connection, account.id),
     };
   });
 }

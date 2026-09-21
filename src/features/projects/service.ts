@@ -1,3 +1,4 @@
+import { type ProjectScope, requireProjectAccess } from "@/platform/auth/project-access";
 import "server-only";
 
 import { randomUUID } from "node:crypto";
@@ -46,6 +47,7 @@ export class ProjectVersionConflictError extends Error {
 
 export type ProjectWriteContext = Readonly<{
   actorId?: string;
+  projectIds?: ProjectScope;
   correlationId: string;
   now?: Date;
 }>;
@@ -76,8 +78,8 @@ function auditSummary(project: Project) {
   };
 }
 
-export async function listProjects(pool: Pool): Promise<readonly Project[]> {
-  return withUtcTransaction(pool, listProjectRecords);
+export async function listProjects(pool: Pool, projectIds: ProjectScope = null): Promise<readonly Project[]> {
+  return withUtcTransaction(pool, (connection) => listProjectRecords(connection, projectIds));
 }
 
 export async function createProject(
@@ -85,6 +87,7 @@ export async function createProject(
   rawInput: CreateProjectInput,
   context: ProjectWriteContext,
 ): Promise<Project> {
+  requireProjectAccess(context.projectIds, null);
   const input = createProjectInputSchema.parse(rawInput);
   if (context.actorId !== undefined) assertCanonicalUuid(context.actorId);
   const now = toUtcDateTime6(context.now ?? new Date());
@@ -129,6 +132,7 @@ export async function updateProject(
   context: ProjectWriteContext,
 ): Promise<Project> {
   assertCanonicalUuid(id);
+  requireProjectAccess(context.projectIds, id);
   if (context.actorId !== undefined) assertCanonicalUuid(context.actorId);
   const input = updateProjectInputSchema.parse(rawInput);
   const now = toUtcDateTime6(context.now ?? new Date());

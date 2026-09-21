@@ -1,3 +1,4 @@
+import type { ProjectScope } from "@/platform/auth/project-access";
 import "server-only";
 
 import { randomUUID } from "node:crypto";
@@ -232,18 +233,26 @@ async function replaceCustomerProjectLinks(
 export async function listCustomers(
   pool: Pool,
   options: Readonly<{
+    projectIds?: ProjectScope;
     includeBilling?: boolean;
     includeContact?: boolean;
     includeVisits?: boolean;
   }> = {},
   now: Date = new Date(),
 ): Promise<readonly Customer[]> {
-  return withUtcTransaction(pool, (connection) =>
-    listCustomerRecords(connection, {
+  return withUtcTransaction(pool, async (connection) => {
+    const customers = await listCustomerRecords(connection, {
       ...options,
+      ...(options.projectIds != null ? { includeBilling: false, includeVisits: false } : {}),
       businessDate: istanbulDate(now),
-    }),
-  );
+    });
+    if (options.projectIds == null) return customers;
+    const allowed = new Set(options.projectIds);
+    return customers.flatMap((customer) => {
+      const projects = customer.projects.filter((project) => allowed.has(project.id));
+      return projects.length ? [{ ...customer, projects, contactNote: null, archiveReason: null, overview: { nextVisitOn: null } }] : [];
+    });
+  });
 }
 
 export async function createCustomer(

@@ -132,6 +132,8 @@ npm run package:hostinger
 
 Geniş gerçek-MariaDB ve E2E paketleri gerektiğinde ayrıca çalıştırılır; günlük geliştirmede önce görünür iş sonucu, ardından değişen kritik sınır için hedefli kontrol esastır.
 
+ByPusula otomatik aktarımının tek odaklı DB senaryosu için `npm run test:bypusula:auto` kullanılır. Docker motoru açık olmalıdır; komut sentetik verili geçici MariaDB oluşturur, yalnız ilgili test dosyasını çalıştırır ve sonunda container ile volume'ü kaldırır. Senaryo aktif proje seçimini, kısmi hata sonrası devamı, mükerrer görev oluşmamasını ve elle yapılan değişikliklerin korunmasını kapsar. Canlı ayarları ve Docker giriş bilgilerini okumaz. Önceki aktarım altyapısının dört DB testi gerektiğinde ayrı `npm run test:bypusula:mariadb` komutuyla çalıştırılabilir; otomatik aktarım kontrolü bunları tekrar çalıştırmaz.
+
 ## Hostinger paketi
 
 ```bash
@@ -153,6 +155,8 @@ Bu hazırlık ve yerel kanıtlar tek başına canlı kabul veya Dilim 0 GO deği
 
 ## Belgeler
 
+- [ByPusula otomatik entegrasyonu](docs/bypusula-auto-sync-v1.md) — Dosya indirme/yükleme gerektirmeyen gönderici ve alıcı yerel kaynakta hazır. Eşleme yoksa kullanıcı aktif projeyi seçer; sonraki adımlar otomatik aktarılır. ByPusula 0.18.0-beta adayı hazır; canlı kurulum henüz yapılmadı.
+- [ByPusula v1 veri sözleşmesi ve önceki çalışma kanıtı](docs/bypusula-transfer-v1.md) — JSON veri biçimi ve tekillik temeli; buradaki eski manuel kullanıcı akışı otomatik entegrasyonla değiştirilmiştir.
 - [Teknik mimari](docs/architecture.md)
 - [Güvenlik sınırı](docs/security.md)
 - [Rol ve alan bazlı erişim kontrolü](docs/access-control.md)

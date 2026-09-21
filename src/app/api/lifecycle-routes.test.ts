@@ -157,7 +157,12 @@ describe("lifecycle command routes", () => {
       {},
       ...serviceIds,
       input,
-      { actorId: accountId, correlationId },
+      {
+        actorId: accountId,
+        correlationId,
+        ...([mocks.changeProjectLifecycle, mocks.changeTaskLifecycle].includes(service)
+          ? { projectIds: null } : {}),
+      },
     );
     expect(response.headers.get("cache-control")).toContain("no-store");
   });

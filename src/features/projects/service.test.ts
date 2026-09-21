@@ -66,6 +66,15 @@ const context = {
 };
 
 describe("project service", () => {
+  it("does not let a restricted member create a new project", async () => {
+    await expect(createProject({} as Pool, { displayName: "New project", projectType: "product", shortCode: "NEW" }, { ...context, projectIds: [projectId] })).rejects.toThrow("Project access denied");
+    expect(mocks.insertProjectRecord).not.toHaveBeenCalled();
+  });
+
+  it("denies an unassigned project before loading its data", async () => {
+    await expect(updateProject({} as Pool, projectId, { ...before, displayName: "Changed" }, { ...context, projectIds: [] })).rejects.toThrow("Project access denied");
+    expect(mocks.findProjectForUpdate).not.toHaveBeenCalled();
+  });
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.findProjectForUpdate.mockResolvedValue(before);

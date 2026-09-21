@@ -95,6 +95,15 @@ const before = {
 };
 
 describe("customer service project links", () => {
+  it("redacts other project links and shared notes from a permitted customer", async () => {
+    mocks.listCustomerRecords.mockResolvedValue([{ ...before, projects: [projectA, projectB], contactNote: "Other project secret", overview: { nextVisitOn: "2026-09-20" } }]);
+    const result = await listCustomers({} as Pool, { projectIds: [projectAId], includeBilling: true, includeVisits: true });
+    expect(result[0].projects).toEqual([projectA]);
+    expect(result[0].contactNote).toBeNull();
+    expect(result[0].overview).toEqual({ nextVisitOn: null });
+    expect(mocks.listCustomerRecords).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ projectIds: [projectAId], includeBilling: false, includeVisits: false }));
+    expect(await listCustomers({} as Pool, { projectIds: [] })).toEqual([]);
+  });
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.findCustomerForUpdate.mockResolvedValue(before);

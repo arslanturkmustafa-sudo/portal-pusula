@@ -1,3 +1,4 @@
+import { projectScope } from "@/platform/auth/project-access";
 import type { Metadata } from "next";
 
 import { MyDayWorkspace } from "@/components/home/my-day-workspace";
@@ -40,6 +41,7 @@ export default async function MyDayPage() {
         getPlatformDatabasePool(getDatabaseProbeEnvironment()),
         businessDate,
         {
+          projectIds: projectScope(principal),
           canReadFinance,
           canReadTasks,
           canReadVisits,

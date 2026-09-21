@@ -1,3 +1,4 @@
+import { type ProjectScope, projectScopeSql } from "@/platform/auth/project-access";
 import "server-only";
 
 import type {
@@ -134,13 +135,17 @@ const PROJECT_COLUMNS = `
 
 export async function listProjectRecords(
   connection: PoolConnection,
+  projectIds: ProjectScope = null,
 ): Promise<readonly Project[]> {
+  const scope = projectScopeSql("id", projectIds);
   const [rows] = await connection.execute<ProjectRow[]>(
     `SELECT ${PROJECT_COLUMNS}
        FROM project
+      WHERE ${scope.sql}
       ORDER BY archived_at_utc IS NULL DESC,
                FIELD(status, 'active', 'planned', 'on_hold', 'completed', 'cancelled'),
                display_name ASC, id ASC`,
+    scope.values,
   );
   return rows.map(mapProject);
 }

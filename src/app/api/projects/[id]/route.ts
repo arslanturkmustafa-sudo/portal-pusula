@@ -1,3 +1,4 @@
+import { projectScope, ProjectAccessDeniedError } from "@/platform/auth/project-access";
 import { Buffer } from "node:buffer";
 
 import { NextRequest, NextResponse } from "next/server";
@@ -109,10 +110,11 @@ export async function PATCH(
       getPlatformDatabasePool(getDatabaseProbeEnvironment()),
       id,
       input,
-      { actorId: actorId(principal), correlationId },
+      { actorId: actorId(principal), correlationId, projectIds: projectScope(principal) },
     );
     return json({ project });
   } catch (error) {
+    if (error instanceof ProjectAccessDeniedError) return json({ status: "forbidden" }, 403);
     if (
       error instanceof z.ZodError ||
       error instanceof SyntaxError ||

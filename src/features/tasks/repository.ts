@@ -1,3 +1,4 @@
+import { type ProjectScope, projectScopeSql } from "@/platform/auth/project-access";
 import "server-only";
 
 import type {
@@ -51,6 +52,7 @@ export type WorkTask = WorkTaskState &
     projectCode: string | null;
     projectName: string | null;
     visitLinked: boolean;
+    bypusula?: { id: string; analysisId: string; companyName: string; programCode: string } | null;
   }>;
 
 type WorkTaskStateRow = RowDataPacket & {
@@ -78,6 +80,10 @@ type WorkTaskStateRow = RowDataPacket & {
 };
 
 type WorkTaskRow = WorkTaskStateRow & {
+  bypusula_id: string | null;
+  bypusula_analysis_id: string | null;
+  bypusula_company_name: string | null;
+  bypusula_step_key: string | null;
   assignee_email: string | null;
   customer_code: string | null;
   customer_name: string | null;
@@ -210,6 +216,12 @@ function mapWorkTask(row: WorkTaskRow): WorkTask {
     projectCode: row.project_code,
     projectName: row.project_name,
     visitLinked: row.linked_visit_id !== null,
+    bypusula: row.bypusula_id && row.bypusula_analysis_id && row.bypusula_company_name && row.bypusula_step_key ? {
+      id: row.bypusula_id,
+      analysisId: row.bypusula_analysis_id,
+      companyName: row.bypusula_company_name,
+      programCode: row.bypusula_step_key.split("/")[0],
+    } : null,
   };
 }
 
@@ -230,7 +242,10 @@ const TASK_PROJECTION_COLUMNS = `${TASK_STATE_COLUMNS},
   project.display_name AS project_name,
   project.short_code AS project_code,
   assignee.email AS assignee_email,
-  task_visit.visit_id AS linked_visit_id`;
+  task_visit.visit_id AS linked_visit_id,
+  bypusula.id AS bypusula_id, bypusula.analysis_id AS bypusula_analysis_id,
+  bypusula.company_name AS bypusula_company_name,
+  bypusula_link.step_key AS bypusula_step_key`;
 
 const TASK_PROJECTION_JOIN = `
   FROM work_task AS task
@@ -239,14 +254,19 @@ const TASK_PROJECTION_JOIN = `
   LEFT JOIN customer ON customer.id = task.customer_id
   LEFT JOIN user_account AS assignee
          ON assignee.id = task.assignee_user_account_id
-  LEFT JOIN work_task_visit AS task_visit ON task_visit.task_id = task.id`;
+  LEFT JOIN work_task_visit AS task_visit ON task_visit.task_id = task.id
+  LEFT JOIN bypusula_task_link AS bypusula_link ON bypusula_link.task_id = task.id
+  LEFT JOIN bypusula_analysis AS bypusula ON bypusula.id = bypusula_link.analysis_id`;
 
 export async function listTaskRecords(
   connection: PoolConnection,
+  projectIds: ProjectScope = null,
 ): Promise<readonly WorkTask[]> {
+  const scope = projectScopeSql("task_link.project_id", projectIds);
   const [rows] = await connection.execute<WorkTaskRow[]>(
     `SELECT ${TASK_PROJECTION_COLUMNS}
        ${TASK_PROJECTION_JOIN}
+      WHERE ${scope.sql}
       ORDER BY task.archived_at_utc IS NULL DESC,
                FIELD(task.status, 'backlog', 'todo', 'in_progress', 'blocked', 'done', 'cancelled'),
                FIELD(task.priority, 'urgent', 'high', 'normal', 'low'),
@@ -254,6 +274,7 @@ export async function listTaskRecords(
                task.due_on ASC,
                task.updated_at_utc DESC,
                task.id ASC`,
+    scope.values,
   );
   return rows.map(mapWorkTask);
 }

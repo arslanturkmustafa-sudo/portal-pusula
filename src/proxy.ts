@@ -16,6 +16,8 @@ const PUBLIC_PATHS = new Set([
   "/api/health/live",
   "/api/internal/readiness",
   "/api/internal/cron/dispatch",
+  // This route authenticates server requests with its own scoped HMAC signature.
+  "/api/integrations/bypusula/sync",
   "/manifest.webmanifest",
 ]);
 

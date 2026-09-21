@@ -1,3 +1,4 @@
+import { type ProjectScope, requireProjectAccess } from "@/platform/auth/project-access";
 import "server-only";
 
 import type { Pool } from "mysql2/promise";
@@ -29,6 +30,7 @@ import { assertCanonicalUuid } from "@/platform/validation/canonical-identifiers
 
 export type TaskLifecycleContext = Readonly<{
   actorId: string;
+  projectIds?: ProjectScope;
   correlationId: string;
   now?: Date;
 }>;
@@ -85,6 +87,7 @@ export async function changeTaskLifecycle(
   return withUtcTransaction(pool, async (connection) => {
     const before = await findTaskStateForUpdate(connection, taskId);
     if (!before) throw new TaskNotFoundError();
+    requireProjectAccess(context.projectIds, before.projectId);
     if (before.version !== input.version) {
       throw new TaskVersionConflictError();
     }

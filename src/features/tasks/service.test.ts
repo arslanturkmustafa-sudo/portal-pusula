@@ -104,6 +104,30 @@ const projection = {
 };
 
 describe("task service", () => {
+  it("blocks access to an unassigned project before any update", async () => {
+    mocks.findTaskStateForUpdate.mockResolvedValueOnce({ ...before, projectId: "40000000-0000-4000-8000-000000000002" });
+    await expect(updateTask({} as Pool, taskId, { version: 4, title: "Changed" }, { ...context, projectIds: ["40000000-0000-4000-8000-000000000001"] })).rejects.toThrow("Project access denied");
+    expect(mocks.updateTaskRecord).not.toHaveBeenCalled();
+  });
+
+  it("blocks moving a permitted task outside its project scope", async () => {
+    const projectId = "40000000-0000-4000-8000-000000000001";
+    mocks.findTaskStateForUpdate.mockResolvedValueOnce({ ...before, projectId });
+    await expect(updateTask({} as Pool, taskId, { version: 4, projectId: null }, { ...context, projectIds: [projectId] })).rejects.toThrow("Project access denied");
+    expect(mocks.replaceTaskProjectRecord).not.toHaveBeenCalled();
+  });
+
+  it("allows a task update inside its assigned project", async () => {
+    const projectId = "40000000-0000-4000-8000-000000000001";
+    mocks.findTaskStateForUpdate.mockResolvedValueOnce({ ...before, projectId });
+    await updateTask({} as Pool, taskId, { version: 4, title: "Permitted change" }, { ...context, projectIds: [projectId] });
+    expect(mocks.updateTaskRecord).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ title: "Permitted change", projectId }), 4);
+  });
+
+  it("blocks projectless task creation for a project-limited user", async () => {
+    await expect(createTask({} as Pool, { title: "No project" }, { ...context, projectIds: [] })).rejects.toThrow("Project access denied");
+    expect(mocks.insertTaskRecord).not.toHaveBeenCalled();
+  });
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.findCustomerForUpdate.mockResolvedValue({

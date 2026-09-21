@@ -1,3 +1,4 @@
+import { projectScope, ProjectAccessDeniedError } from "@/platform/auth/project-access";
 import { Buffer } from "node:buffer";
 
 import { NextRequest, NextResponse } from "next/server";
@@ -105,7 +106,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   }
 
   try {
-    return json({ tasks: await listTasks(databasePool()) });
+    return json({ tasks: await listTasks(databasePool(), projectScope(principal)) });
   } catch {
     return json({ status: "service_unavailable" }, 503);
   }
@@ -133,10 +134,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
     const task = await createTask(databasePool(), input, {
       actorId: actorId(principal),
+      projectIds: projectScope(principal),
       correlationId,
     });
     return json({ task }, 201);
   } catch (error) {
+    if (error instanceof ProjectAccessDeniedError) return json({ status: "forbidden" }, 403);
     if (error instanceof z.ZodError || error instanceof SyntaxError) {
       return json({ status: "validation_error" }, 400);
     }

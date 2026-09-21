@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 
 const mocks = vi.hoisted(() => ({
+  listTaskRecords: vi.fn(),
   listDailyAgendaItems: vi.fn(),
   listDailyPlanTasks: vi.fn(),
   listOpenFinanceDigestItems: vi.fn(),
@@ -19,6 +20,8 @@ vi.mock("@/features/daily-plan", () => ({
 vi.mock("@/features/finance/finance-digest-repository", () => ({
   listOpenFinanceDigestItems: mocks.listOpenFinanceDigestItems,
 }));
+
+vi.mock("@/features/tasks/repository", () => ({ listTaskRecords: mocks.listTaskRecords }));
 
 import { readTodayOverview } from "./service";
 
@@ -52,6 +55,16 @@ const openTask = {
 };
 
 describe("today overview", () => {
+  it("uses only scoped tasks and does not load portfolio visits or finances", async () => {
+    mocks.listTaskRecords.mockResolvedValue([{ ...openTask, archivedAtUtc: null, projectId: "allowed" }]);
+    const result = await readTodayOverview({} as PoolConnection, "2026-09-13", { canReadTasks: true, canReadVisits: true, canReadFinance: true, projectIds: ["allowed"] });
+    expect(mocks.listTaskRecords).toHaveBeenCalledWith({}, ["allowed"]);
+    expect(result.tasks).toHaveLength(1);
+    expect(result.visits).toEqual([]);
+    expect(result.financeItems).toBeUndefined();
+    expect(mocks.listDailyAgendaItems).not.toHaveBeenCalled();
+    expect(mocks.listOpenFinanceDigestItems).not.toHaveBeenCalled();
+  });
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.listDailyAgendaItems.mockResolvedValue([

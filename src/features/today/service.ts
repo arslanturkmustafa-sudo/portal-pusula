@@ -1,3 +1,5 @@
+import type { ProjectScope } from "@/platform/auth/project-access";
+import { listTaskRecords } from "@/features/tasks/repository";
 import "server-only";
 
 import type { Pool, PoolConnection } from "mysql2/promise";
@@ -15,6 +17,7 @@ import {
 import { withUtcConsistentRead } from "@/platform/jobs/mysql-transaction";
 
 export type TodayOverviewAccess = Readonly<{
+  projectIds?: ProjectScope;
   canReadFinance: boolean;
   canReadTasks: boolean;
   canReadVisits: boolean;
@@ -48,6 +51,16 @@ export async function readTodayOverview(
   businessDate: string,
   access: TodayOverviewAccess,
 ): Promise<TodayOverview> {
+  if (access.projectIds != null) {
+    const scopedTasks = access.canReadTasks ? await listTaskRecords(connection, access.projectIds) : [];
+    const tasks = scopedTasks.flatMap((task): DailyPlanTask[] => {
+      if (task.archivedAtUtc !== null || task.dueOn !== businessDate || task.status === "done" || task.status === "cancelled") return [];
+      return [{ id: task.id, title: task.title, status: task.status, dueOn: task.dueOn,
+        calendarOn: task.dueOn, calendarSource: "due_date", customerId: task.customerId,
+        customerName: task.customerName, projectName: task.projectName, linkedVisitId: null, locationLabel: null }];
+    });
+    return { businessDate, tasks, visits: [] };
+  }
   const [allVisits, allTasks] = await Promise.all([
     access.canReadVisits
       ? listDailyAgendaItems(connection, businessDate, businessDate)

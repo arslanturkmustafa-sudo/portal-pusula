@@ -1,0 +1,16 @@
+.analysis { margin: 10px 6px; border: 1px solid var(--line); border-radius: 12px; background: var(--sheet); overflow: clip; }
+.analysis summary { display: flex; align-items: center; gap: 9px; padding: 14px 12px; cursor: pointer; list-style: none; }
+.analysis summary::-webkit-details-marker { display: none; }
+.analysis summary:hover { background: var(--sheet-soft); }
+.heading { display: grid; gap: 5px; min-width: 0; flex: 1; }
+.heading strong { font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.heading small { color: var(--ink-soft); font-size: 10px; line-height: 1.4; }
+.chevron { font-size: 24px; line-height: 1; color: var(--forest); transition: transform .15s ease; }
+details[open] > summary > .chevron { transform: rotate(90deg); }
+.count { display: grid; place-items: center; min-width: 30px; height: 30px; border-radius: 9px; background: var(--sheet-soft); color: var(--forest); font-size: 12px; font-weight: 700; }
+.programs { border-top: 1px solid var(--line); }
+.program + .program { border-top: 1px solid var(--line); }
+.program > summary { align-items: flex-start; padding: 12px; }
+.program .heading strong { font-weight: 550; }
+.program ul { border-top: 1px solid var(--line); }
+@media (prefers-reduced-motion: reduce) { .chevron { transition: none; } }

@@ -1,3 +1,4 @@
+import { PROJECT_SCOPED_PERMISSIONS, type ProjectScope } from "./project-access";
 export const PERMISSION_CODES = [
   "accounts.manage",
   "customers.read",
@@ -46,6 +47,7 @@ export type AccountRole = "member" | "owner";
 export type PermissionPrincipal = Readonly<{
   permissions: readonly PermissionCode[];
   role: AccountRole;
+  projectIds?: ProjectScope;
 }>;
 
 const permissionCodeSet = new Set<string>(PERMISSION_CODES);
@@ -65,7 +67,9 @@ export function hasPermission(
   principal: PermissionPrincipal,
   permission: PermissionCode,
 ): boolean {
-  return principal.role === "owner" || principal.permissions.includes(permission);
+  if (principal.role === "owner") return true;
+  if (principal.projectIds != null && !PROJECT_SCOPED_PERMISSIONS.includes(permission)) return false;
+  return principal.permissions.includes(permission);
 }
 
 export function requirePermission(

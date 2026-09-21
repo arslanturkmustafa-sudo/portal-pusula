@@ -12,6 +12,9 @@ import {
 } from "react";
 
 import { PortalPageHeader } from "@/components/portal/portal-page-header";
+import { BypusulaPendingNotice } from "@/components/home/bypusula-pending-notice";
+import { TaskGroups, type BypusulaTaskSource } from "./task-groups";
+import actions from "./workspace-actions.module.css";
 import { RecordLifecycleControls } from "@/components/portal/record-lifecycle-controls";
 import { redirectToPortalLogin as redirectToLogin } from "@/platform/navigation/portal-return-path";
 
@@ -23,6 +26,7 @@ type SaveState = "idle" | "saving";
 type DueFilter = "all" | "today" | "overdue";
 
 type TaskDto = Readonly<{
+  bypusula?: BypusulaTaskSource | null;
   archiveReason?: string | null;
   archivedAtUtc?: string | null;
   assigneeEmail: string | null;
@@ -578,6 +582,11 @@ export function TasksWorkspace({
     if (focusTaskId === null) return;
     const card = taskCardRefs.current.get(focusTaskId);
     if (card === undefined) return;
+    let disclosure = card.closest("details");
+    while (disclosure) {
+      disclosure.open = true;
+      disclosure = disclosure.parentElement?.closest("details") ?? null;
+    }
     card.focus();
     setFocusTaskId(null);
   }, [focusTaskId, mobileStatus, tasks]);
@@ -869,10 +878,13 @@ export function TasksWorkspace({
       <PortalPageHeader
         actions={capabilities.canExportReports || capabilities.canWriteTasks ? (
           <>
+            {capabilities.canWriteTasks ? (
+              <BypusulaPendingNotice enabled={loadState === "ready"} />
+            ) : null}
             {capabilities.canExportReports ? (
               <Link
                 aria-label="Firma görev raporu"
-                className="task-report-action"
+                className={actions.secondary}
                 href={
                   customerFilter !== "all" && customerFilter !== "unassigned"
                     ? `/gorevler/rapor?customerId=${encodeURIComponent(customerFilter)}`
@@ -895,7 +907,7 @@ export function TasksWorkspace({
               <button
                 aria-controls="task-editor"
                 aria-expanded={editorOpen}
-                className="primary-action"
+                className={actions.primary}
                 disabled={saveState === "saving"}
                 ref={createButtonRef}
                 type="button"
@@ -910,7 +922,7 @@ export function TasksWorkspace({
           </>
         ) : undefined}
         context="İş takibi"
-        note="İşleri proje, müşteri, öncelik ve vade bilgisiyle beş aşamada takip edin."
+        note="İşleri aşamalarına göre takip edin. ByPusula analizlerini ve programlarını açarak görevlerine ulaşın."
         title="Görevler"
       />
 
@@ -1318,9 +1330,7 @@ export function TasksWorkspace({
                       {columnTasks.length === 0 ? (
                         <p className="task-column-empty">Bu aşamada görev yok.</p>
                       ) : (
-                        <ul className="task-card-list">
-                          {columnTasks.map((task) => (
-                            <li key={task.id}>
+                        <TaskGroups tasks={columnTasks} expandMatches={query.trim().length > 0} renderTask={(task) => (
                               <TaskCard
                                 canLifecycle={capabilities.canLifecycleTasks}
                                 canReadHistory={capabilities.canReadAudit}
@@ -1338,9 +1348,7 @@ export function TasksWorkspace({
                                 today={today}
                                 updating={updatingTaskId === task.id}
                               />
-                            </li>
-                          ))}
-                        </ul>
+                          )} />
                       )}
                     </section>
                   );

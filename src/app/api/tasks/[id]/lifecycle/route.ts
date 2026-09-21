@@ -1,3 +1,4 @@
+import { projectScope, ProjectAccessDeniedError } from "@/platform/auth/project-access";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
@@ -67,11 +68,13 @@ export async function POST(
       input,
       {
         actorId: principal.accountId,
+        projectIds: projectScope(principal),
         correlationId: correlationIdFromHeaders(request.headers),
       },
     );
     return json({ status: "ok", version: task.version });
   } catch (error) {
+    if (error instanceof ProjectAccessDeniedError) return json({ status: "forbidden" }, 403);
     if (
       error instanceof z.ZodError ||
       error instanceof SyntaxError ||

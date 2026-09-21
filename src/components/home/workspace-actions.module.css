@@ -1,0 +1,10 @@
+.primary, .secondary { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 42px; padding: 10px 16px; border: 1px solid transparent; border-radius: 10px; font: inherit; font-size: 12px; line-height: 1.4; font-weight: 650; text-decoration: none; cursor: pointer; transition: background .15s, border-color .15s; }
+.primary { background: var(--forest); color: var(--sheet); border-color: var(--forest); }
+.primary:hover { background: #244e40; }
+.secondary { background: var(--sheet); border-color: var(--line); color: var(--ink); }
+.secondary:hover { background: var(--sheet-soft); border-color: var(--forest); }
+.primary:disabled, .secondary:disabled { opacity: .5; cursor: default; }
+.primary svg, .secondary svg { width: 16px; height: 16px; flex: 0 0 auto; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.badge { display: inline-grid; place-items: center; min-width: 23px; height: 23px; border-radius: 7px; background: var(--forest); color: var(--sheet); font-size: 11px; }
+@media (max-width: 600px) { .primary, .secondary { min-height: 44px; padding: 10px 12px; } }
+@media (prefers-reduced-motion: reduce) { .primary, .secondary { transition: none; } }

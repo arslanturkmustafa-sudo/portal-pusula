@@ -1,3 +1,5 @@
+import { type ProjectScope, projectScopeSql } from "@/platform/auth/project-access";
+import type { RowDataPacket } from "mysql2/promise";
 import "server-only";
 
 import type { Pool } from "mysql2/promise";
@@ -89,12 +91,21 @@ export async function getCustomerTaskReport(
   pool: Pool,
   rawFilter: TaskReportFilter,
   now = new Date(),
+  projectIds: ProjectScope = null,
 ): Promise<CustomerTaskReport> {
   const filter = taskReportFilterSchema.parse(rawFilter);
   return withUtcConsistentRead(pool, async (connection) => {
+    if (projectIds !== null) {
+      const scope = projectScopeSql("project_id", projectIds);
+      const [links] = await connection.execute<RowDataPacket[]>(
+        `SELECT 1 FROM customer_project WHERE customer_id = ? AND status = 'active' AND ${scope.sql} LIMIT 1`,
+        [filter.customerId, ...scope.values],
+      );
+      if (!links.length) throw new TaskReportCustomerNotFoundError();
+    }
     const customer = await findTaskReportCustomer(connection, filter.customerId);
     if (!customer) throw new TaskReportCustomerNotFoundError();
-    const tasks = await listTaskReportItems(connection, filter);
+    const tasks = await listTaskReportItems(connection, filter, projectIds);
     return composeCustomerTaskReport(customer, filter, tasks, now);
   });
 }

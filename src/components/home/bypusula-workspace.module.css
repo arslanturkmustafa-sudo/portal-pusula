@@ -1,0 +1,45 @@
+.workspace { display: grid; gap: 20px; max-width: 1200px; min-width: 0; }
+.panel { padding: 26px; background: var(--sheet); border: 1px solid var(--line); border-radius: 16px; min-width: 0; }
+.panel h2 { margin: 0; font-size: 19px; font-weight: 650; line-height: 1.45; }
+.panel p { font-size: 13px; line-height: 1.7; color: var(--ink-soft); }
+.row { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.field { display: grid; gap: 9px; min-width: 0; font-size: 13px; font-weight: 600; }
+.field select { width: 100%; min-height: 46px; padding: 12px; border: 1px solid var(--line-strong); border-radius: 9px; background: var(--sheet); color: var(--ink); font: inherit; }
+.inbox { margin: 20px 0 0; padding: 0; list-style: none; display: grid; gap: 10px; }
+.analysisButton { display: flex; align-items: center; justify-content: space-between; gap: 18px; width: 100%; text-align: left; padding: 16px 18px; border: 1px solid var(--line); border-radius: 11px; color: var(--ink); background: var(--sheet); cursor: pointer; }
+.analysisButton > span:first-child { display: grid; gap: 5px; min-width: 0; }
+.analysisButton strong { font-size: 13px; font-weight: 650; overflow-wrap: anywhere; }
+.analysisButton small { font-size: 11px; color: var(--ink-soft); }
+.analysisButton:hover { background: var(--sheet-soft); border-color: var(--line-strong); }
+.analysisButton[aria-pressed="true"] { border-color: var(--forest); background: color-mix(in srgb, var(--forest) 5%, var(--sheet)); box-shadow: inset 3px 0 var(--forest); }
+.arrow { font-size: 24px; color: var(--forest); }
+.progress { display: block; width: 100%; height: 6px; margin: 14px 0 18px; border: 0; border-radius: 9px; overflow: hidden; accent-color: var(--forest); background: var(--sheet-soft); }
+.progress::-webkit-progress-bar { background: var(--sheet-soft); }
+.progress::-webkit-progress-value { background: var(--forest); border-radius: 9px; }
+.sourceLink { display: inline-block; font-size: 12px; color: var(--forest); text-underline-offset: 4px; }
+.help { border-top: 1px solid var(--line); margin-top: 22px; padding-top: 16px; font-size: 12px; }
+.help summary { cursor: pointer; color: var(--ink-soft); }
+.program { border: 1px solid var(--line); border-radius: 11px; margin-top: 12px; overflow: clip; }
+.program > summary { display: flex; align-items: center; gap: 14px; padding: 16px 18px; cursor: pointer; list-style: none; }
+.program > summary::-webkit-details-marker { display: none; }
+.program > summary:hover { background: var(--sheet-soft); }
+.program > summary > span:nth-child(2) { display: grid; gap: 5px; min-width: 0; flex: 1; }
+.program strong { font-size: 13px; line-height: 1.6; font-weight: 600; }
+.program small { font-size: 11px; color: var(--ink-soft); }
+.programCount { display: grid; gap: 3px; text-align: right; font-size: 13px; font-variant-numeric: tabular-nums; color: var(--forest); }
+.chevron { font-size: 25px; color: var(--forest); transition: transform .15s; }
+.program[open] > summary > .chevron { transform: rotate(90deg); }
+.steps { border-top: 1px solid var(--line); padding: 0 20px; }
+.step { padding: 16px 0; }
+.step + .step { border-top: 1px solid var(--line); }
+.step details { margin-top: 10px; font-size: 12px; color: var(--ink-soft); }
+.step summary { cursor: pointer; }
+.check { display: flex; align-items: flex-start; gap: 14px; line-height: 1.6; }
+.check strong { flex: 1; }
+.check span { font-size: 11px; color: var(--forest); white-space: nowrap; }
+.description { white-space: pre-wrap; overflow-wrap: anywhere; }
+.error { padding: 16px; color: #90252d; background: #fff2f3; border-radius: 8px; }
+.workspace button:disabled { cursor: default; opacity: .6; }
+.workspace > [role="status"]:empty { display: none; }
+@media (max-width: 600px) { .panel { padding: 17px; } .panel h2 { font-size: 17px; } .program > summary { padding: 13px 12px; gap: 10px; } .programCount small { display: none; } .analysisButton { padding: 14px; } .steps { padding: 0 14px; } }
+@media (prefers-reduced-motion: reduce) { .chevron { transition: none; } }
