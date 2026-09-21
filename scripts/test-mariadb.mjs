@@ -11,10 +11,8 @@ const projectAccessOnly = process.argv.length === 3 && process.argv[2] === "--pr
 if (process.argv.length > 2 && !bypusulaOnly && !projectAccessOnly) {
   throw new Error("Supported arguments: --bypusula, --bypusula-auto, --project-access");
 }
-// The focused gate never reads Docker login credentials or user contexts.
-const dockerConfigDirectory = bypusulaOnly || projectAccessOnly
-  ? await mkdtemp(path.join(tmpdir(), "portal-bypusula-docker-"))
-  : null;
+// Disposable checks never read Docker login credentials or user contexts.
+const dockerConfigDirectory = await mkdtemp(path.join(tmpdir(), "portal-mariadb-docker-"));
 
 const repositoryRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),

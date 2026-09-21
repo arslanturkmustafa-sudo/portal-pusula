@@ -611,8 +611,6 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
           "__drizzle_migrations",
           "_platform_migration_verification",
           "audit_event",
-          "bypusula_analysis",
-          "bypusula_task_link",
         ]);
         expect(await journalRows(pool)).toHaveLength(1);
         expect(modeRows[0]?.global_sql_mode).not.toMatch(
@@ -686,6 +684,8 @@ describe.skipIf(!disposableMariaDbEnabled).sequential(
           "__drizzle_migrations",
           "_platform_migration_verification",
           "audit_event",
+          "bypusula_analysis",
+          "bypusula_task_link",
           "consulting_contract",
           "credit_card",
           "credit_card_installment",
