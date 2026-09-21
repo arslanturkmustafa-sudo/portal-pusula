@@ -72,6 +72,9 @@ function validatePermissionDependencies(
   }
 }
 
+export const managedProjectIdsSchema = z.array(z.uuid().toLowerCase()).max(200)
+  .refine((ids) => new Set(ids).size === ids.length, "Projeler tekrar içeremez.").nullable();
+
 const permissionsSchema = z
   .array(permissionSchema)
   .max(PERMISSION_CODES.length - 1)
@@ -91,6 +94,7 @@ export const createManagedUserInputSchema = z
     email: z.email().max(254).trim().toLowerCase(),
     password: z.string().min(12).max(256),
     permissions: permissionsSchema,
+    projectIds: managedProjectIdsSchema.optional(),
   })
   .strict()
   .superRefine((value, context) => {
@@ -107,6 +111,7 @@ export const createManagedUserInputSchema = z
 export const updateManagedUserInputSchema = z
   .object({
     permissions: permissionsSchema,
+    projectIds: managedProjectIdsSchema.optional(),
     status: z.enum(["active", "disabled"]),
   })
   .strict()

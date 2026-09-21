@@ -42,6 +42,17 @@ const taskRow = {
 };
 
 describe("task repository", () => {
+  it("projects durable ByPusula grouping without relying on editable task notes", async () => {
+    const execute = vi.fn().mockResolvedValue([[
+      { ...taskRow, description: "Elle değiştirildi", bypusula_id: "snapshot-14", bypusula_analysis_id: "14",
+        bypusula_company_name: "Deneme Firma", bypusula_step_key: "PRG-YON-01/IMPLEMENTATION_ACTION_02" },
+      { ...taskRow, id: "ordinary-task" },
+    ], []]);
+    const tasks = await listTaskRecords({ execute } as unknown as PoolConnection);
+    expect(tasks[0].bypusula).toEqual({ id: "snapshot-14", analysisId: "14", companyName: "Deneme Firma", programCode: "PRG-YON-01" });
+    expect(tasks[1].bypusula).toBeNull();
+    expect(tasks[0]).not.toHaveProperty("payload_json");
+  });
   it("returns customer and assignee projections in deterministic board order", async () => {
     const execute = vi.fn().mockResolvedValue([[taskRow], []]);
 
@@ -62,8 +73,9 @@ describe("task repository", () => {
     ]);
     expect(execute).toHaveBeenCalledWith(
       expect.stringMatching(/LEFT JOIN project[\s\S]*LEFT JOIN customer[\s\S]*LEFT JOIN user_account[\s\S]*LEFT JOIN work_task_visit/iu),
+      [],
     );
-    expect(execute).toHaveBeenCalledWith(expect.stringContaining("FIELD(task.status"));
+    expect(execute).toHaveBeenCalledWith(expect.stringContaining("FIELD(task.status"), []);
   });
 
   it("marks a task projection as visit-linked without exposing the visit id", async () => {

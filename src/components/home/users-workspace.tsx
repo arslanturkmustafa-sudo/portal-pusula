@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 
 import { PortalPageHeader } from "@/components/portal/portal-page-header";
+import { PROJECT_SCOPED_PERMISSIONS, type ProjectScope } from "@/platform/auth/project-access";
 import type { PermissionCode } from "@/platform/auth/permissions";
 import { redirectToPortalLogin } from "@/platform/navigation/portal-return-path";
 
@@ -15,10 +16,13 @@ type ManagedUser = Readonly<{
   email: string;
   id: string;
   permissions: readonly PermissionCode[];
+  projectIds?: ProjectScope;
   role: "member" | "owner";
   status: "active" | "disabled";
   updatedAtUtc: string;
 }>;
+
+type ProjectOption = Readonly<{ id: string; displayName: string; shortCode: string }>;
 
 const permissionGroups: readonly Readonly<{
   description: string;
@@ -140,40 +144,47 @@ function permissionValues(form: HTMLFormElement): PermissionCode[] {
       }
     }
   }
-  return [...selected].sort();
+  return [...selected].filter((code) => data.get("projectScope") === "all" || PROJECT_SCOPED_PERMISSIONS.includes(code)).sort();
 }
 
-function PermissionPicker({ selected }: Readonly<{ selected?: readonly PermissionCode[] }>) {
+function projectValues(form: HTMLFormElement): ProjectScope {
+  const data = new FormData(form);
+  return data.get("projectScope") === "all" ? null : data.getAll("projectIds").map(String);
+}
+
+function PermissionPicker({ selected, initialProjectIds = [], projects }: Readonly<{
+  selected?: readonly PermissionCode[]; initialProjectIds?: ProjectScope; projects: readonly ProjectOption[];
+}>) {
+  const [allProjects, setAllProjects] = useState(initialProjectIds === null);
   const initial = new Set(selected ?? []);
-  return (
+  return <>
+    <fieldset className={styles.permissionGroup}>
+      <legend>Proje erişimi</legend>
+      <label><input checked={allProjects} name="projectScope" type="checkbox" value="all" onChange={(event) => setAllProjects(event.target.checked)} /><span>Tüm projeler (sonradan açılanlar dahil)</span></label>
+      <p>{allProjects ? "Aşağıdaki modül yetkileri tüm projelerde geçerlidir." : "Yalnız seçilen projeler, görevleri ve görev raporları açılır. Bağlı müşteri kartları görüntülenebilir. Genel finans, sözleşmeler, planlama, görev atama ve ByPusula aktarımı kapalıdır. Proje seçilmezse hiçbir proje açılmaz."}</p>
+      {!allProjects && <div>{projects.length ? projects.map((project) => <label key={project.id}>
+        <input defaultChecked={initialProjectIds?.includes(project.id)} name="projectIds" type="checkbox" value={project.id} />
+        <span>{project.displayName} · {project.shortCode}</span>
+      </label>) : <span>Seçilebilecek proje bulunmuyor.</span>}</div>}
+    </fieldset>
     <div className={styles.permissionGrid}>
-      {permissionGroups.map((group) => (
-        <fieldset className={styles.permissionGroup} key={group.label}>
-          <legend>{group.label}</legend>
-          <p>{group.description}</p>
-          <div>
-            {group.permissions.map((permission) => (
-              <label key={permission.code}>
-                <input
-                  defaultChecked={initial.has(permission.code)}
-                  name="permissions"
-                  type="checkbox"
-                  value={permission.code}
-                />
-                <span>{permission.label}</span>
-              </label>
-            ))}
-          </div>
-        </fieldset>
-      ))}
+      {permissionGroups.map((group) => <fieldset className={styles.permissionGroup} key={group.label}>
+        <legend>{group.label}</legend><p>{group.description}</p><div>
+          {group.permissions.map((permission) => <label key={permission.code}>
+            <input defaultChecked={initial.has(permission.code)} disabled={!allProjects && !PROJECT_SCOPED_PERMISSIONS.includes(permission.code)} name="permissions" type="checkbox" value={permission.code} />
+            <span>{permission.label}</span>
+          </label>)}
+        </div>
+      </fieldset>)}
     </div>
-  );
+  </>;
 }
 
 function UserAccessEditor({
   onSaved,
+  projects,
   user,
-}: Readonly<{ onSaved: (user: ManagedUser) => void; user: ManagedUser }>) {
+}: Readonly<{ onSaved: (user: ManagedUser) => void; user: ManagedUser; projects: readonly ProjectOption[] }>) {
   const [state, setState] = useState<"idle" | "saving" | "error" | "saved">("idle");
 
   async function save(event: FormEvent<HTMLFormElement>) {
@@ -184,6 +195,7 @@ function UserAccessEditor({
       const response = await fetch(`/api/users/${user.id}`, {
         body: JSON.stringify({
           permissions: permissionValues(form),
+          projectIds: projectValues(form),
           status: new FormData(form).get("status"),
         }),
         credentials: "same-origin",
@@ -217,7 +229,7 @@ function UserAccessEditor({
           <option value="disabled">Devre dışı</option>
         </select>
       </label>
-      <PermissionPicker selected={user.permissions} />
+      <PermissionPicker key={user.credentialVersion} projects={projects} initialProjectIds={user.projectIds ?? null} selected={user.permissions} />
       <div className={styles.editorActions}>
         <span aria-live="polite">
           {state === "error"
@@ -235,12 +247,25 @@ function UserAccessEditor({
 }
 
 export function UsersWorkspace() {
+  const [projects, setProjects] = useState<readonly ProjectOption[]>([]);
+  const [createRevision, setCreateRevision] = useState(0);
+  const [projectsReady, setProjectsReady] = useState(false);
   const [users, setUsers] = useState<readonly ManagedUser[]>([]);
   const [loadState, setLoadState] = useState<"loading" | "ready" | "error">("loading");
   const [createState, setCreateState] = useState<"idle" | "saving" | "error">("idle");
 
   useEffect(() => {
     const controller = new AbortController();
+    void fetch("/api/projects", { cache: "no-store", credentials: "same-origin", signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Projects unavailable.");
+        const payload = await response.json() as { projects: ProjectOption[] };
+        setProjects(payload.projects);
+        setProjectsReady(true);
+      }).catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        setProjectsReady(false);
+      });
     void fetch("/api/users", {
       cache: "no-store",
       credentials: "same-origin",
@@ -284,6 +309,7 @@ export function UsersWorkspace() {
           email: data.get("email"),
           password: data.get("password"),
           permissions: permissionValues(form),
+          projectIds: projectValues(form),
         }),
         credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
@@ -295,6 +321,7 @@ export function UsersWorkspace() {
       setUsers((current) => [...current, payload.user]);
       setCreateState("idle");
       form.reset();
+      setCreateRevision((revision) => revision + 1);
       form.closest("details")?.removeAttribute("open");
     } catch {
       setCreateState("error");
@@ -333,9 +360,10 @@ export function UsersWorkspace() {
           <p className={styles.securityNote}>
             Parolayı güvenli bir kanaldan iletin. Portal parolayı tekrar göstermez veya loglamaz.
           </p>
-          <PermissionPicker />
+          <PermissionPicker key={createRevision} projects={projects} />
+          {!projectsReady && <p role="alert">Proje listesi yüklenmeden yetkiler kaydedilemez.</p>}
           {createState === "error" ? <p className={styles.error} role="alert">Hesap oluşturulamadı. Alanları, e-posta benzersizliğini ve yetki bağımlılıklarını kontrol edin.</p> : null}
-          <button className="primary-action" disabled={createState === "saving"} type="submit">
+          <button className="primary-action" disabled={createState === "saving" || !projectsReady} type="submit">
             {createState === "saving" ? "Hesap oluşturuluyor…" : "Hesabı oluştur"}
           </button>
         </form>
@@ -353,7 +381,7 @@ export function UsersWorkspace() {
                 {user.role === "owner" ? "Sahip" : user.status === "active" ? "Aktif" : "Kapalı"}
               </span>
             </summary>
-            <UserAccessEditor onSaved={replaceUser} user={user} />
+            {projectsReady ? <UserAccessEditor onSaved={replaceUser} projects={projects} user={user} /> : <p role="alert">Proje listesi yüklenemedi veya yükleniyor; sayfayı yenileyin.</p>}
           </details>
         ))}
       </section>

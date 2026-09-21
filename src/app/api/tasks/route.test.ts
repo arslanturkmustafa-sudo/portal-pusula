@@ -93,6 +93,11 @@ function postRequest(origin = "https://portal.example.test") {
 }
 
 describe("task collection API", () => {
+  it("passes the authenticated scope to the list service, including empty scope", async () => {
+    mocks.authenticatePrincipalRequest.mockResolvedValueOnce({ ...principal, role: "member", permissions: ["tasks.read"], projectIds: [] });
+    expect((await GET(new NextRequest("https://portal.example.test/api/tasks"))).status).toBe(200);
+    expect(mocks.listTasks).toHaveBeenCalledWith({}, []);
+  });
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.authenticatePrincipalRequest.mockResolvedValue(principal);
@@ -122,6 +127,7 @@ describe("task collection API", () => {
       { title: "Yeni görev" },
       {
         actorId: accountId,
+        projectIds: null,
         correlationId: "22222222-2222-4222-8222-222222222222",
       },
     );

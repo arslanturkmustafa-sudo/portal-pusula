@@ -92,6 +92,7 @@ describe("project collection API", () => {
       expect.objectContaining({ shortCode: "BYPUSULA" }),
       {
         actorId: accountId,
+        projectIds: null,
         correlationId: "22222222-2222-4222-8222-222222222222",
       },
     );

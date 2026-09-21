@@ -1,3 +1,4 @@
+import { type ProjectScope, projectScopeSql } from "@/platform/auth/project-access";
 import "server-only";
 
 import type { PoolConnection, RowDataPacket } from "mysql2/promise";
@@ -105,9 +106,13 @@ export async function findTaskReportCustomer(
 export async function listTaskReportItems(
   connection: PoolConnection,
   filter: TaskReportFilter,
+  projectIds: ProjectScope = null,
 ): Promise<readonly TaskReportItem[]> {
   const conditions = ["task.customer_id = ?"];
   const parameters: Array<string> = [filter.customerId];
+  const scope = projectScopeSql("task_link.project_id", projectIds);
+  conditions.push(scope.sql);
+  parameters.push(...scope.values);
   if (filter.from && filter.to) {
     conditions.push("task.due_on >= ?", "task.due_on <= ?");
     parameters.push(filter.from, filter.to);

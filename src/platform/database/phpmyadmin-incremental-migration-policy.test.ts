@@ -74,6 +74,35 @@ const collectionCardAccountsMigrationTag =
   "0023_collection_card_accounts";
 const partialCardPaymentsMigrationTag =
   "0024_partial_card_payments";
+
+describe("ByPusula deployment migrations", () => {
+  it("builds only the exact ByPusula DDL with ordered composite FK and approval column guards", async () => {
+    for (const [migrationTag, journalCount] of [["0025_bypusula_transfer", 25], ["0026_bypusula_auto_sync", 26]] as const) {
+      const source = await readFile(resolve(projectRoot, "drizzle", `${migrationTag}.sql`), "utf8");
+      const statements = source.split(/--> statement-breakpoint\s*/u).map(value => value.trim().replace(/;$/u, "")).filter(Boolean);
+      const outputDirectory = await temporaryOutputDirectory();
+      const summary = await buildPhpMyAdminIncrementalMigrationBundle({ migrationTag, outputDirectory, projectRoot, targetDatabaseSha256, serverVersionSha256 });
+      const manifest = JSON.parse(await readFile(resolve(outputDirectory, `portal-pusula-incremental-${migrationTag}.manifest.json`), "utf8")) as IncrementalManifest;
+      const sql = await readFile(resolve(outputDirectory, `portal-pusula-incremental-${migrationTag}.sql`), "utf8");
+      expect(summary.statementCount).toBe(6);
+      expect(manifest.expectedJournalCount).toBe(journalCount);
+      expect(candidateStatements(sql).slice(0, 6)).toEqual(statements);
+      expect(sql).toContain(targetDatabaseSha256);
+      expect(sql).toContain(serverVersionSha256);
+      if (migrationTag === "0025_bypusula_transfer") {
+        expect(analyzeIncrementalMigrationStatement(statements[2], migrationTag)).toMatchObject({ columnNames: ["customer_id", "project_id"], referencedColumnNames: ["customer_id", "project_id"], type: "foreign-key" });
+        expect(sql).toContain("ORDINAL_POSITION = 2 AND POSITION_IN_UNIQUE_CONSTRAINT = 2 AND COLUMN_NAME = 'project_id'");
+        expect(() => analyzeIncrementalMigrationStatement(statements[2].replace("ON DELETE restrict", "ON DELETE cascade"), migrationTag)).toThrow();
+      } else {
+        expect(sql).toContain("COLUMN_NAME = 'sync_approved_at_utc'");
+        expect(sql).toContain("DATETIME_PRECISION = 6");
+        expect(sql).toContain("COLUMN_NAME = 'sync_approved_by_user_account_id'");
+        expect(() => analyzeIncrementalMigrationStatement(statements[0].replace("datetime(6)", "datetime"), migrationTag)).toThrow();
+        expect(() => analyzeIncrementalMigrationStatement(statements[4].replace("IS NOT NULL", "IS NULL"), migrationTag)).toThrow();
+      }
+    }
+  });
+});
 const incremental0011Backfills = untyped0011Backfills as {
   consultingContract: string;
   customerProject: string;

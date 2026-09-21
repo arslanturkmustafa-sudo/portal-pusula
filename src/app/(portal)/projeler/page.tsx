@@ -1,3 +1,4 @@
+import { projectScope } from "@/platform/auth/project-access";
 import type { Metadata } from "next";
 
 import { ProjectsWorkspace } from "@/components/home/projects-workspace";
@@ -17,6 +18,8 @@ export default async function ProjectsPage() {
     <PortalPermissionGate anyOf={["projects.read"]}>
       <ProjectsWorkspace
         capabilities={{
+          canCreateProjects: can("projects.write") && principal !== null && projectScope(principal) === null,
+          canWriteProjects: can("projects.write"),
           canLifecycleProjects: can("projects.lifecycle"),
           canReadAudit: can("audit.read"),
         }}

@@ -2,6 +2,19 @@ import { randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { mkdtemp, rmdir } from "node:fs/promises";
+import { tmpdir } from "node:os";
+
+const bypusulaAuto = process.argv.length === 3 && process.argv[2] === "--bypusula-auto";
+const bypusulaOnly = bypusulaAuto || (process.argv.length === 3 && process.argv[2] === "--bypusula");
+const projectAccessOnly = process.argv.length === 3 && process.argv[2] === "--project-access";
+if (process.argv.length > 2 && !bypusulaOnly && !projectAccessOnly) {
+  throw new Error("Supported arguments: --bypusula, --bypusula-auto, --project-access");
+}
+// The focused gate never reads Docker login credentials or user contexts.
+const dockerConfigDirectory = bypusulaOnly || projectAccessOnly
+  ? await mkdtemp(path.join(tmpdir(), "portal-bypusula-docker-"))
+  : null;
 
 const repositoryRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -98,6 +111,7 @@ const dockerEnvironment = runtimeEnvironment({
 
 function dockerCompose(...args) {
   return [
+    ...(dockerConfigDirectory ? ["--config", dockerConfigDirectory] : []),
     "--context",
     "default",
     "compose",
@@ -175,6 +189,13 @@ try {
     }),
   );
 
+  if (projectAccessOnly) {
+    console.log("Running only project access persistence and isolation tests...");
+    await runIntegrationFile("mariadb-project-access.test.ts", publishedPort);
+  } else if (bypusulaOnly) {
+    console.log("Running only ByPusula transfer persistence tests...");
+    await runIntegrationFile(bypusulaAuto ? "mariadb-bypusula-auto-sync.test.ts" : "mariadb-bypusula-transfer.test.ts", publishedPort);
+  } else {
   console.log("Running migration correctness tests against disposable MariaDB...");
   await runIntegrationFile(
     "mariadb-phpmyadmin-bundle.test.ts",
@@ -224,6 +245,10 @@ try {
 
   console.log("Running durable cron dispatch gate tests against disposable MariaDB...");
   await runIntegrationFile("mariadb-cron-gate.test.ts", publishedPort);
+
+  console.log("Running project access persistence and isolation tests...");
+  await runIntegrationFile("mariadb-project-access.test.ts", publishedPort);
+  }
 } catch (error) {
   exitCode = 1;
   console.error(
@@ -234,6 +259,8 @@ try {
 } finally {
   console.log("Stopping disposable MariaDB and removing its volume...");
   await stopEnvironment();
+  // Non-recursive: never delete unexpected files created outside this runner.
+  if (dockerConfigDirectory) await rmdir(dockerConfigDirectory).catch(() => undefined);
 }
 
 if (process.exitCode && process.exitCode !== 0) {

@@ -1,3 +1,4 @@
+import { PROJECT_SCOPED_PERMISSIONS, type ProjectScope } from "./project-access";
 import "server-only";
 
 import { cookies, headers } from "next/headers";
@@ -29,7 +30,7 @@ type OwnerPrincipal = Readonly<{
   role: "owner";
 }>;
 
-export type AuthenticatedPrincipal =
+export type AuthenticatedPrincipal = { projectIds?: ProjectScope } & (
   | (OwnerPrincipal & Readonly<{ kind: "development" }>)
   | (OwnerPrincipal & Readonly<{ kind: "legacy" }>)
   | Readonly<{
@@ -41,7 +42,7 @@ export type AuthenticatedPrincipal =
       passwordChangedAtUtc: string;
       permissions: readonly PermissionCode[];
       role: "member" | "owner";
-    }>;
+    }>);
 
 /** @deprecated Use AuthenticatedPrincipal for new authorization code. */
 export type AuthenticatedAdmin = AuthenticatedPrincipal;
@@ -111,7 +112,10 @@ async function authenticateToken(
           email: access.account.email,
           kind: "account",
           passwordChangedAtUtc: access.account.passwordChangedAtUtc,
-          permissions: access.permissions,
+          projectIds: access.account.role === "owner" ? null : access.projectIds ?? null,
+          permissions: access.account.role === "owner" || access.projectIds == null
+            ? access.permissions
+            : access.permissions.filter((code) => PROJECT_SCOPED_PERMISSIONS.includes(code)),
           role: access.account.role,
         }
       : null;

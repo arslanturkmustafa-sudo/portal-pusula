@@ -1,3 +1,4 @@
+import { projectScope, ProjectAccessDeniedError } from "@/platform/auth/project-access";
 import { Buffer } from "node:buffer";
 
 import { NextRequest, NextResponse } from "next/server";
@@ -88,14 +89,15 @@ function actorId(principal: AuthenticatedAdmin): string | undefined {
 }
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  if (!(await authenticateAdminRequest(request, "projects.read"))) {
+  const principal = await authenticateAdminRequest(request, "projects.read");
+  if (!principal) {
     return json({ status: "unauthorized" }, 401);
   }
   if ([...request.nextUrl.searchParams].length > 0) {
     return json({ status: "validation_error" }, 400);
   }
   try {
-    return json({ projects: await listProjects(databasePool()) });
+    return json({ projects: await listProjects(databasePool(), projectScope(principal)) });
   } catch {
     return json({ status: "service_unavailable" }, 503);
   }
@@ -114,10 +116,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const input = createProjectInputSchema.parse(await readBody(request));
     const project = await createProject(databasePool(), input, {
       actorId: actorId(principal),
+      projectIds: projectScope(principal),
       correlationId,
     });
     return json({ project }, 201);
   } catch (error) {
+    if (error instanceof ProjectAccessDeniedError) return json({ status: "forbidden" }, 403);
     if (error instanceof z.ZodError || error instanceof SyntaxError) {
       return json({ status: "validation_error" }, 400);
     }

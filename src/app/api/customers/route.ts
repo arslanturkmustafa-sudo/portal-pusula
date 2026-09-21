@@ -1,3 +1,4 @@
+import { projectScope } from "@/platform/auth/project-access";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
@@ -49,6 +50,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   try {
     const customers = await listCustomers(databasePool(), {
+      projectIds: projectScope(principal),
       includeBilling: hasPermission(principal, "contracts.billing.read"),
       includeContact: hasPermission(principal, "customers.contact.read"),
       includeVisits: hasPermission(principal, "visits.read"),

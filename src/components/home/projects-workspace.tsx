@@ -195,6 +195,8 @@ function budgetLabel(value: string | null): string {
 
 type ProjectsWorkspaceProps = Readonly<{
   capabilities?: Readonly<{
+    canCreateProjects?: boolean;
+    canWriteProjects?: boolean;
     canLifecycleProjects: boolean;
     canReadAudit: boolean;
   }>;
@@ -249,12 +251,12 @@ export function ProjectsWorkspace({
           redirectToLogin();
           return null;
         }
-        if (!projectsResponse.ok || !customersResponse.ok) {
+        if (!projectsResponse.ok || (!customersResponse.ok && customersResponse.status !== 403)) {
           throw new Error("Project workspace is unavailable.");
         }
         const [projectPayload, customerPayload] = (await Promise.all([
           projectsResponse.json(),
-          customersResponse.json(),
+          customersResponse.status === 403 ? Promise.resolve({ customers: [] }) : customersResponse.json(),
         ])) as [
           { projects?: ProjectDto[] },
           { customers?: CustomerDto[] },
@@ -523,7 +525,7 @@ export function ProjectsWorkspace({
   return (
     <div className="projects-page-workspace">
       <PortalPageHeader
-        actions={(
+        actions={capabilities.canCreateProjects !== false && (
           <button
             className="primary-action"
             disabled={saveState === "saving" || initializing}
@@ -579,7 +581,8 @@ export function ProjectsWorkspace({
         </div>
       ) : null}
 
-      {loadState === "ready" && projects.length === 0 && editorMode === null ? (
+      {loadState === "ready" && projects.length === 0 && capabilities.canCreateProjects === false ? <p>Erişebileceğiniz proje bulunmuyor.</p> : null}
+      {loadState === "ready" && capabilities.canCreateProjects !== false && projects.length === 0 && editorMode === null ? (
         <section className="portfolio-empty" aria-labelledby="portfolio-empty-title">
           <span aria-hidden="true">00 / 04</span>
           <div>
@@ -611,7 +614,7 @@ export function ProjectsWorkspace({
       ) : null}
 
       {loadState === "ready" &&
-      projects.length > 0 &&
+      capabilities.canCreateProjects !== false && projects.length > 0 &&
       missingInitialProjects.length > 0 &&
       editorMode === null ? (
         <div
@@ -851,7 +854,7 @@ export function ProjectsWorkspace({
                 </div>
                 <footer className="project-dossier-actions">
                   <p>Görevler ekranında bu projeyi seçerek işleri aynı dosya altında toplayabilirsiniz.</p>
-                  <button className="primary-action" type="button" onClick={openEditEditor}>Projeyi düzenle</button>
+                  {capabilities.canWriteProjects !== false && <button className="primary-action" type="button" onClick={openEditEditor}>Projeyi düzenle</button>}
                   <RecordLifecycleControls
                     actions={!capabilities.canLifecycleProjects ? [] : selectedProject.archivedAtUtc ? [{
                       description: "Projeyi arşivden çıkarır; tamamlandı veya iptal durumunu ayrıca değiştirmez.",

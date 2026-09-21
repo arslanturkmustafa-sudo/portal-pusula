@@ -125,6 +125,7 @@ describe("customer API database diagnostics", () => {
     );
     expect(restricted.status).toBe(200);
     expect(mocks.listCustomers).toHaveBeenLastCalledWith({}, {
+      projectIds: null,
       includeBilling: false,
       includeContact: false,
       includeVisits: false,
@@ -142,6 +143,7 @@ describe("customer API database diagnostics", () => {
     );
     expect(ownerResponse.status).toBe(200);
     expect(mocks.listCustomers).toHaveBeenLastCalledWith({}, {
+      projectIds: null,
       includeBilling: true,
       includeContact: true,
       includeVisits: true,

@@ -1,3 +1,4 @@
+import { projectScope } from "@/platform/auth/project-access";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
@@ -60,6 +61,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const report = await getCustomerTaskReport(
       getPlatformDatabasePool(getDatabaseProbeEnvironment()),
       strictFilter(request),
+      undefined,
+      projectScope(principal),
     );
     return json({ report }, 200, correlationId);
   } catch (error) {

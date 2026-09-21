@@ -1,3 +1,4 @@
+import { type ProjectScope, requireProjectAccess } from "@/platform/auth/project-access";
 import "server-only";
 
 import type { Pool } from "mysql2/promise";
@@ -25,6 +26,7 @@ import { assertCanonicalUuid } from "@/platform/validation/canonical-identifiers
 
 export type ProjectLifecycleContext = Readonly<{
   actorId: string;
+  projectIds?: ProjectScope;
   correlationId: string;
   now?: Date;
 }>;
@@ -45,6 +47,7 @@ export async function changeProjectLifecycle(
   context: ProjectLifecycleContext,
 ): Promise<Project> {
   assertCanonicalUuid(projectId);
+  requireProjectAccess(context.projectIds, projectId);
   assertCanonicalUuid(context.actorId);
   const input = lifecycleCommandInputSchema.parse(rawInput);
   const now = toUtcDateTime6(context.now ?? new Date());

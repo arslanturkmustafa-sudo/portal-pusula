@@ -1,3 +1,4 @@
+import { type ProjectScope, projectScopeSql } from "@/platform/auth/project-access";
 import "server-only";
 
 import type {
@@ -293,6 +294,7 @@ const CUSTOMER_PROJECT_COLUMNS = `
 export async function listCustomerRecords(
   connection: PoolConnection,
   options: Readonly<{
+    projectIds?: ProjectScope;
     businessDate?: string;
     includeBilling?: boolean;
     includeContact?: boolean;
@@ -342,6 +344,7 @@ export async function listCustomerRecords(
           GROUP BY contract.customer_id
        ) upcoming ON upcoming.customer_id = c.id`
     : "";
+  const scope = projectScopeSql("cp.project_id", options.projectIds ?? null);
   const query = `SELECT ${CUSTOMER_IDENTITY_COLUMNS}, ${contactColumns},
             ${CUSTOMER_PROJECT_COLUMNS}, ${visitColumns}, ${billingColumns}
        FROM customer c
@@ -350,6 +353,7 @@ export async function listCustomerRecords(
        LEFT JOIN project p ON p.id = cp.project_id
        ${visitJoin}
        ${billingJoin}
+      WHERE ${scope.sql}
       ORDER BY c.status = 'active' DESC, c.display_name ASC, c.id ASC,
                p.display_name ASC, p.id ASC`;
   const parameters = [
@@ -357,6 +361,7 @@ export async function listCustomerRecords(
     ...(options.includeBilling
       ? [businessDate as string, businessDate as string]
       : []),
+    ...scope.values,
   ];
   const [rows] = parameters.length > 0
     ? await connection.execute<CustomerWithProjectRow[]>(query, parameters)

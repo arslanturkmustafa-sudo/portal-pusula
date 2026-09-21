@@ -1,3 +1,4 @@
+import { type ProjectScope, requireProjectAccess } from "@/platform/auth/project-access";
 import "server-only";
 
 import { randomUUID } from "node:crypto";
@@ -90,6 +91,7 @@ export class TaskVisitLinkedFieldsLockedError extends Error {
 
 export type TaskWriteContext = Readonly<{
   actorId?: string;
+  projectIds?: ProjectScope;
   correlationId: string;
   now?: Date;
 }>;
@@ -240,8 +242,8 @@ async function generateNextRecurringTask(
   );
 }
 
-export async function listTasks(pool: Pool): Promise<readonly WorkTask[]> {
-  return withUtcTransaction(pool, listTaskRecords);
+export async function listTasks(pool: Pool, projectIds: ProjectScope = null): Promise<readonly WorkTask[]> {
+  return withUtcTransaction(pool, (connection) => listTaskRecords(connection, projectIds));
 }
 
 export async function createTask(
@@ -261,6 +263,7 @@ export async function createTaskInTransaction(
   taskId: string = randomUUID(),
 ): Promise<WorkTask> {
   const input = createTaskInputSchema.parse(rawInput);
+  requireProjectAccess(context.projectIds, input.projectId);
   assertCanonicalUuid(taskId);
   if (context.actorId !== undefined) assertCanonicalUuid(context.actorId);
   const now = toUtcDateTime6(context.now ?? new Date());
@@ -321,6 +324,8 @@ export async function updateTask(
   return withUtcTransaction(pool, async (connection) => {
     const before = await findTaskStateForUpdate(connection, id);
     if (!before) throw new TaskNotFoundError();
+    requireProjectAccess(context.projectIds, before.projectId);
+    requireProjectAccess(context.projectIds, input.projectId === undefined ? before.projectId : input.projectId);
     if (before.archivedAtUtc !== null) {
       throw new LifecycleArchivedRecordError();
     }

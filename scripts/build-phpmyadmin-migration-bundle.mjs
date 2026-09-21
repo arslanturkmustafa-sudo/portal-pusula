@@ -51,6 +51,27 @@ const COLLECTION_CARD_ACCOUNTS_MIGRATION_TAG =
   "0023_collection_card_accounts";
 const PARTIAL_CARD_PAYMENTS_MIGRATION_TAG =
   "0024_partial_card_payments";
+const BYPUSULA_TRANSFER_MIGRATION_TAG = "0025_bypusula_transfer";
+const BYPUSULA_AUTO_SYNC_MIGRATION_TAG = "0026_bypusula_auto_sync";
+
+// The integration migrations accept only the reviewed additive DDL. In
+// particular, the customer/project pair must keep its composite RESTRICT FK.
+const BYPUSULA_TRANSFER_STATEMENT_HASHES = new Set([
+  "3c277b4aff53fe908479c2a2842b55efe5a9715234de64718532e7646f02b61c",
+  "bc214158c8286d846d4265a9a9f255ca1f7af8e530460c19cad1672239d28eff",
+  "2b8885bc2b090412c69034ca3a1b550dc7dc186224cf8efd2e1b5e6def3212aa",
+  "291797ff85778ceeb785abe05ab130160dccb68b575ee247fc3e0a5b6de3c367",
+  "cacef4faa707eb9f47fad1c121094fbac64000fa765072ae652e11b1f9e6ab4d",
+  "756845b95486770e398480e5bf454198bfb27be249bcb55796e013b208081c90",
+]);
+const BYPUSULA_AUTO_SYNC_STATEMENT_HASHES = new Set([
+  "63d20085b72a58aebf210054b48f8fbd4d8f9f4d6f8f1eafd6c92d92cb6ae2a6",
+  "5e1075aa9c753a7c497928ce72e266e98763538e5dd8cdfd7e8ae9890df4bcec",
+  "ca1ef389a9745549fd83a27aa7cea449e46d1d58509adf18106c6304b12279d9",
+  "f1455d562cf3162b716196cb79bcfb921383bbec33a1520aac8f4d1237e628a1",
+  "72d13cea1203e480a3663364ef4a12c13fb58cf6e67b1ef4a28749a75a3d7267",
+  "62e556f535e37c170c7f6f9bee0f822f3def13b31dc9d2b7aca40b23e397ea93",
+]);
 
 // 0020 alters an existing financial table, so keep every accepted statement
 // byte-independent but semantically exact after whitespace normalization.
@@ -132,6 +153,15 @@ const EXPENSE_CATEGORY_SEED_SQL = `INSERT INTO \`expense_category\` (\`id\`, \`c
 ).join(", ")}`;
 
 const managedForwardColumns = new Map([
+  ...[
+    ["bypusula_analysis", "sync_requested_at_utc", "datetime(6)"],
+    ["bypusula_analysis", "sync_last_received_at_utc", "datetime(6)"],
+    ["bypusula_analysis", "sync_approved_at_utc", "datetime(6)"],
+    ["bypusula_analysis", "sync_approved_by_user_account_id", "char(36) CHARACTER SET ascii COLLATE ascii_bin"],
+  ].map(([tableName, columnName, definition]) => [
+    `${BYPUSULA_AUTO_SYNC_MIGRATION_TAG}:${tableName}:${columnName}`,
+    { columnName, definition, tableName },
+  ]),
   ...[
     ["consulting_contract", "archive_reason", "varchar(500)"],
     ["consulting_contract", "archived_at_utc", "datetime(6)"],
@@ -276,6 +306,10 @@ function assertExactManagedMigrationStatement(statement, migrationTag) {
     acceptedHashes = COLLECTION_CARD_ACCOUNTS_STATEMENT_HASHES;
   } else if (migrationTag === PARTIAL_CARD_PAYMENTS_MIGRATION_TAG) {
     acceptedHashes = PARTIAL_CARD_PAYMENTS_STATEMENT_HASHES;
+  } else if (migrationTag === BYPUSULA_TRANSFER_MIGRATION_TAG) {
+    acceptedHashes = BYPUSULA_TRANSFER_STATEMENT_HASHES;
+  } else if (migrationTag === BYPUSULA_AUTO_SYNC_MIGRATION_TAG) {
+    acceptedHashes = BYPUSULA_AUTO_SYNC_STATEMENT_HASHES;
   }
   if (acceptedHashes === null) return;
 
@@ -737,7 +771,8 @@ function parseManagedForwardStatement(statement, migrationTag) {
     migrationTag !== TAX_OBLIGATIONS_MIGRATION_TAG &&
     migrationTag !== EXPENSE_ACCOUNT_LEDGER_MIGRATION_TAG &&
     migrationTag !== RECURRING_TASKS_EXPENSES_MIGRATION_TAG &&
-    migrationTag !== COLLECTION_CARD_ACCOUNTS_MIGRATION_TAG
+    migrationTag !== COLLECTION_CARD_ACCOUNTS_MIGRATION_TAG &&
+    migrationTag !== BYPUSULA_AUTO_SYNC_MIGRATION_TAG
   ) {
     return null;
   }
@@ -846,6 +881,19 @@ export function analyzeMigrationStatement(statement, migrationTag) {
   }
 
   assertExactManagedMigrationStatement(statement, migrationTag);
+
+  if (migrationTag === BYPUSULA_TRANSFER_MIGRATION_TAG &&
+      /^ALTER\s+TABLE\s+`bypusula_analysis`\s+ADD\s+CONSTRAINT\s+`fk_bypusula_analysis_mapping`\s/iu.test(statement)) {
+    // Exact statement hash above locks both ordered columns and FK actions.
+    return {
+      columnNames: ["customer_id", "project_id"],
+      constraintName: "fk_bypusula_analysis_mapping",
+      referencedColumnNames: ["customer_id", "project_id"],
+      referencedTableName: "customer_project",
+      tableName: "bypusula_analysis",
+      type: "foreign-key",
+    };
+  }
 
   const customerProjectsPartnershipAnalysis =
     migrationTag === CUSTOMER_PROJECTS_PARTNERSHIP_MIGRATION_TAG
